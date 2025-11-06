@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recon-cli"
+version = "0.1.0"
+description = "Deterministic recon pipeline orchestrator CLI"
+authors = [{ name = "Recon Team" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "typer>=0.9,<1.0",
+  "rich>=13.0,<14.0",
+  "requests>=2.31,<3.0",
+  "numpy>=1.24,<2.0",
+  "scikit-learn>=1.4,<2.0"
+]
+
+[project.scripts]
+recon-cli = "recon_cli.cli:app"
+
+[tool.typer.codegen]
+package = "recon_cli"
+
+[tool.setuptools.packages.find]
+where = ['.']
+include = ['recon_cli*']
+exclude = ['jobs*', 'archive*', 'artifacts*', 'jobs', 'archive']
+

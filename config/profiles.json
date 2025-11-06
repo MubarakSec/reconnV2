@@ -1,0 +1,54 @@
+{
+  "quick": {
+    "base_profile": "passive",
+    "runtime": {
+      "timeout_http": 5,
+      "httpx_threads": 25,
+      "runtime_crawl_max_urls": 5,
+      "runtime_crawl_timeout": 8,
+      "runtime_crawl_concurrency": 1,
+      "max_global_concurrency": 10,
+      "max_fuzz_hosts": 0,
+      "enable_fuzz": false,
+      "enable_runtime_crawl": false,
+      "enable_screenshots": false,
+      "enable_secrets": true,
+      "secrets_max_files": 10,
+      "retry_count": 0
+    }
+  },
+  "deep": {
+    "base_profile": "full",
+    "runtime": {
+      "timeout_http": 20,
+      "httpx_threads": 80,
+      "runtime_crawl_max_urls": 40,
+      "runtime_crawl_concurrency": 4,
+      "runtime_crawl_timeout": 30,
+      "max_fuzz_hosts": 12,
+      "enable_fuzz": true,
+      "enable_runtime_crawl": true,
+      "enable_screenshots": true,
+      "enable_secrets": true,
+      "secrets_max_files": 60,
+      "max_screenshots": 40,
+      "retry_count": 2
+    }
+  },
+  "api-only": {
+    "base_profile": "full",
+    "runtime": {
+      "enable_fuzz": true,
+      "enable_runtime_crawl": true,
+      "enable_screenshots": false,
+      "enable_secrets": true,
+      "url_path_allow_regex": "(/api|/graphql)",
+      "runtime_crawl_max_urls": 25,
+      "runtime_crawl_concurrency": 2,
+      "max_fuzz_hosts": 6,
+      "secrets_max_files": 30,
+      "httpx_threads": 40,
+      "timeout_http": 10
+    }
+  }
+}
