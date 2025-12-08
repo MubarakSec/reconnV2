@@ -7,6 +7,7 @@ from recon_cli.jobs.manager import JobManager
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages import PIPELINE_STAGES, Stage, StageError
 from recon_cli.utils.notify import send_pipeline_notification
+from recon_cli.utils import time as time_utils
 
 
 class PipelineRunner:
@@ -16,18 +17,32 @@ class PipelineRunner:
     def run(self, context: PipelineContext) -> None:
         context.mark_started()
         error: Exception | None = None
+        progress = []
+        context.record.metadata.stats["stage_progress"] = progress
+        context.manager.update_metadata(context.record)
         try:
             for stage in self.stages:
+                started_at = time_utils.iso_now()
+                progress.append({"stage": stage.name, "status": "running", "started_at": started_at})
+                context.manager.update_metadata(context.record)
                 try:
-                    stage.run(context)
+                    ran = stage.run(context)
+                    progress[-1]["status"] = "completed" if ran else "skipped"
                 except StageError as exc:
+                    progress[-1]["status"] = "failed"
+                    progress[-1]["error"] = str(exc)
                     context.mark_error(str(exc))
                     error = exc
                     raise
                 except Exception as exc:
+                    progress[-1]["status"] = "failed"
+                    progress[-1]["error"] = str(exc)
                     context.mark_error(str(exc))
                     error = exc
                     raise
+                finally:
+                    progress[-1]["finished_at"] = time_utils.iso_now()
+                    context.manager.update_metadata(context.record)
             context.mark_finished()
             summary.generate_summary(context)
         except Exception as exc:

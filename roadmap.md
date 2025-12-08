@@ -55,7 +55,7 @@
 - [x] UR5 Doctor command to check dependencies and suggest installs (`--fix` regenerates defaults).
 - [x] UR6 Actionable missing-tool messages recorded in stats/summary.
 - [x] UR7 Quickstart profile/flag with minimal passive defaults and post-run guidance.
-- [ ] UR8 Per-stage progress/status display including skipped stages.
+- [x] UR8 Per-stage progress/status display including skipped stages.
 - [x] UR9 `report` command to emit shareable reports (txt/md/json).
 - [x] UR10 Defaults protect beginners: passive-first, active modules explicit.
 
