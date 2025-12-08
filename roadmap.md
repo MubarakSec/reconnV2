@@ -66,11 +66,11 @@
 - [x] R4 Log redaction.
 - [x] R5 Stage checkpoints & reruns.
 - [x] R6 Timeouts for external commands with clear errors.
-- [ ] R7 Configurable retries/backoff spelled out per stage.
+- [x] R7 Configurable retries/backoff spelled out per stage.
 - [x] R8 Job load resilience to corrupt JSON.
-- [ ] R9 Concurrency/locking so one worker owns a job.
-- [ ] R10 Distinct exit codes for automation.
-- [ ] R11 Config/profile validation with helpful errors.
+- [x] R9 Concurrency/locking so one worker owns a job.
+- [x] R10 Distinct exit codes for automation.
+- [x] R11 Config/profile validation with helpful errors.
 
 ## Performance Requirements (P)
 - [x] P1 Expose limits for max targets/hosts/screenshots/crawl depth/concurrency.
@@ -86,11 +86,11 @@
 - [x] S3 Tests for pipeline pieces, active modules, limits, redaction, merging.
 - [x] S4 Centralized logging/redaction utilities.
 - [x] S5 Config module with env vars and profile loading.
-- [ ] S6 Formal config/profile schema + validation.
-- [ ] S7 Plugin interface for stages/active modules/scanners.
-- [ ] S8 Optional structured logging (JSON) toggle.
+- [x] S6 Formal config/profile schema + validation.
+- [x] S7 Plugin interface for stages/active modules/scanners.
+- [x] S8 Optional structured logging (JSON) toggle.
 - [ ] S9 Broader automated tests: per-stage success/failure, artifact corruption handling.
-- [ ] S10 Schema versioning in results and job metadata.
+- [x] S10 Schema versioning in results and job metadata.
 
 ## Design / Implementation / Interface / Physical (FURPS+ “+”)
 - [x] D1 Layered architecture: CLI, job lifecycle, pipeline orchestrator, tools/integrations, utils.

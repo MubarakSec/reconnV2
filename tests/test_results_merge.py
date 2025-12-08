@@ -9,7 +9,7 @@ def test_results_tracker_merges_duplicates(tmp_path: Path):
     tracker = ResultsTracker(path)
     tracker.append({"type": "url", "url": "https://example.com", "tags": ["a"], "source": "probe", "score": 10})
     tracker.append({"type": "url", "url": "https://example.com", "tags": ["b"], "source": "ffuf", "score": 30})
-    entries = read_jsonl(path)
+    entries = [e for e in read_jsonl(path) if e.get("type") != "meta"]
     assert len(entries) == 1
     entry = entries[0]
     assert set(entry.get("tags", [])) == {"a", "b"}

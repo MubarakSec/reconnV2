@@ -109,6 +109,8 @@ class Stage(ABC):
             logger.info("Stage %s already checkpointed; skipping", self.name)
             return False
         attempts = context.max_retries + 1
+        backoff_base = max(0.1, float(context.runtime_config.retry_backoff_base))
+        backoff_factor = max(1.0, float(context.runtime_config.retry_backoff_factor))
         for attempt in range(1, attempts + 1):
             context.increment_attempt(self.name)
             context.record.metadata.stage = self.name
@@ -125,7 +127,7 @@ class Stage(ABC):
                 logger.exception("Stage %s failed: %s", self.name, exc)
                 if attempt >= attempts:
                     raise StageError(f"Stage {self.name} failed after {attempts} attempts") from exc
-                delay = 2 ** (attempt - 1)
+                delay = backoff_base * (backoff_factor ** (attempt - 1))
                 logger.info("Retrying stage %s after %ss", self.name, delay)
                 time.sleep(delay)
         return False

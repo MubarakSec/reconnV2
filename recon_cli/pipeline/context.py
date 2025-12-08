@@ -54,7 +54,12 @@ class PipelineContext:
         self._cache_dirty = False
         if self.max_retries is None:
             self.max_retries = self.runtime_config.retry_count
-        self.logger = build_file_logger(self.logger_name, self.record.paths.pipeline_log, level=config.LOG_LEVEL)
+        self.logger = build_file_logger(
+            self.logger_name,
+            self.record.paths.pipeline_log,
+            level=config.LOG_LEVEL,
+            log_format=config.LOG_FORMAT,
+        )
         self.executor = CommandExecutor(self.logger)
         pattern = self.runtime_config.url_path_allow_regex
         self._url_allow_pattern = re.compile(pattern) if pattern else None

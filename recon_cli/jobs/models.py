@@ -118,6 +118,7 @@ class JobSpec:
 class JobMetadata:
     job_id: str
     queued_at: str
+    schema_version: str = "1.0.0"
     status: str = "queued"
     stage: str = "queued"
     started_at: Optional[str] = None
@@ -131,6 +132,7 @@ class JobMetadata:
         return {
             "job_id": self.job_id,
             "queued_at": self.queued_at,
+            "schema_version": self.schema_version,
             "status": self.status,
             "stage": self.stage,
             "started_at": self.started_at,
@@ -146,6 +148,7 @@ class JobMetadata:
         return cls(
             job_id=payload["job_id"],
             queued_at=payload["queued_at"],
+            schema_version=payload.get("schema_version", "1.0.0"),
             status=payload.get("status", "queued"),
             stage=payload.get("stage", "queued"),
             started_at=payload.get("started_at"),

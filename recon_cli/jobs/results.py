@@ -28,6 +28,8 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("screenshot_path"))
     if ptype == "runtime_crawl":
         return (ptype, payload.get("url"))
+    if ptype == "meta":
+        return (ptype, payload.get("schema_version"))
     return (ptype, payload.get("source"))
 
 
@@ -45,6 +47,7 @@ class ResultsTracker:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._writer = JsonlWriter(self.path)
         self._load_existing()
+        self._ensure_schema_record()
 
     def _load_existing(self) -> None:
         if not self.path.exists():
@@ -98,6 +101,17 @@ class ResultsTracker:
 
     def to_dict(self) -> Dict[str, int]:
         return dict(self.stats)
+
+    def _ensure_schema_record(self) -> None:
+        schema_key = ("meta", "1.0.0")
+        if schema_key in self._seen:
+            return
+        payload = {"type": "meta", "schema_version": "1.0.0", "timestamp": time_utils.iso_now()}
+        self._seen.add(schema_key)
+        self._records[schema_key] = payload
+        self._order.insert(0, schema_key)
+        with self._writer as writer:
+            writer.write(payload)
 
     @staticmethod
     def _priority_rank(value: object) -> int:

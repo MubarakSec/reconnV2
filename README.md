@@ -100,10 +100,13 @@ Tune behaviour via environment variables:
 - `RECON_RUNTIME_CRAWL_MAX_URLS`, `RECON_RUNTIME_CRAWL_PER_HOST`, `RECON_RUNTIME_CRAWL_TIMEOUT`, `RECON_RUNTIME_CRAWL_CONCURRENCY` to tune the Playwright runtime crawl scope, per-host limits, and resource usage.
 - `RECON_MAX_TARGETS_PER_JOB`, `RECON_MAX_PROBE_HOSTS`, `RECON_HTTPX_MAX_HOSTS` to cap workload size for targets/HTTP probing.
 - `RECON_ENABLE_FUZZ`, `RECON_ENABLE_RUNTIME_CRAWL`, `RECON_ENABLE_SCREENSHOTS`, `RECON_ENABLE_SECRETS` to toggle heavy modules (fuzzing/crawl/screenshots default off, secrets on).
+- `RECON_LOG_FORMAT` to choose `text` (default) or `json` structured logs.
+- `RECON_PLUGIN_STAGES` to load extra pipeline stages as `module:Class` entries (comma-separated).
 - `SECLISTS_ROOT` to override the SecLists base directory.
 - RECON_TELEGRAM_TOKEN, RECON_TELEGRAM_CHAT_ID, RECON_TELEGRAM_TIMEOUT to push Telegram alerts when jobs finish or fail.
 - `RECON_HOME` to relocate job storage.
 - `RECON_CORRELATION_MAX_RECORDS` to cap how many results are processed in the correlation stage (default 10k); `RECON_CORRELATION_SVG_NODE_LIMIT` to skip SVG rendering when the graph exceeds this node count (default 2500).
+- `RECON_RETRY_BACKOFF_BASE`, `RECON_RETRY_BACKOFF_FACTOR` to control retry delays between failed stage attempts.
 
 ## Notes
 - Missing external binaries trigger warnings and the stage is skipped; the pipeline still completes so you can test locally without the full toolchain.

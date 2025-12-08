@@ -17,6 +17,8 @@ def _default_home() -> Path:
 
 LOG_LEVEL_NAME = os.environ.get("RECON_LOG_LEVEL", "INFO").upper()
 LOG_LEVEL = getattr(logging, LOG_LEVEL_NAME, logging.INFO)
+LOG_FORMAT = os.environ.get("RECON_LOG_FORMAT", "text").lower()
+LOG_FORMAT = os.environ.get("RECON_LOG_FORMAT", "text").lower()
 
 RECON_HOME: Path = _default_home()
 JOBS_ROOT: Path = RECON_HOME / "jobs"
@@ -134,12 +136,15 @@ def ensure_base_directories(force: bool = False) -> None:
 
 
 _PROFILES_CACHE: Dict[str, Dict[str, Any]] | None = None
+_PROFILE_ERRORS: list[str] = []
 
 
 def load_profiles() -> Dict[str, Dict[str, Any]]:
     global _PROFILES_CACHE
+    global _PROFILE_ERRORS
     if _PROFILES_CACHE is not None:
         return _PROFILES_CACHE
+    _PROFILE_ERRORS = []
     if not DEFAULT_PROFILES.exists():
         _PROFILES_CACHE = {}
         return _PROFILES_CACHE
@@ -148,7 +153,22 @@ def load_profiles() -> Dict[str, Dict[str, Any]]:
     except json.JSONDecodeError:
         data = {}
     if isinstance(data, dict):
-        _PROFILES_CACHE = {str(key).lower(): value for key, value in data.items() if isinstance(value, dict)}
+        validated: Dict[str, Dict[str, Any]] = {}
+        for key, value in data.items():
+            if not isinstance(value, dict):
+                _PROFILE_ERRORS.append(f"profile '{key}' invalid: expected object")
+                continue
+            name = str(key).lower()
+            base_profile = value.get("base_profile")
+            if base_profile is None or not isinstance(base_profile, str):
+                _PROFILE_ERRORS.append(f"profile '{name}' missing base_profile")
+                continue
+            runtime = value.get("runtime")
+            if runtime is not None and not isinstance(runtime, dict):
+                _PROFILE_ERRORS.append(f"profile '{name}' runtime must be object")
+                continue
+            validated[name] = value
+        _PROFILES_CACHE = validated
     else:
         _PROFILES_CACHE = {}
     return _PROFILES_CACHE
@@ -164,6 +184,11 @@ def available_profiles() -> Dict[str, Dict[str, Any]]:
     return load_profiles().copy()
 
 
+def profile_errors() -> list[str]:
+    load_profiles()
+    return list(_PROFILE_ERRORS)
+
+
 @dataclass
 class RuntimeConfig:
     max_global_concurrency: int = int(os.environ.get("RECON_MAX_GLOBAL_CONCURRENCY", 20))
@@ -176,6 +201,8 @@ class RuntimeConfig:
     max_targets_per_job: int = int(os.environ.get("RECON_MAX_TARGETS_PER_JOB", 200))
     max_probe_hosts: int = int(os.environ.get("RECON_MAX_PROBE_HOSTS", 400))
     retry_count: int = int(os.environ.get("RECON_RETRY_COUNT", 1))
+    retry_backoff_base: float = float(os.environ.get("RECON_RETRY_BACKOFF_BASE", 1.0))
+    retry_backoff_factor: float = float(os.environ.get("RECON_RETRY_BACKOFF_FACTOR", 2.0))
     timeout_http: int = int(os.environ.get("RECON_TIMEOUT_HTTP", 10))
     max_scanner_hosts: int = int(os.environ.get("RECON_MAX_SCANNER_HOSTS", 10))
     scanner_timeout: int = int(os.environ.get("RECON_SCANNER_TIMEOUT", 300))

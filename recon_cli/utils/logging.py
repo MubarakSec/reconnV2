@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 from logging import Logger
 from recon_cli.utils.sanitizer import redact
+import json
 
 
 class RedactingFormatter(logging.Formatter):
@@ -13,17 +14,30 @@ class RedactingFormatter(logging.Formatter):
         return redact(formatted)
 
 
+class JsonRedactingFormatter(logging.Formatter):
+    def format(self, record):
+        payload = {
+            "timestamp": self.formatTime(record, _DATEFMT),
+            "level": record.levelname,
+            "message": record.getMessage(),
+        }
+        return redact(json.dumps(payload, ensure_ascii=True))
+
+
 _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
 _DATEFMT = "%Y-%m-%dT%H:%M:%S"
 
 
-def build_file_logger(name: str, logfile: Path, level: int = logging.INFO) -> Logger:
+def build_file_logger(name: str, logfile: Path, level: int = logging.INFO, log_format: str = "text") -> Logger:
     logfile.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.handlers.clear()
 
-    formatter = RedactingFormatter(_LOG_FORMAT, datefmt=_DATEFMT)
+    if log_format == "json":
+        formatter = JsonRedactingFormatter()
+    else:
+        formatter = RedactingFormatter(_LOG_FORMAT, datefmt=_DATEFMT)
 
     file_handler = logging.FileHandler(logfile, encoding="utf-8")
     file_handler.setFormatter(formatter)

@@ -68,7 +68,7 @@ def _load_job_or_exit(manager: JobManager, job_id: str) -> JobRecord:
     record = manager.load_job(job_id)
     if not record:
         typer.echo(f"Job {job_id} not found", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=3)
     return record
 
 
@@ -107,7 +107,11 @@ def scan(
         profile_input = "passive"
     if profile_input not in profile_choices:
         typer.echo(f"Invalid profile: {profile_input}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
+    profile_errors = config.profile_errors()
+    if profile_errors:
+        for err in profile_errors:
+            typer.echo(f"[warn] profile config: {err}", err=True)
     profile_config = available_profiles.get(profile_input)
     runtime_overrides: Dict[str, Any] = {}
     execution_profile: Optional[str] = None
