@@ -34,7 +34,7 @@
 ```text
 recon-cli scan <target> [--profile passive|full|fuzz-only] [--inline] [--wordlist PATH] \
                  [--max-screenshots N] [--force] [--allow-ip] [--targets-file PATH] \
-                 [--active-module MODULE]
+                 [--active-module MODULE] [--quickstart]
 recon-cli worker-run [--poll-interval 5] [--max-workers 1]
 recon-cli status <job_id>
 recon-cli tail-logs <job_id>
@@ -42,6 +42,7 @@ recon-cli list-jobs [status]
 recon-cli requeue <job_id>
 recon-cli prune --days N [--archive]
 recon-cli export <job_id> --format jsonl|txt|zip
+recon-cli report <job_id> --format txt|md|json
 ```
 
 `scan --inline` runs the pipeline immediately and prints the finished results path. Without `--inline`, jobs land in `jobs/queued/` for a worker to process. `--targets-file` accepts one host per line; `--force` reruns stages even if checkpoints exist.
@@ -97,6 +98,8 @@ Tune behaviour via environment variables:
 - `RECON_MAX_SCANNER_HOSTS` to cap the number of hosts scanned per job.
 - `RECON_SCANNER_TIMEOUT` to control scanner command timeouts (seconds).
 - `RECON_RUNTIME_CRAWL_MAX_URLS`, `RECON_RUNTIME_CRAWL_PER_HOST`, `RECON_RUNTIME_CRAWL_TIMEOUT`, `RECON_RUNTIME_CRAWL_CONCURRENCY` to tune the Playwright runtime crawl scope, per-host limits, and resource usage.
+- `RECON_MAX_TARGETS_PER_JOB`, `RECON_MAX_PROBE_HOSTS`, `RECON_HTTPX_MAX_HOSTS` to cap workload size for targets/HTTP probing.
+- `RECON_ENABLE_FUZZ`, `RECON_ENABLE_RUNTIME_CRAWL`, `RECON_ENABLE_SCREENSHOTS`, `RECON_ENABLE_SECRETS` to toggle heavy modules (fuzzing/crawl/screenshots default off, secrets on).
 - `SECLISTS_ROOT` to override the SecLists base directory.
 - RECON_TELEGRAM_TOKEN, RECON_TELEGRAM_CHAT_ID, RECON_TELEGRAM_TIMEOUT to push Telegram alerts when jobs finish or fail.
 - `RECON_HOME` to relocate job storage.
@@ -104,8 +107,14 @@ Tune behaviour via environment variables:
 
 ## Notes
 - Missing external binaries trigger warnings and the stage is skipped; the pipeline still completes so you can test locally without the full toolchain.
+- Heavy modules (fuzzing, runtime crawl, screenshots) are disabled by default; enable via profiles or `RECON_ENABLE_*` flags.
 - The initial target is always seeded into the host list so fallback resolution/probing will still run even when enumeration tools are absent.
 - Requeued jobs retain completed checkpoints but reset attempts and rerun from the last stage, making recovery from transient failures predictable.
 - `worker-run` currently processes jobs sequentially; run multiple workers for concurrency if required.
 - Only scan targets you are authorized to assess.
+
+## Performance defaults & hardware
+- Default profiles are conservative: fuzzing/runtime crawl/screenshots are disabled unless explicitly enabled; caps exist for targets/job and probe/httpx hosts.
+- Recommended minimum: 2 vCPUs, 4 GB RAM, 10 GB free disk; quick profile should finish a 1–5 target job in minutes on this footprint.
+- Worker concurrency: `recon-cli worker-run --max-workers N` starts N worker loops; jobs are locked per worker to avoid double-processing.
 

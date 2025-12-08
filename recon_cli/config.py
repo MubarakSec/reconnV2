@@ -169,9 +169,12 @@ class RuntimeConfig:
     max_global_concurrency: int = int(os.environ.get("RECON_MAX_GLOBAL_CONCURRENCY", 20))
     per_domain_rps: float = float(os.environ.get("RECON_PER_DOMAIN_RPS", 5))
     httpx_threads: int = int(os.environ.get("RECON_HTTPX_THREADS", 50))
+    httpx_max_hosts: int = int(os.environ.get("RECON_HTTPX_MAX_HOSTS", 300))
     max_fuzz_hosts: int = int(os.environ.get("RECON_MAX_FUZZ_HOSTS", 5))
     ffuf_threads: int = int(os.environ.get("RECON_FFUF_THREADS", 30))
     max_screenshots: int = int(os.environ.get("RECON_MAX_SCREENSHOTS", 10))
+    max_targets_per_job: int = int(os.environ.get("RECON_MAX_TARGETS_PER_JOB", 200))
+    max_probe_hosts: int = int(os.environ.get("RECON_MAX_PROBE_HOSTS", 400))
     retry_count: int = int(os.environ.get("RECON_RETRY_COUNT", 1))
     timeout_http: int = int(os.environ.get("RECON_TIMEOUT_HTTP", 10))
     max_scanner_hosts: int = int(os.environ.get("RECON_MAX_SCANNER_HOSTS", 10))
@@ -182,10 +185,10 @@ class RuntimeConfig:
     runtime_crawl_per_host_limit: int = int(os.environ.get("RECON_RUNTIME_CRAWL_PER_HOST", 3))
     runtime_crawl_timeout: int = int(os.environ.get("RECON_RUNTIME_CRAWL_TIMEOUT", 15))
     runtime_crawl_concurrency: int = int(os.environ.get("RECON_RUNTIME_CRAWL_CONCURRENCY", 2))
-    enable_fuzz: bool = os.environ.get("RECON_ENABLE_FUZZ", "1") not in {"0", "false", "False"}
-    enable_runtime_crawl: bool = os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "1") not in {"0", "false", "False"}
+    enable_fuzz: bool = os.environ.get("RECON_ENABLE_FUZZ", "0") not in {"0", "false", "False"}
+    enable_runtime_crawl: bool = os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0") not in {"0", "false", "False"}
     enable_secrets: bool = os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"}
-    enable_screenshots: bool = os.environ.get("RECON_ENABLE_SCREENSHOTS", "1") not in {"0", "false", "False"}
+    enable_screenshots: bool = os.environ.get("RECON_ENABLE_SCREENSHOTS", "0") not in {"0", "false", "False"}
     verify_tls: bool = os.environ.get("RECON_VERIFY_TLS", "1") not in {"0", "false", "False"}
     url_path_allow_regex: Optional[str] = os.environ.get("RECON_URL_PATH_ALLOW_REGEX")
     trim_url_max_per_host: int = int(os.environ.get("RECON_TRIM_URL_MAX_PER_HOST", 200))

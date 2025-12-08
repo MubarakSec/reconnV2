@@ -11,9 +11,12 @@ class JobLifecycle:
     def __init__(self, manager: JobManager) -> None:
         self.manager = manager
 
-    def move_to_running(self, job_id: str) -> Optional[JobRecord]:
+    def move_to_running(self, job_id: str, owner: Optional[str] = None) -> Optional[JobRecord]:
+        if not self.manager.acquire_lock(job_id, owner=owner or "worker"):
+            return None
         new_root = self.manager.move_job(job_id, config.RUNNING_JOBS)
         if not new_root:
+            self.manager.release_lock(job_id)
             return None
         record = self.manager.load_job(job_id)
         if record:
@@ -29,6 +32,7 @@ class JobLifecycle:
         if record:
             record.metadata.status = status
             self.manager.update_metadata(record)
+        self.manager.release_lock(job_id)
         return record
 
     def move_to_failed(self, job_id: str) -> Optional[JobRecord]:
@@ -39,12 +43,14 @@ class JobLifecycle:
         if record:
             record.metadata.status = "failed"
             self.manager.update_metadata(record)
+        self.manager.release_lock(job_id)
         return record
 
     def requeue(self, job_id: str) -> Optional[JobRecord]:
         new_root = self.manager.move_job(job_id, config.QUEUED_JOBS)
         if not new_root:
             return None
+        self.manager.release_lock(job_id)
         record = self.manager.load_job(job_id)
         if record:
             failed_stage = record.metadata.stage

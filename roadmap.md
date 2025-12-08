@@ -54,9 +54,9 @@
 - [x] UR4 JSONL results for jq/grep-friendly consumption.
 - [x] UR5 Doctor command to check dependencies and suggest installs (`--fix` regenerates defaults).
 - [x] UR6 Actionable missing-tool messages recorded in stats/summary.
-- [ ] UR7 Quickstart profile/flag with minimal passive defaults and post-run guidance.
+- [x] UR7 Quickstart profile/flag with minimal passive defaults and post-run guidance.
 - [ ] UR8 Per-stage progress/status display including skipped stages.
-- [ ] UR9 `report` command to emit shareable reports (txt/md/json).
+- [x] UR9 `report` command to emit shareable reports (txt/md/json).
 - [x] UR10 Defaults protect beginners: passive-first, active modules explicit.
 
 ## Reliability Requirements (R)
@@ -73,12 +73,12 @@
 - [ ] R11 Config/profile validation with helpful errors.
 
 ## Performance Requirements (P)
-- [ ] P1 Expose limits for max targets/hosts/screenshots/crawl depth/concurrency.
-- [ ] P2 Default profile tuned for small scopes on modest hardware (document target runtime/resources).
-- [ ] P3 Worker mode should ensure slow jobs don’t block listing/creation; controlled parallelism.
+- [x] P1 Expose limits for max targets/hosts/screenshots/crawl depth/concurrency.
+- [x] P2 Default profile tuned for small scopes on modest hardware (document target runtime/resources).
+- [x] P3 Worker mode should ensure slow jobs don’t block listing/creation; controlled parallelism.
 - [x] P4 Streaming/incremental JSONL results.
-- [ ] P5 Heavy modules off by default; clearly gated in profiles.
-- [ ] P6 Per-tool concurrency caps configurable.
+- [x] P5 Heavy modules off by default; clearly gated in profiles.
+- [x] P6 Per-tool concurrency caps configurable.
 
 ## Supportability Requirements (S)
 - [x] S1 Modular architecture by domain (pipeline/active/scanners/secrets/etc.).

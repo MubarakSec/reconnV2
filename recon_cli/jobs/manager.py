@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import secrets
 import shutil
+import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,6 +29,34 @@ class JobManager:
         ts = time_utils.utc_now().strftime("%Y%m%d%H%M%S")
         suffix = secrets.token_hex(3)
         return f"{ts}_{suffix}"
+
+    def _lock_path(self, root: Path) -> Path:
+        return root / ".lock"
+
+    def acquire_lock(self, job_id: str, owner: Optional[str] = None) -> bool:
+        root = self._find_job_dir(job_id)
+        if not root:
+            return False
+        lock_path = self._lock_path(root)
+        if lock_path.exists():
+            return False
+        payload = {
+            "owner": owner or "worker",
+            "pid": os.getpid(),
+            "timestamp": time_utils.iso_now(),
+        }
+        lock_path.write_text(json.dumps(payload), encoding="utf-8")
+        return True
+
+    def release_lock(self, job_id: str) -> None:
+        root = self._find_job_dir(job_id)
+        if not root:
+            return
+        lock_path = self._lock_path(root)
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
 
     def create_job(
         self,

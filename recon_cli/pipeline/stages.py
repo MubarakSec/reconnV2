@@ -146,6 +146,12 @@ class NormalizeStage(Stage):
             targets = validation.load_targets_from_file(str(targets_path), allow_ip=allow_ip)
         else:
             targets = [validation.validate_target(spec.target, allow_ip=allow_ip)]
+        limit = max(0, context.runtime_config.max_targets_per_job)
+        total_targets = len(targets)
+        if limit and total_targets > limit:
+            context.logger.warning("Target list capped at %s (received %s)", limit, total_targets)
+            targets = targets[:limit]
+            context.record.metadata.stats.setdefault("targets_capped", {})["total"] = total_targets
         context.targets = targets
         spec.target = targets[0]
         context.manager.update_spec(context.record)
@@ -563,7 +569,23 @@ class HttpProbeStage(Stage):
         httpx_input = context.record.paths.artifact("hosts_for_httpx.txt")
         httpx_output = context.record.paths.artifact("httpx_raw.json")
         fs.ensure_directory(httpx_input.parent)
-        httpx_input.write_text("\n".join(hosts) + "\n", encoding="utf-8")
+        max_hosts = max(0, context.runtime_config.max_probe_hosts)
+        httpx_host_limit = max(0, context.runtime_config.httpx_max_hosts)
+        cap = max_hosts if max_hosts else len(hosts)
+        if httpx_host_limit:
+            cap = min(cap, httpx_host_limit)
+        selected_hosts = hosts[:cap]
+        if len(selected_hosts) < len(hosts):
+            context.logger.info("HTTP probe limiting hosts to %s of %s (max_probe_hosts/httpx_max_hosts)", len(selected_hosts), len(hosts))
+            stats = context.record.metadata.stats.setdefault("http_probe", {})
+            stats["hosts_total"] = len(hosts)
+            stats["hosts_capped"] = len(hosts) - len(selected_hosts)
+            context.manager.update_metadata(context.record)
+        httpx_input.write_text("\n".join(selected_hosts) + "\n", encoding="utf-8")
+        hosts = selected_hosts
+        if not hosts:
+            context.logger.info("No hosts to probe after applying caps")
+            return
         executor = context.executor
         tool_timeout = context.runtime_config.tool_timeout
         tracker = context.results

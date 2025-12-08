@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -75,6 +76,7 @@ def _load_job_or_exit(manager: JobManager, job_id: str) -> JobRecord:
 def scan(
     target: Optional[str] = typer.Argument(None, help="Domain or hostname to scan"),
     profile: str = typer.Option("passive", "--profile", case_sensitive=False, help=PROFILE_HELP, show_default=True),
+    quickstart: bool = typer.Option(False, "--quickstart", help="Use the quick profile if available (passive-minimal)"),
     inline: bool = typer.Option(False, "--inline", help="Run the pipeline immediately"),
     wordlist: Optional[Path] = typer.Option(None, "--wordlist", help="Override default wordlist"),
     max_screenshots: Optional[int] = typer.Option(None, "--max-screenshots", min=0, help="Limit screenshots"),
@@ -99,6 +101,10 @@ def scan(
     profile_input = profile.lower()
     available_profiles = config.available_profiles()
     profile_choices = BASE_PROFILES | set(available_profiles.keys())
+    if quickstart and "quick" in available_profiles:
+        profile_input = "quick"
+    elif quickstart and "quick" not in available_profiles:
+        profile_input = "passive"
     if profile_input not in profile_choices:
         typer.echo(f"Invalid profile: {profile_input}", err=True)
         raise typer.Exit(code=1)
@@ -182,35 +188,47 @@ def worker_run(
         1,
         "--max-workers",
         min=1,
-        help="Reserved for future concurrency; currently runs a single worker (values >1 are ignored)",
+        help="Number of worker loops to run concurrently",
     ),
 ) -> None:
     """Run the job worker loop that pulls queued scans and executes the pipeline."""
-    if max_workers > 1:
-        typer.echo("Single-worker mode only; ignoring max-workers > 1")
     manager = JobManager()
     lifecycle = JobLifecycle(manager)
-    typer.echo("Worker started; press Ctrl+C to stop")
-    try:
-        while True:
+    typer.echo(f"Worker started with {max_workers} worker(s); press Ctrl+C to stop")
+    stop_event = False
+
+    def worker_loop(name: str) -> None:
+        nonlocal stop_event
+        while not stop_event:
             queued = manager.list_jobs("queued")
             if not queued:
                 time.sleep(poll_interval)
                 continue
             job_id = queued[0]
-            record = lifecycle.move_to_running(job_id)
+            record = lifecycle.move_to_running(job_id, owner=name)
             if not record:
-                time.sleep(poll_interval)
+                time.sleep(0.2)
                 continue
-            typer.echo(f"Processing job {job_id}")
+            typer.echo(f"[{name}] Processing job {job_id}")
             try:
                 run_pipeline(record, manager, force=record.spec.force)
             except Exception as exc:  # pragma: no cover - runtime path
-                typer.echo(f"Job {job_id} failed: {exc}", err=True)
+                typer.echo(f"[{name}] Job {job_id} failed: {exc}", err=True)
                 lifecycle.move_to_failed(job_id)
             else:
                 lifecycle.move_to_finished(job_id)
+
+    workers: list[threading.Thread] = []
+    for idx in range(max_workers):
+        t = threading.Thread(target=worker_loop, args=(f"worker-{idx+1}",), daemon=True)
+        workers.append(t)
+        t.start()
+
+    try:
+        while any(t.is_alive() for t in workers):
+            time.sleep(0.5)
     except KeyboardInterrupt:
+        stop_event = True
         typer.echo("Worker stopped")
 
 
@@ -386,6 +404,32 @@ def export(job_id: str, fmt: str = typer.Option("jsonl", "--format", case_sensit
             archive_path.unlink()
         shutil.make_archive(str(archive_path.with_suffix("")), "zip", record.paths.root)
         typer.echo(str(archive_path))
+
+
+@app.command()
+def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json")) -> None:
+    """Emit a shareable report for a finished job."""
+    fmt = fmt.lower()
+    if fmt not in {"txt", "md", "json"}:
+        typer.echo(f"Unsupported format: {fmt}", err=True)
+        raise typer.Exit(code=1)
+    manager = JobManager()
+    record = _load_job_or_exit(manager, job_id)
+    if fmt == "txt":
+        typer.echo(record.paths.results_txt.read_text(encoding="utf-8"))
+        return
+    if fmt == "md":
+        content = record.paths.results_txt.read_text(encoding="utf-8")
+        md_lines = ["# recon-cli report", f"Job: {job_id}", "", "```", content.strip(), "```"]
+        typer.echo("\n".join(md_lines))
+        return
+    payload = {
+        "job_id": job_id,
+        "spec": record.spec.to_dict(),
+        "metadata": record.metadata.to_dict(),
+        "stats": record.metadata.stats,
+    }
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def main() -> None:
