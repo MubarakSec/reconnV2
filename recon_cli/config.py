@@ -66,6 +66,25 @@ DEFAULT_PROFILES_CONTENT = """{
       "retry_count": 0
     }
   },
+  "secure": {
+    "base_profile": "passive",
+    "runtime": {
+      "timeout_http": 8,
+      "httpx_threads": 20,
+      "httpx_max_hosts": 150,
+      "max_probe_hosts": 150,
+      "max_global_concurrency": 10,
+      "max_fuzz_hosts": 0,
+      "enable_fuzz": false,
+      "enable_runtime_crawl": false,
+      "enable_screenshots": false,
+      "enable_secrets": true,
+      "secrets_max_files": 25,
+      "retry_count": 1,
+      "retry_backoff_base": 1.0,
+      "retry_backoff_factor": 2.0
+    }
+  },
   "deep": {
     "base_profile": "full",
     "runtime": {

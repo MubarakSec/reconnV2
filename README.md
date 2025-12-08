@@ -43,9 +43,19 @@ recon-cli requeue <job_id>
 recon-cli prune --days N [--archive]
 recon-cli export <job_id> --format jsonl|txt|zip
 recon-cli report <job_id> --format txt|md|json
+recon-cli verify-job <job_id>
 ```
 
 `scan --inline` runs the pipeline immediately and prints the finished results path. Without `--inline`, jobs land in `jobs/queued/` for a worker to process. `--targets-file` accepts one host per line; `--force` reruns stages even if checkpoints exist.
+
+## Profiles
+- `passive` (default): conservative, passive-only recon.
+- `full`: enables fuzzing/runtime crawl/screenshots (respecting limits).
+- `fuzz-only`: fuzzing-centric runs.
+- `quick`: minimal passive scan with tight limits.
+- `secure`: safe defaults with TLS verification enforced, active modules off, low concurrency/limits.
+- `deep`: aggressive/full run with higher limits.
+- `api-only`: focuses on API paths and related modules.
 
 ## Pipeline stages
 1. `normalize_scope` - strict hostname validation, punycode normalization, and target manifest creation.
@@ -107,6 +117,7 @@ Tune behaviour via environment variables:
 - `RECON_HOME` to relocate job storage.
 - `RECON_CORRELATION_MAX_RECORDS` to cap how many results are processed in the correlation stage (default 10k); `RECON_CORRELATION_SVG_NODE_LIMIT` to skip SVG rendering when the graph exceeds this node count (default 2500).
 - `RECON_RETRY_BACKOFF_BASE`, `RECON_RETRY_BACKOFF_FACTOR` to control retry delays between failed stage attempts.
+- `RECON_METRICS` to emit per-job metrics JSON under `artifacts/metrics.json`.
 
 ## Notes
 - Missing external binaries trigger warnings and the stage is skipped; the pipeline still completes so you can test locally without the full toolchain.

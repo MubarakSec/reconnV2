@@ -26,9 +26,9 @@
 - [ ] Provide a lightweight “no-tools” smoke test path that asserts graceful skips without external binaries.
 
 ## Release & Operations
-- [ ] Document “secure defaults” profile (strict TLS, redaction, conservative limits).
-- [ ] Add metrics/telemetry hooks (opt-in) for job duration, stage failures, and skipped stages to guide tuning.
-- [ ] Ship example CI recipe to run lint/tests and the smoke pipeline before releases.
+- [x] Document “secure defaults” profile (strict TLS, redaction, conservative limits).
+- [x] Add metrics/telemetry hooks (opt-in) for job duration, stage failures, and skipped stages to guide tuning.
+- [x] Ship example CI recipe to run lint/tests and the smoke pipeline before releases.
 
 ## Context & Mental Model
 - [x] Mini recon platform: targets + profiles → job dirs (spec/metadata/artifacts/logs) → deterministic pipeline (passive → DNS → HTTP → fuzz/active/secrets/correlation/learning) with external tools and append-only JSONL + summaries. (Reference section only.)
@@ -89,7 +89,7 @@
 - [x] S6 Formal config/profile schema + validation.
 - [x] S7 Plugin interface for stages/active modules/scanners.
 - [x] S8 Optional structured logging (JSON) toggle.
-- [ ] S9 Broader automated tests: per-stage success/failure, artifact corruption handling.
+- [x] S9 Broader automated tests: per-stage success/failure, artifact corruption handling.
 - [x] S10 Schema versioning in results and job metadata.
 
 ## Design / Implementation / Interface / Physical (FURPS+ “+”)

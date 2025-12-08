@@ -436,6 +436,22 @@ def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitiv
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
+@app.command("verify-job")
+def verify_job(job_id: str) -> None:
+    """Validate job files and surface corruption/errors."""
+    from recon_cli.jobs.validator import validate_job
+
+    manager = JobManager()
+    record = _load_job_or_exit(manager, job_id)
+    issues = validate_job(record)
+    if not issues:
+        typer.secho(f"Job {job_id} OK", fg=typer.colors.GREEN)
+        return
+    typer.echo(f"Job {job_id} has {len(issues)} issue(s):", err=True)
+    for issue in issues:
+        typer.echo(f"- {issue}", err=True)
+    raise typer.Exit(code=4)
+
 def main() -> None:
     app()
 
