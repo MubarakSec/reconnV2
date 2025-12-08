@@ -69,10 +69,12 @@ class IDORStage(Stage):
         if getattr(runtime, "idor_token_b", None):
             tokens.append(("token-b", runtime.idor_token_b))
         session = requests.Session()
-        try:
-            requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        verify_tls = bool(getattr(runtime, "verify_tls", True))
+        if not verify_tls:
+            try:
+                requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+            except Exception:
+                pass
         stats = context.record.metadata.stats.setdefault("idor", {"tests": 0, "suspects": 0})
         other_id = getattr(runtime, "idor_other_identifier", None)
         timeout = getattr(runtime, "idor_timeout", 10)
@@ -85,7 +87,7 @@ class IDORStage(Stage):
                 baseline_url = candidate.url
                 baseline_key = (baseline_url, auth_label)
                 if baseline_key not in baseline_cache:
-                    baseline_data = self._fetch(session, context, baseline_url, auth_label, token, timeout)
+                    baseline_data = self._fetch(session, context, baseline_url, auth_label, token, timeout, verify_tls)
                     if not baseline_data:
                         continue
                     baseline_cache[baseline_key] = baseline_data
@@ -93,7 +95,7 @@ class IDORStage(Stage):
                     baseline_data = baseline_cache[baseline_key]
                 for variant_url, variant_meta in variants:
                     stats["tests"] += 1
-                    data = self._fetch(session, context, variant_url, auth_label, token, timeout)
+                    data = self._fetch(session, context, variant_url, auth_label, token, timeout, verify_tls)
                     if not data:
                         continue
                     if self._is_interesting(baseline_data, data):
@@ -218,7 +220,7 @@ class IDORStage(Stage):
         variants.append("")
         return variants[: self.MAX_VARIANTS_PER_PARAM]
 
-    def _fetch(self, session: "requests.Session", context: PipelineContext, url: str, auth_label: str, token: Optional[str], timeout: int) -> Optional[Dict[str, object]]:
+    def _fetch(self, session: "requests.Session", context: PipelineContext, url: str, auth_label: str, token: Optional[str], timeout: int, verify_tls: bool) -> Optional[Dict[str, object]]:
         if not context.url_allowed(url):
             return None
         headers = {"User-Agent": "recon-cli idor"}
@@ -231,7 +233,7 @@ class IDORStage(Stage):
             if cache_entry.get("last_modified"):
                 headers["If-Modified-Since"] = cache_entry["last_modified"]
         try:
-            resp = session.get(url, headers=headers, timeout=timeout, verify=False, allow_redirects=True)
+            resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
         except Exception as exc:
             context.logger.debug("IDOR request failed for %s (%s): %s", url, auth_label, exc)
             return None

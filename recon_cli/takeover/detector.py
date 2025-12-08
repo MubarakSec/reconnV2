@@ -46,16 +46,17 @@ class TakeoverFinding:
 
 
 class TakeoverDetector:
-    def __init__(self, timeout: int = REQUEST_TIMEOUT) -> None:
+    def __init__(self, timeout: int = REQUEST_TIMEOUT, verify_tls: bool = True) -> None:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.timeout = timeout
+        self.verify_tls = verify_tls
 
     def check_host(self, hostname: str) -> Optional[TakeoverFinding]:
         urls = [f"http://{hostname}", f"https://{hostname}"]
         for url in urls:
             try:
-                resp = self.session.get(url, timeout=self.timeout, allow_redirects=True, verify=False)
+                resp = self.session.get(url, timeout=self.timeout, allow_redirects=True, verify=self.verify_tls)
             except requests.RequestException:
                 continue
             body = (resp.text or "")[:2000]

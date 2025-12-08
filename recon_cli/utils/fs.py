@@ -11,8 +11,11 @@ from recon_cli.utils.sanitizer import redact
 def read_json(path: Path, default: Any | None = None) -> Any:
     if not path.exists():
         return default
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except json.JSONDecodeError:
+        return default
 
 
 def write_json(path: Path, payload: Any) -> None:

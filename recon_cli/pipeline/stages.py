@@ -71,6 +71,13 @@ class StageError(RuntimeError):
     pass
 
 
+def _note_missing_tool(context: "PipelineContext", tool: str) -> None:
+    missing = context.record.metadata.stats.setdefault("missing_tools", [])
+    if tool not in missing:
+        missing.append(tool)
+        context.manager.update_metadata(context.record)
+
+
 class Stage(ABC):
     name: str = "stage"
     optional: bool = False
@@ -159,6 +166,7 @@ class PassiveEnumerationStage(Stage):
         targets = context.targets
         artifacts = context.record.paths
         allow_ip = context.record.spec.allow_ip
+        tool_timeout = context.runtime_config.tool_timeout
 
         subfinder_out = artifacts.artifact("subfinder.txt")
         amass_out = artifacts.artifact("amass.json")
@@ -185,6 +193,7 @@ class PassiveEnumerationStage(Stage):
                     ["subfinder", "-dL", str(targets_file), "-silent"],
                     capture_output=True,
                     check=False,
+                    timeout=tool_timeout,
                 )
                 output = (completed.stdout or "") if hasattr(completed, "stdout") else ""
                 if output:
@@ -195,6 +204,7 @@ class PassiveEnumerationStage(Stage):
                 context.logger.warning("subfinder execution failed; continuing")
         else:
             context.logger.warning("subfinder not available; skipping")
+            _note_missing_tool(context, "subfinder")
 
         if executor.available("amass"):
             try:
@@ -209,6 +219,7 @@ class PassiveEnumerationStage(Stage):
                         str(amass_out),
                     ],
                     check=False,
+                    timeout=tool_timeout,
                 )
                 if amass_out.exists():
                     with amass_out.open("r", encoding="utf-8") as handle:
@@ -229,6 +240,7 @@ class PassiveEnumerationStage(Stage):
                 context.logger.warning("amass execution failed; continuing")
         else:
             context.logger.warning("amass not available; skipping")
+            _note_missing_tool(context, "amass")
 
         wayback_cmd = None
         if executor.available("waybackurls"):
@@ -239,7 +251,7 @@ class PassiveEnumerationStage(Stage):
             aggregated: List[str] = []
             for target in targets:
                 try:
-                    completed = executor.run([wayback_cmd, target], capture_output=True, check=False)
+                    completed = executor.run([wayback_cmd, target], capture_output=True, check=False, timeout=tool_timeout)
                 except CommandError:
                     context.logger.warning("%s failed for %s", wayback_cmd, target)
                     continue
@@ -251,6 +263,7 @@ class PassiveEnumerationStage(Stage):
                 wayback_urls.extend(aggregated)
         else:
             context.logger.warning("waybackurls/gau not available; skipping URL discovery")
+            _note_missing_tool(context, "waybackurls/gau")
 
         tracker = context.results
         added = 0
@@ -397,12 +410,13 @@ class ResolveStage(Stage):
                 str(hosts_path),
             ]
             try:
-                executor.run(cmd, check=False)
+                executor.run(cmd, check=False, timeout=context.runtime_config.tool_timeout)
             except CommandError:
                 context.logger.warning("massdns execution failed; falling back to system resolver")
         else:
             if not executor.available("massdns"):
                 context.logger.info("massdns not available; using system resolver for %s hosts", total_hosts)
+                _note_missing_tool(context, "massdns")
             else:
                 context.logger.info("Resolvers file missing; system resolver fallback for %s hosts", total_hosts)
 
@@ -551,6 +565,7 @@ class HttpProbeStage(Stage):
         fs.ensure_directory(httpx_input.parent)
         httpx_input.write_text("\n".join(hosts) + "\n", encoding="utf-8")
         executor = context.executor
+        tool_timeout = context.runtime_config.tool_timeout
         tracker = context.results
         seen_urls: Set[str] = set()
         used_httpx = False
@@ -570,7 +585,7 @@ class HttpProbeStage(Stage):
                 "-follow-redirects",
             ]
             try:
-                executor.run(cmd, check=False)
+                executor.run(cmd, check=False, timeout=tool_timeout)
                 used_httpx = True
             except CommandError:
                 context.logger.warning("httpx execution failed; attempting fallback probe")
@@ -913,11 +928,13 @@ class FuzzStage(Stage):
     def execute(self, context: PipelineContext) -> None:
         executor = context.executor
         runtime = context.runtime_config
+        tool_timeout = runtime.tool_timeout
         per_host_limit = max(runtime.trim_url_max_per_host, 0)
         per_host_counts: Dict[str, int] = defaultdict(int)
         stage_seen: Set[str] = set()
         if not executor.available("ffuf"):
             context.logger.warning("ffuf not available; skipping fuzzing stage")
+            _note_missing_tool(context, "ffuf")
             return
         spec = context.record.spec
         if spec.wordlist:
@@ -950,7 +967,7 @@ class FuzzStage(Stage):
                 str(artifact),
             ]
             try:
-                executor.run(cmd, check=False)
+                executor.run(cmd, check=False, timeout=tool_timeout)
             except CommandError:
                 context.logger.warning("ffuf failed for %s", host)
                 continue
@@ -1079,7 +1096,7 @@ class SecretsDetectionStage(Stage):
         items = read_jsonl(context.record.paths.results_jsonl)
         if not items:
             return
-        detector = SecretsDetector(timeout=context.runtime_config.secrets_timeout)
+        detector = SecretsDetector(timeout=context.runtime_config.secrets_timeout, verify_tls=bool(context.runtime_config.verify_tls))
         candidates: List[tuple[int, str, str]] = []  # (score, url, host)
         for entry in items:
             if entry.get("type") != "url":
@@ -1109,7 +1126,20 @@ class SecretsDetectionStage(Stage):
 
         artifacts_dir = context.record.paths.ensure_subdir("secrets")
         artifact_path = artifacts_dir / "matches.json"
-        serialised = {url: [match.__dict__ for match in matches] for url, matches in results.items()}
+        serialised = {
+            url: [
+                {
+                    "pattern": match.pattern,
+                    "value_hash": match.value_hash,
+                    "length": match.length,
+                    "entropy": match.entropy,
+                    "start": match.start,
+                    "end": match.end,
+                }
+                for match in matches
+            ]
+            for url, matches in results.items()
+        }
         artifact_path.write_text(json.dumps(serialised, indent=2, sort_keys=True), encoding="utf-8")
 
         pattern_counter: Counter[str] = Counter()
@@ -1131,7 +1161,8 @@ class SecretsDetectionStage(Stage):
                         "description": f"{match.pattern} ({match.confidence})",
                         "details": {
                             "pattern": match.pattern,
-                            "value_preview": match.value[:40],
+                            "value_hash": match.value_hash,
+                            "length": match.length,
                             "entropy": match.entropy,
                             "location": {"start": match.start, "end": match.end},
                         },
@@ -1249,6 +1280,7 @@ class RuntimeCrawlStage(Stage):
             )
             context.manager.update_metadata(context.record)
             logger.warning("playwright not installed; skipping runtime crawl stage")
+            _note_missing_tool(context, "playwright")
             return
 
         candidates: List[tuple[int, str, str]] = []
@@ -2153,6 +2185,7 @@ class ScreenshotStage(Stage):
             from playwright.sync_api import sync_playwright
         except ImportError:
             context.logger.warning("playwright not installed; skipping screenshots")
+            _note_missing_tool(context, "playwright")
             return
         max_shots = context.record.spec.max_screenshots or context.runtime_config.max_screenshots
         urls = self._select_urls(context, max_shots)

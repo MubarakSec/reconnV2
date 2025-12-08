@@ -71,6 +71,11 @@ def generate_summary(context) -> None:
         lines.append("== Priority Counts ==")
         for priority, count in priority_counter.most_common():
             lines.append(f"{priority}: {count}")
+    missing_tools = metadata.stats.get("missing_tools") if hasattr(metadata, "stats") else None
+    if missing_tools:
+        lines.append("")
+        lines.append("== Missing Tools ==")
+        lines.append(", ".join(sorted(missing_tools)))
     if noise_count:
         metadata.stats["noise_suppressed"] = noise_count
     correlation_stats = getattr(metadata, 'stats', {}).get('correlation') if hasattr(metadata, 'stats') else None
@@ -128,6 +133,24 @@ def generate_summary(context) -> None:
             priority = entry.get("priority", "unknown")
             tags = ",".join(entry.get("tags", []))
             lines.append(f"[{score:4}] ({priority}) {label} {tags}")
+    next_actions: list[str] = []
+    secrets_stats = getattr(metadata, 'stats', {}).get('secrets') if hasattr(metadata, 'stats') else None
+    if secrets_stats and secrets_stats.get('findings'):
+        next_actions.append("Rotate/revoke exposed credentials and add to secrets manager.")
+    auth_stats = getattr(metadata, 'stats', {}).get('auth_matrix') if hasattr(metadata, 'stats') else None
+    if auth_stats and auth_stats.get("issues"):
+        next_actions.append("Review auth-matrix issues; ensure least-privilege tokens differ in content.")
+    if getattr(metadata, 'stats', {}).get('idor', {}).get('suspects'):
+        next_actions.append("Validate IDOR suspects and add authorization checks.")
+    if missing_tools:
+        next_actions.append("Install missing external tools for fuller coverage.")
+    if not next_actions and priority_counter.get("high", 0) or priority_counter.get("critical", 0):
+        next_actions.append("Investigate high/critical items first; rerun with full profile if needed.")
+    if next_actions:
+        lines.append("")
+        lines.append("== Next Actions ==")
+        for item in next_actions:
+            lines.append(f"- {item}")
     record.paths.results_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
     metadata.stats.update({f"type_{key}": value for key, value in counts.items()})
     metadata.stats.update({f"status_{code}": value for code, value in status_counter.items()})

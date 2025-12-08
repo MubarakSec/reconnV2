@@ -102,7 +102,8 @@ DEFAULT_PROFILES_CONTENT = """{
 """
 DEFAULT_SECLISTS_ROOT = Path(os.environ.get("SECLISTS_ROOT", "/opt/recon-tools/seclists"))
 
-def ensure_base_directories() -> None:
+def ensure_base_directories(force: bool = False) -> None:
+    global _PROFILES_CACHE
     for path in [
         RECON_HOME,
         JOBS_ROOT,
@@ -114,21 +115,22 @@ def ensure_base_directories() -> None:
     ]:
         path.mkdir(parents=True, exist_ok=True)
     DEFAULT_RESOLVERS_PARENT.mkdir(parents=True, exist_ok=True)
-    if not DEFAULT_RESOLVERS.exists():
+    profiles_written = False
+    if force or not DEFAULT_RESOLVERS.exists():
         DEFAULT_RESOLVERS.write_text(DEFAULT_RESOLVERS_CONTENT, encoding="utf-8")
         try:
             DEFAULT_RESOLVERS.chmod(0o600)
         except PermissionError:
             pass
-    if not DEFAULT_PROFILES.exists():
+    if force or not DEFAULT_PROFILES.exists():
         DEFAULT_PROFILES.write_text(DEFAULT_PROFILES_CONTENT, encoding="utf-8")
         try:
             DEFAULT_PROFILES.chmod(0o600)
         except PermissionError:
             pass
-
-
-ensure_base_directories()
+        profiles_written = True
+    if profiles_written or force:
+        _PROFILES_CACHE = None
 
 
 _PROFILES_CACHE: Dict[str, Dict[str, Any]] | None = None
@@ -184,6 +186,7 @@ class RuntimeConfig:
     enable_runtime_crawl: bool = os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "1") not in {"0", "false", "False"}
     enable_secrets: bool = os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"}
     enable_screenshots: bool = os.environ.get("RECON_ENABLE_SCREENSHOTS", "1") not in {"0", "false", "False"}
+    verify_tls: bool = os.environ.get("RECON_VERIFY_TLS", "1") not in {"0", "false", "False"}
     url_path_allow_regex: Optional[str] = os.environ.get("RECON_URL_PATH_ALLOW_REGEX")
     trim_url_max_per_host: int = int(os.environ.get("RECON_TRIM_URL_MAX_PER_HOST", 200))
     trim_finding_max_per_host: int = int(os.environ.get("RECON_TRIM_FINDING_MAX_PER_HOST", 100))
@@ -201,6 +204,7 @@ class RuntimeConfig:
     correlation_max_records: int = int(os.environ.get("RECON_CORRELATION_MAX_RECORDS", 10000))
     correlation_svg_node_limit: int = int(os.environ.get("RECON_CORRELATION_SVG_NODE_LIMIT", 2500))
     resolvers_file: Optional[Path] = field(default_factory=lambda: DEFAULT_RESOLVERS if DEFAULT_RESOLVERS.exists() else None)
+    tool_timeout: int = int(os.environ.get("RECON_TOOL_TIMEOUT", 120))
 
     def clone(self, **overrides: Any) -> "RuntimeConfig":
         valid_overrides = {key: value for key, value in overrides.items() if hasattr(self, key)}

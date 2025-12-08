@@ -47,6 +47,9 @@ class CommandExecutor:
                 text=True,
                 check=check,
             )
+        except subprocess.TimeoutExpired as exc:
+            self.logger.error("Command timed out after %ss: %s", timeout, message)
+            raise CommandError(f"Command timeout after {timeout or 'unknown'}s") from exc
         except FileNotFoundError as exc:
             missing = redact_text(cmd_list[0]) if redact else cmd_list[0]
             self.logger.error("Command not found: %s", missing)
@@ -71,6 +74,7 @@ class CommandExecutor:
         cwd: Optional[Path] = None,
         env: Optional[Mapping[str, str]] = None,
         redact: bool = True,
+        timeout: Optional[int] = None,
     ) -> subprocess.CompletedProcess:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(
@@ -81,6 +85,7 @@ class CommandExecutor:
             stderr=subprocess.STDOUT,
             text=True,
             check=False,
+            timeout=timeout,
         )
         output = completed.stdout or ""
         if redact:

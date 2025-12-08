@@ -241,7 +241,9 @@ def run_js_secret_harvest(url_entries: Sequence[Dict[str, object]], session: req
         for name, pattern in JS_SECRET_PATTERNS:
             for match in pattern.findall(text):
                 match_value = match if isinstance(match, str) else match[-1]
-                matches.append({"type": name, "value": match_value})
+                match_str = str(match_value)
+                match_hash = hashlib.sha256(match_str.encode("utf-8", "ignore")).hexdigest()[:16]
+                matches.append({"type": name, "hash": match_hash, "length": len(match_str)})
         if matches:
             findings.append(
                 {

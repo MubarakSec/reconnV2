@@ -17,6 +17,7 @@ from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.pipeline.runner import run_pipeline
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
+from recon_cli.utils.sanitizer import redact
 from recon_cli.active import modules as active_modules
 from recon_cli.tools.executor import CommandExecutor
 
@@ -92,13 +93,16 @@ def scan(
         help=f"Trigger smart scanner integration (repeatable). Choices: {SCANNER_HELP}",
         show_default=False,
     ),
+    insecure: bool = typer.Option(False, "--insecure", help="Disable TLS verification for HTTP requests (not recommended)"),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
-    if profile_input not in PROFILE_CHOICES:
+    available_profiles = config.available_profiles()
+    profile_choices = BASE_PROFILES | set(available_profiles.keys())
+    if profile_input not in profile_choices:
         typer.echo(f"Invalid profile: {profile_input}", err=True)
         raise typer.Exit(code=1)
-    profile_config = config.get_profile(profile_input)
+    profile_config = available_profiles.get(profile_input)
     runtime_overrides: Dict[str, Any] = {}
     execution_profile: Optional[str] = None
     base_profile = profile_input
@@ -150,6 +154,7 @@ def scan(
         scanners=scanners,
         execution_profile=execution_profile,
         runtime_overrides=runtime_overrides,
+        insecure=insecure,
     )
     job_id = record.spec.job_id
     typer.echo(f"Job created: {job_id}")
@@ -268,8 +273,9 @@ def requeue(job_id: str) -> None:
 
 
 @app.command()
-def doctor() -> None:
+def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate default configs/resolvers")) -> None:
     """Run quick environment & source sanity checks."""
+    config.ensure_base_directories(force=fix)
     import io
     import tokenize
 
@@ -367,9 +373,11 @@ def export(job_id: str, fmt: str = typer.Option("jsonl", "--format", case_sensit
     manager = JobManager()
     record = _load_job_or_exit(manager, job_id)
     if fmt == "jsonl":
-        typer.echo(record.paths.results_jsonl.read_text(encoding="utf-8"))
+        payload = record.paths.results_jsonl.read_text(encoding="utf-8")
+        typer.echo(redact(payload) or payload)
     elif fmt == "txt":
-        typer.echo(record.paths.results_txt.read_text(encoding="utf-8"))
+        payload = record.paths.results_txt.read_text(encoding="utf-8")
+        typer.echo(redact(payload) or payload)
     else:
         import shutil
 

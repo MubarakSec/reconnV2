@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -40,7 +41,8 @@ def shannon_entropy(data: str) -> float:
 @dataclass
 class SecretMatch:
     pattern: str
-    value: str
+    value_hash: str
+    length: int
     entropy: float
     start: int
     end: int
@@ -55,8 +57,14 @@ class SecretMatch:
 
 
 class SecretsDetector:
-    def __init__(self, timeout: int = 10) -> None:
+    def __init__(self, timeout: int = 10, verify_tls: bool = True) -> None:
         self.session = requests.Session()
+        self.session.verify = verify_tls
+        if not verify_tls:
+            try:
+                requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+            except Exception:
+                pass
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.timeout = timeout
 
@@ -79,10 +87,12 @@ class SecretsDetector:
             for match in pattern.finditer(text):
                 value = match.group(0)
                 entropy = shannon_entropy(value)
+                value_hash = hashlib.sha256(value.encode("utf-8", "ignore")).hexdigest()[:16]
                 matches.append(
                     SecretMatch(
                         pattern=name,
-                        value=value[:120],
+                        value_hash=value_hash,
+                        length=len(value),
                         entropy=entropy,
                         start=match.start(),
                         end=match.end(),

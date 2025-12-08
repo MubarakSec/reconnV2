@@ -54,10 +54,12 @@ class AuthMatrixStage(Stage):
             context.logger.info("AuthMatrix stage: additional tokens not configured; skipping")
             return
         session = requests.Session()
-        try:
-            requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        verify_tls = bool(getattr(runtime, "verify_tls", True))
+        if not verify_tls:
+            try:
+                requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+            except Exception:
+                pass
         timeout = getattr(runtime, "idor_timeout", 10)
         stats = context.record.metadata.stats.setdefault("auth_matrix", {"tests": 0, "issues": 0})
         tsv_lines = ["url	auth	status	body_md5	length	sensitive_keys"]
@@ -65,7 +67,7 @@ class AuthMatrixStage(Stage):
             records: List[AuthRecord] = []
             baseline_data: Dict[str, Dict[str, object]] = {}
             for auth_label, token in tokens:
-                data = self._fetch(session, context, url, auth_label, token, timeout)
+                data = self._fetch(session, context, url, auth_label, token, timeout, verify_tls)
                 if not data:
                     continue
                 stats["tests"] += 1
@@ -119,6 +121,7 @@ class AuthMatrixStage(Stage):
         auth_label: str,
         token: Optional[str],
         timeout: int,
+        verify_tls: bool,
     ) -> Optional[Dict[str, object]]:
         headers = {"User-Agent": "recon-cli auth-matrix"}
         if token:
@@ -130,7 +133,7 @@ class AuthMatrixStage(Stage):
             if cache_entry.get("last_modified"):
                 headers["If-Modified-Since"] = cache_entry["last_modified"]
         try:
-            resp = session.get(url, headers=headers, timeout=timeout, verify=False, allow_redirects=True)
+            resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
         except Exception as exc:
             context.logger.debug("AuthMatrix request failed for %s (%s): %s", url, auth_label, exc)
             return None

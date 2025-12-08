@@ -32,6 +32,8 @@ class PipelineContext:
         spec = self.record.spec
         overrides = getattr(spec, 'runtime_overrides', {}) or {}
         base_config = config.RUNTIME_CONFIG.clone()
+        if getattr(spec, "insecure", False):
+            overrides = {**overrides, "verify_tls": False}
         if overrides:
             base_config = base_config.clone(**overrides)
         self.runtime_config = base_config

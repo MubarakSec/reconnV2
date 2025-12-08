@@ -66,6 +66,7 @@ class JobSpec:
     allow_ip: bool = False
     active_modules: List[str] = field(default_factory=list)
     scanners: List[str] = field(default_factory=list)
+    insecure: bool = False
     created_at: str = field(default_factory=time_utils.iso_now)
     initiator: Optional[str] = None
     execution_profile: Optional[str] = None
@@ -84,6 +85,7 @@ class JobSpec:
             "allow_ip": self.allow_ip,
             "active_modules": self.active_modules,
             "scanners": self.scanners,
+            "insecure": self.insecure,
             "created_at": self.created_at,
             "initiator": self.initiator,
             "execution_profile": self.execution_profile,
@@ -104,6 +106,7 @@ class JobSpec:
             allow_ip=payload.get("allow_ip", False),
             active_modules=list(payload.get("active_modules", [])),
             scanners=list(payload.get("scanners", [])),
+            insecure=payload.get("insecure", False),
             created_at=payload.get("created_at", time_utils.iso_now()),
             initiator=payload.get("initiator"),
             execution_profile=payload.get("execution_profile"),

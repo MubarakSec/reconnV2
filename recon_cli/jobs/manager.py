@@ -43,6 +43,7 @@ class JobManager:
         scanners: Optional[List[str]] = None,
         execution_profile: Optional[str] = None,
         runtime_overrides: Optional[Dict[str, Any]] = None,
+        insecure: bool = False,
     ) -> JobRecord:
         job_id = self.generate_job_id()
         root = config.QUEUED_JOBS / job_id
@@ -108,6 +109,7 @@ class JobManager:
             scanners=scanners or [],
             execution_profile=execution_profile,
             runtime_overrides=prepared_overrides,
+            insecure=insecure,
         )
         metadata = JobMetadata(job_id=job_id, queued_at=time_utils.iso_now())
         fs.write_json(paths.spec_path, spec.to_dict())
