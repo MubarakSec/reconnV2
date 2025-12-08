@@ -40,6 +40,10 @@ class JobPaths:
     def results_txt(self) -> Path:
         return self.root / config.RESULTS_TEXT_NAME
 
+    @property
+    def trimmed_results_jsonl(self) -> Path:
+        return self.root / "results_trimmed.jsonl"
+
     def artifact(self, name: str) -> Path:
         return self.artifacts_dir / name
 

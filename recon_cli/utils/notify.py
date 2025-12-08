@@ -54,7 +54,7 @@ def send_pipeline_notification(context, status: str, error: Optional[str] = None
     if status.lower() == "finished":
         body_lines.append(f"Results: {result_paths.results_txt}")
     if error:
-        snippet = textwrap.shorten(error, width=280, placeholder="...")
+        snippet = textwrap.shorten(error, width=280, placeholder="[snip]")
         body_lines.append(f"Error: {snippet}")
 
     message = "\n".join(body_lines)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Tuple
+from typing import Callable, Sequence, Tuple
 
 _PLACEHOLDER = "***"
 
@@ -41,7 +41,7 @@ _QUERY_PATTERN = re.compile(r'(?i)((?:\?|&)(?:{keys})=)([^&\s]+)'.format(keys=_K
 _BEARER_PATTERN = re.compile(r'(?i)(bearer\s+)([A-Za-z0-9._\-]+)')
 _BASIC_PATTERN = re.compile(r'(?i)(basic\s+)([A-Za-z0-9+/=]+)')
 
-_REPLACEMENTS: Tuple[Tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
+_REPLACEMENTS: Sequence[Tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = (
     (_HEADER_PATTERN, lambda m: f"{m.group(1)}{_PLACEHOLDER}"),
     (_JSON_DOUBLE_PATTERN, lambda m: f"{m.group(1)}{_PLACEHOLDER}{m.group(3)}"),
     (_JSON_SINGLE_PATTERN, lambda m: f"{m.group(1)}{_PLACEHOLDER}{m.group(3)}"),

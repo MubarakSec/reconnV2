@@ -185,11 +185,21 @@ class RuntimeConfig:
     enable_secrets: bool = os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"}
     enable_screenshots: bool = os.environ.get("RECON_ENABLE_SCREENSHOTS", "1") not in {"0", "false", "False"}
     url_path_allow_regex: Optional[str] = os.environ.get("RECON_URL_PATH_ALLOW_REGEX")
+    trim_url_max_per_host: int = int(os.environ.get("RECON_TRIM_URL_MAX_PER_HOST", 200))
+    trim_finding_max_per_host: int = int(os.environ.get("RECON_TRIM_FINDING_MAX_PER_HOST", 100))
+    trim_finding_min_score: int = int(os.environ.get("RECON_TRIM_FINDING_MIN_SCORE", 20))
+    trim_tag_per_host_limit: int = int(os.environ.get("RECON_TRIM_TAG_PER_HOST", 50))
+    idor_token_a: Optional[str] = os.environ.get("RECON_IDOR_TOKEN_A")
+    idor_token_b: Optional[str] = os.environ.get("RECON_IDOR_TOKEN_B")
+    idor_other_identifier: Optional[str] = os.environ.get("RECON_IDOR_OTHER_ID")
+    idor_timeout: int = int(os.environ.get("RECON_IDOR_TIMEOUT", 10))
     telegram_token: Optional[str] = os.environ.get("RECON_TELEGRAM_TOKEN")
     telegram_chat_id: Optional[str] = os.environ.get("RECON_TELEGRAM_CHAT_ID")
     telegram_timeout: int = int(os.environ.get("RECON_TELEGRAM_TIMEOUT", 5))
     seclists_root: Path = DEFAULT_SECLISTS_ROOT
     fallback_dns_limit: int = int(os.environ.get("RECON_FALLBACK_DNS_LIMIT", 200))
+    correlation_max_records: int = int(os.environ.get("RECON_CORRELATION_MAX_RECORDS", 10000))
+    correlation_svg_node_limit: int = int(os.environ.get("RECON_CORRELATION_SVG_NODE_LIMIT", 2500))
     resolvers_file: Optional[Path] = field(default_factory=lambda: DEFAULT_RESOLVERS if DEFAULT_RESOLVERS.exists() else None)
 
     def clone(self, **overrides: Any) -> "RuntimeConfig":

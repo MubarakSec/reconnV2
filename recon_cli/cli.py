@@ -18,6 +18,7 @@ from recon_cli.pipeline.runner import run_pipeline
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.active import modules as active_modules
+from recon_cli.tools.executor import CommandExecutor
 
 app = typer.Typer(
     help="Run the reconnaissance pipeline end-to-end (passive discovery -> runtime crawl -> reporting).",
@@ -172,11 +173,16 @@ def scan(
 @app.command("worker-run")
 def worker_run(
     poll_interval: int = typer.Option(5, "--poll-interval", min=1, help="Seconds between queue checks"),
-    max_workers: int = typer.Option(1, "--max-workers", min=1, help="Maximum concurrent jobs"),
+    max_workers: int = typer.Option(
+        1,
+        "--max-workers",
+        min=1,
+        help="Reserved for future concurrency; currently runs a single worker (values >1 are ignored)",
+    ),
 ) -> None:
     """Run the job worker loop that pulls queued scans and executes the pipeline."""
     if max_workers > 1:
-        typer.echo("Current implementation processes jobs sequentially; ignoring max-workers > 1")
+        typer.echo("Single-worker mode only; ignoring max-workers > 1")
     manager = JobManager()
     lifecycle = JobLifecycle(manager)
     typer.echo("Worker started; press Ctrl+C to stop")
@@ -262,11 +268,59 @@ def requeue(job_id: str) -> None:
 
 
 @app.command()
+def doctor() -> None:
+    """Run quick environment & source sanity checks."""
+    import io
+    import tokenize
+
+    source_root = Path(__file__).resolve().parent
+    issues: list[str] = []
+
+    for py_file in source_root.rglob("*.py"):
+        with py_file.open("r", encoding="utf-8") as handle:
+            stream = io.StringIO(handle.read())
+        for token in tokenize.generate_tokens(stream.readline):
+            if token.type == tokenize.OP and token.string == "...":
+                issues.append(f"ellipsis operator found in {py_file}:{token.start[0]}")
+
+    tool_hints = {
+        "subfinder": "install via go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
+        "amass": "install via go install github.com/owasp-amass/amass/v4/...@latest",
+        "massdns": "install from https://github.com/blechschmidt/massdns",
+        "httpx": "install via go install github.com/projectdiscovery/httpx/cmd/httpx@latest",
+        "ffuf": "install via go install github.com/ffuf/ffuf@latest",
+        "nuclei": "install via go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+        "wpscan": "install via gem install wpscan",
+    }
+    for tool, hint in tool_hints.items():
+        if not CommandExecutor.available(tool):
+            typer.echo(f"[warn] tool '{tool}' not found in PATH ({hint})")
+    if not (CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")):
+        typer.echo("[warn] tool 'waybackurls' or 'gau' not found in PATH (install via go install github.com/tomnomnom/waybackurls@latest or go install github.com/lc/gau/v2/cmd/gau@latest)")
+
+    try:
+        __import__("recon_cli.pipeline.stage_idor")
+        __import__("recon_cli.pipeline.stage_auth_matrix")
+    except Exception as exc:
+        issues.append(f"stage import failed: {exc}")
+
+    if issues:
+        for issue in issues:
+            typer.echo(f"[fail] {issue}")
+        raise typer.Exit(code=1)
+
+    typer.secho("All checks passed", fg=typer.colors.GREEN)
+
+
+
+@app.command()
 def prune(
-    days: int = typer.Option(..., "--days", min=1, help="Remove finished jobs older than N days"),
+    days: int = typer.Option(None, "--days", min=1, help="Remove finished jobs older than N days", show_default=False),
     archive: bool = typer.Option(False, "--archive", help="Move jobs to archive instead of deleting"),
 ) -> None:
     """Delete or archive finished jobs older than the given number of days."""
+    if days is None:
+        raise typer.BadParameter("--days is required", param_name="--days")
     manager = JobManager()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     finished_dir = config.FINISHED_JOBS

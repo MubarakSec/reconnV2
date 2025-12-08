@@ -47,8 +47,13 @@ class JobLifecycle:
             return None
         record = self.manager.load_job(job_id)
         if record:
+            failed_stage = record.metadata.stage
+            if failed_stage and failed_stage in record.metadata.checkpoints:
+                record.metadata.checkpoints.pop(failed_stage, None)
+            record.metadata.attempts = {}
             record.metadata.status = "queued"
             record.metadata.stage = "queued"
             record.metadata.error = None
+            self.manager.update_spec(record)
             self.manager.update_metadata(record)
         return record

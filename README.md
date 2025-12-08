@@ -100,9 +100,12 @@ Tune behaviour via environment variables:
 - `SECLISTS_ROOT` to override the SecLists base directory.
 - RECON_TELEGRAM_TOKEN, RECON_TELEGRAM_CHAT_ID, RECON_TELEGRAM_TIMEOUT to push Telegram alerts when jobs finish or fail.
 - `RECON_HOME` to relocate job storage.
+- `RECON_CORRELATION_MAX_RECORDS` to cap how many results are processed in the correlation stage (default 10k); `RECON_CORRELATION_SVG_NODE_LIMIT` to skip SVG rendering when the graph exceeds this node count (default 2500).
 
 ## Notes
 - Missing external binaries trigger warnings and the stage is skipped; the pipeline still completes so you can test locally without the full toolchain.
+- The initial target is always seeded into the host list so fallback resolution/probing will still run even when enumeration tools are absent.
+- Requeued jobs retain completed checkpoints but reset attempts and rerun from the last stage, making recovery from transient failures predictable.
 - `worker-run` currently processes jobs sequentially; run multiple workers for concurrency if required.
 - Only scan targets you are authorized to assess.
 

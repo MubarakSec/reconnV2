@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Pattern
+from pathlib import Path
+from typing import Dict, List, Optional, Pattern
 from urllib.parse import urlparse
 import re
 
@@ -9,6 +10,7 @@ from recon_cli import config
 from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.jobs.results import ResultsTracker
 from recon_cli.tools.executor import CommandExecutor
+from recon_cli.utils import fs
 from recon_cli.utils.logging import build_file_logger, silence_logger
 
 
@@ -22,6 +24,9 @@ class PipelineContext:
     logger_name: str = "recon.pipeline"
     execution_profile: Optional[str] = field(init=False, default=None)
     _url_allow_pattern: Optional[Pattern[str]] = field(init=False, default=None)
+    _delta_cache: Dict[str, Dict[str, str]] = field(init=False, default_factory=dict)
+    _cache_path: Path = field(init=False)
+    _cache_dirty: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         spec = self.record.spec
@@ -30,6 +35,21 @@ class PipelineContext:
         if overrides:
             base_config = base_config.clone(**overrides)
         self.runtime_config = base_config
+        self._cache_path = self.record.paths.root / "cache.json"
+        raw_cache = fs.read_json(self._cache_path, default={})
+        self._delta_cache = {}
+        if isinstance(raw_cache, dict):
+            for url, entry in raw_cache.items():
+                if not isinstance(entry, dict):
+                    continue
+                cleaned = {}
+                for key in ("etag", "last_modified", "body_md5"):
+                    value = entry.get(key)
+                    if value:
+                        cleaned[key] = str(value)
+                if cleaned:
+                    self._delta_cache[str(url)] = cleaned
+        self._cache_dirty = False
         if self.max_retries is None:
             self.max_retries = self.runtime_config.retry_count
         self.logger = build_file_logger(self.logger_name, self.record.paths.pipeline_log, level=config.LOG_LEVEL)
@@ -67,6 +87,39 @@ class PipelineContext:
             return False
         return bool(self._url_allow_pattern.search(path))
 
+    def get_cache_entry(self, url: str) -> Optional[Dict[str, str]]:
+        return self._delta_cache.get(url)
+
+    def should_skip_due_to_cache(self, url: str, *, etag: Optional[str] = None, last_modified: Optional[str] = None, body_md5: Optional[str] = None) -> bool:
+        if self.force:
+            return False
+        previous = self._delta_cache.get(url)
+        if not previous:
+            return False
+        comparisons = []
+        for key, value in (("etag", etag), ("last_modified", last_modified), ("body_md5", body_md5)):
+            if value:
+                comparisons.append(previous.get(key) == value)
+            elif previous.get(key):
+                return False
+        return bool(comparisons) and all(comparisons)
+
+    def update_cache(self, url: str, *, etag: Optional[str] = None, last_modified: Optional[str] = None, body_md5: Optional[str] = None) -> None:
+        entry = self._delta_cache.get(url, {}).copy()
+        mutated = False
+        for key, value in (("etag", etag), ("last_modified", last_modified), ("body_md5", body_md5)):
+            if value:
+                if entry.get(key) != value:
+                    entry[key] = str(value)
+                    mutated = True
+        if entry:
+            if self._delta_cache.get(url) != entry:
+                self._delta_cache[url] = entry
+                self._cache_dirty = True
+        elif url in self._delta_cache and mutated:
+            del self._delta_cache[url]
+            self._cache_dirty = True
+
     def increment_attempt(self, stage: str) -> int:
         current = self.stage_attempts.get(stage, 0) + 1
         self.stage_attempts[stage] = current
@@ -92,4 +145,6 @@ class PipelineContext:
         self.manager.update_metadata(self.record)
 
     def close(self) -> None:
+        if self._cache_dirty:
+            fs.write_json(self._cache_path, self._delta_cache)
         silence_logger(self.logger)

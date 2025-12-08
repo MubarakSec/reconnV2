@@ -4,7 +4,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Callable, Dict, Iterable, Optional
 
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.jsonl import JsonlWriter

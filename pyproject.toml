@@ -28,3 +28,8 @@ where = ['.']
 include = ['recon_cli*']
 exclude = ['jobs*', 'archive*', 'artifacts*', 'jobs', 'archive']
 
+[tool.pytest.ini_options]
+markers = [
+  "smoke: smoke-test marker for pipeline E2E run"
+]
+

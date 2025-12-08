@@ -1,12 +1,14 @@
 
 import json
+import hashlib
+import heapq
 import math
 import socket
 import time
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.crawl.runtime import (
@@ -30,6 +32,13 @@ def compute_asn_score(asn: str | None) -> float:
     if asn_upper.startswith("AS1") or asn_upper.startswith("AS3"):
         return 0.6
     return 0.2
+
+
+def root_domain(host: str) -> str:
+    parts = host.split('.')
+    if len(parts) >= 2:
+        return '.'.join(parts[-2:])
+    return host
 
 
 FEATURE_KEYS = ["has_api", "has_login", "js_secrets_count", "url_count", "finding_count", "asn_score", "tag_entropy"]
@@ -79,7 +88,7 @@ class Stage(ABC):
 
     @abstractmethod
     def execute(self, context: PipelineContext) -> None:
-        ...
+        raise NotImplementedError('Stage subclasses must implement execute()')
 
     def after(self, context: PipelineContext) -> None:  # pragma: no cover - hook
         pass
@@ -95,6 +104,8 @@ class Stage(ABC):
         attempts = context.max_retries + 1
         for attempt in range(1, attempts + 1):
             context.increment_attempt(self.name)
+            context.record.metadata.stage = self.name
+            context.manager.update_metadata(context.record)
             logger.info("Stage %s attempt %s/%s", self.name, attempt, attempts)
             try:
                 self.before(context)
@@ -147,6 +158,7 @@ class PassiveEnumerationStage(Stage):
         executor = context.executor
         targets = context.targets
         artifacts = context.record.paths
+        allow_ip = context.record.spec.allow_ip
 
         subfinder_out = artifacts.artifact("subfinder.txt")
         amass_out = artifacts.artifact("amass.json")
@@ -157,6 +169,15 @@ class PassiveEnumerationStage(Stage):
         subfinder_hosts: set[str] = set()
         amass_hosts: set[str] = set()
         wayback_urls: List[str] = []
+        seed_hosts: set[str] = set()
+        for target in targets:
+            if allow_ip and validation.is_ip(target):
+                seed_hosts.add(target)
+                continue
+            try:
+                seed_hosts.add(validation.normalize_hostname(target))
+            except ValueError:
+                continue
 
         if executor.available("subfinder"):
             try:
@@ -195,11 +216,15 @@ class PassiveEnumerationStage(Stage):
                             try:
                                 payload = json.loads(line)
                             except json.JSONDecodeError:
-                                continue
-                            name = payload.get("name")
-                            if not name:
-                                continue
-                            amass_hosts.add(name.strip())
+                                payload = None
+                            if isinstance(payload, dict):
+                                name = payload.get("name")
+                                if name:
+                                    amass_hosts.add(name.strip())
+                                    continue
+                            host = line.strip()
+                            if host:
+                                amass_hosts.add(host)
             except CommandError:
                 context.logger.warning("amass execution failed; continuing")
         else:
@@ -271,7 +296,27 @@ class PassiveEnumerationStage(Stage):
             }
             tracker.append(payload)
 
-        passive_hosts = sorted({validation.normalize_hostname(host) for host in (subfinder_hosts | amass_hosts) if host})
+        for hostname in sorted(seed_hosts):
+            tracker.append(
+                {
+                    "type": "hostname",
+                    "source": "input",
+                    "hostname": hostname,
+                }
+            )
+
+        passive_hosts_set: set[str] = set()
+        for host in (subfinder_hosts | amass_hosts | seed_hosts):
+            if not host:
+                continue
+            if allow_ip and validation.is_ip(host):
+                passive_hosts_set.add(host)
+                continue
+            try:
+                passive_hosts_set.add(validation.normalize_hostname(host))
+            except ValueError:
+                continue
+        passive_hosts = sorted(passive_hosts_set)
         if passive_hosts:
             passive_hosts_out.write_text("\n".join(passive_hosts) + "\n", encoding="utf-8")
         context.record.metadata.stats["passive_hostnames"] = len(passive_hosts)
@@ -294,11 +339,14 @@ class DedupeStage(Stage):
                 host = line.strip()
                 if not host:
                     continue
-                try:
-                    canonical = validation.normalize_hostname(host)
-                except ValueError:
-                    context.logger.debug("Skipping invalid host from passive list: %s", host)
-                    continue
+                if context.record.spec.allow_ip and validation.is_ip(host):
+                    canonical = host
+                else:
+                    try:
+                        canonical = validation.normalize_hostname(host)
+                    except ValueError:
+                        context.logger.debug("Skipping invalid host from passive list: %s", host)
+                        continue
                 if canonical not in seen:
                     seen.add(canonical)
                     normalized.append(canonical)
@@ -459,7 +507,6 @@ class EnrichmentStage(Stage):
                 appended += 1
         if enrichment_store:
             import json
-
             mapped: Dict[str, list] = {}
             for key, data in enrichment_store.items():
                 hostname = data["hostname"]
@@ -472,17 +519,40 @@ class EnrichmentStage(Stage):
 class HttpProbeStage(Stage):
     name = "http_probe"
 
+    PROBE_PATHS = [
+        "/robots.txt",
+        "/.well-known/security.txt",
+        "/sitemap.xml",
+        "/api/",
+        "/login",
+        "/admin",
+    ]
+    HEADER_TAG_KEYS = [
+        "server",
+        "x-powered-by",
+        "server-timing",
+        "location",
+        "access-control-allow-origin",
+        "www-authenticate",
+    ]
+
     def execute(self, context: PipelineContext) -> None:
         hosts_path = context.record.paths.artifact("dedupe_hosts.txt")
         if not hosts_path.exists():
             context.logger.info("No hosts to probe")
             return
+        with hosts_path.open("r", encoding="utf-8") as handle:
+            hosts = [line.strip() for line in handle if line.strip()]
+        if not hosts:
+            context.logger.info("No hosts to probe")
+            return
         httpx_input = context.record.paths.artifact("hosts_for_httpx.txt")
         httpx_output = context.record.paths.artifact("httpx_raw.json")
         fs.ensure_directory(httpx_input.parent)
-        httpx_input.write_text(hosts_path.read_text(encoding="utf-8"), encoding="utf-8")
+        httpx_input.write_text("\n".join(hosts) + "\n", encoding="utf-8")
         executor = context.executor
         tracker = context.results
+        seen_urls: Set[str] = set()
         used_httpx = False
         if executor.available("httpx"):
             cmd = [
@@ -529,13 +599,18 @@ class HttpProbeStage(Stage):
                     url_value = entry.get("url")
                     if url_value and not context.url_allowed(url_value):
                         continue
-                    tracker.append(entry)
+                    if url_value and url_value in seen_urls:
+                        continue
+                    appended = tracker.append(entry)
+                    if appended and url_value:
+                        seen_urls.add(url_value)
         else:
-            self._fallback_probe(context, hosts_path)
+            self._fallback_probe(context, hosts_path, seen_urls)
+        self._probe_additional_paths(context, hosts, seen_urls)
         context.record.metadata.stats["http_urls"] = context.results.stats.get("type:url", 0)
         context.manager.update_metadata(context.record)
 
-    def _fallback_probe(self, context: PipelineContext, hosts_path: Path) -> None:
+    def _fallback_probe(self, context: PipelineContext, hosts_path: Path, seen_urls: Set[str]) -> None:
         import http.client
         import ssl
 
@@ -546,28 +621,159 @@ class HttpProbeStage(Stage):
                 if not host:
                     continue
                 for scheme, port in (("http", 80), ("https", 443)):
+                    url = f"{scheme}://{host}/"
+                    if not context.url_allowed(url):
+                        continue
+                    if url in seen_urls:
+                        continue
+                    conn = None
                     try:
                         if scheme == "https":
                             ssl_ctx = ssl.create_default_context()
                             conn = http.client.HTTPSConnection(host, port=port, timeout=5, context=ssl_ctx)
                         else:
                             conn = http.client.HTTPConnection(host, port=port, timeout=5)
-                        conn.request("GET", "/", headers={"User-Agent": "recon-cli"})
+                        headers = {"User-Agent": "recon-cli"}
+                        cache_entry = context.get_cache_entry(url)
+                        if cache_entry and not context.force:
+                            if cache_entry.get("etag"):
+                                headers["If-None-Match"] = cache_entry["etag"]
+                            if cache_entry.get("last_modified"):
+                                headers["If-Modified-Since"] = cache_entry["last_modified"]
+                        conn.request("GET", "/", headers=headers)
                         resp = conn.getresponse()
+                        if resp.status == 304 and not context.force:
+                            break
+                        body = resp.read(2048) or b""
+                        headers_lower = {k.lower(): v for k, v in resp.getheaders()}
+                        etag = headers_lower.get("etag")
+                        last_modified = headers_lower.get("last-modified")
+                        body_md5 = hashlib.md5(body).hexdigest()
+                        if context.should_skip_due_to_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5):
+                            context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
+                            break
                         payload = {
                             "type": "url",
-                            "source": "fallback-http",
-                            "url": f"{scheme}://{host}/",
+                            "source": "probe",
+                            "url": url,
                             "hostname": host,
                             "status_code": resp.status,
-                            "server": resp.getheader("Server"),
+                            "server": headers_lower.get("server"),
                             "tls": scheme == "https",
+                            "content_type": headers_lower.get("content-type"),
+                            "length": len(body),
+                            "body_md5": body_md5,
+                            "etag": etag,
+                            "last_modified": last_modified,
                         }
-                        if payload.get("url") and not context.url_allowed(payload["url"]):
-                            continue
-                        tracker.append(payload)
+                        context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
+                        appended = tracker.append(payload)
+                        if appended:
+                            seen_urls.add(url)
                     except Exception:
                         continue
+                    finally:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+
+    def _probe_additional_paths(self, context: PipelineContext, hosts: List[str], seen_urls: Set[str]) -> None:
+        if not hosts:
+            return
+        runtime = context.runtime_config
+        host_limit = runtime.max_global_concurrency or len(hosts)
+        total_added = 0
+        for idx, host in enumerate(hosts):
+            if idx >= host_limit:
+                break
+            total_added += self._probe_host_paths(context, host, seen_urls)
+        if total_added:
+            stats = context.record.metadata.stats.setdefault("http_probe", {})
+            stats["extra"] = stats.get("extra", 0) + total_added
+            context.manager.update_metadata(context.record)
+
+    def _probe_host_paths(self, context: PipelineContext, host: str, seen_urls: Set[str]) -> int:
+        import http.client
+        import ssl
+        added = 0
+        paths = self.PROBE_PATHS
+        for path in paths:
+            base_tags = ["probe++", f"path:{path.lstrip('/') or '/'}"]
+            for scheme in ("https", "http"):
+                url = f"{scheme}://{host}{path}"
+                if not context.url_allowed(url):
+                    continue
+                if url in seen_urls:
+                    continue
+                conn = None
+                try:
+                    start = time.perf_counter()
+                    if scheme == "https":
+                        conn = http.client.HTTPSConnection(host, timeout=5, context=ssl.create_default_context())
+                    else:
+                        conn = http.client.HTTPConnection(host, timeout=5)
+                    headers = {"User-Agent": "recon-cli probe++"}
+                    cache_entry = context.get_cache_entry(url)
+                    if cache_entry and not context.force:
+                        if cache_entry.get("etag"):
+                            headers["If-None-Match"] = cache_entry["etag"]
+                        if cache_entry.get("last_modified"):
+                            headers["If-Modified-Since"] = cache_entry["last_modified"]
+                    conn.request("GET", path, headers=headers)
+                    resp = conn.getresponse()
+                    if resp.status == 304 and not context.force:
+                        break
+                    body = resp.read(2048) or b""
+                    duration_ms = int((time.perf_counter() - start) * 1000)
+                    headers_lower = {k.lower(): v for k, v in resp.getheaders()}
+                    etag = headers_lower.get("etag")
+                    last_modified = headers_lower.get("last-modified")
+                    body_md5 = hashlib.md5(body).hexdigest()
+                    if context.should_skip_due_to_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5):
+                        context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
+                        continue
+                    tags = list(base_tags)
+                    for header_name in self.HEADER_TAG_KEYS:
+                        value = headers_lower.get(header_name)
+                        if value:
+                            tags.append(f"header:{header_name}={value.strip()[:80]}")
+                    content_type = headers_lower.get("content-type")
+                    payload = {
+                        "type": "url",
+                        "source": "probe",
+                        "url": url,
+                        "hostname": host,
+                        "status_code": resp.status,
+                        "content_type": content_type,
+                        "length": len(body),
+                        "body_md5": body_md5,
+                        "tags": sorted(set(tags)),
+                        "tls": scheme == "https",
+                        "response_time_ms": duration_ms,
+                        "etag": etag,
+                        "last_modified": last_modified,
+                    }
+                    location = headers_lower.get("location")
+                    if location:
+                        payload["redirect_location"] = location
+                    context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
+                    appended = context.results.append(payload)
+                    if appended:
+                        added += 1
+                        seen_urls.add(url)
+                    break
+                except Exception:
+                    continue
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+        return added
+
+
 
 
 class ScoringStage(Stage):
@@ -706,6 +912,10 @@ class FuzzStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         executor = context.executor
+        runtime = context.runtime_config
+        per_host_limit = max(runtime.trim_url_max_per_host, 0)
+        per_host_counts: Dict[str, int] = defaultdict(int)
+        stage_seen: Set[str] = set()
         if not executor.available("ffuf"):
             context.logger.warning("ffuf not available; skipping fuzzing stage")
             return
@@ -760,9 +970,22 @@ class FuzzStage(Stage):
                         "score": 50,
                     }
                     entry_url = payload.get("url")
-                    if entry_url and not context.url_allowed(entry_url):
+                    if not entry_url:
                         continue
-                    context.results.append(payload)
+                    if not context.url_allowed(entry_url):
+                        continue
+                    if entry_url in stage_seen:
+                        continue
+                    host = payload.get("hostname") or urlparse(entry_url).hostname
+                    if host:
+                        payload.setdefault("hostname", host)
+                    if host and per_host_limit > 0 and per_host_counts[host] >= per_host_limit:
+                        continue
+                    appended = context.results.append(payload)
+                    if appended:
+                        stage_seen.add(entry_url)
+                        if host:
+                            per_host_counts[host] += 1
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts = defaultdict(int)
@@ -1190,13 +1413,222 @@ class RuntimeCrawlStage(Stage):
             appended,
         )
 
+
+
+class TrimResultsStage(Stage):
+    name = "trim_results"
+
+    def execute(self, context: PipelineContext) -> None:
+        results_path = context.record.paths.results_jsonl
+        trimmed_path = context.record.paths.trimmed_results_jsonl
+        if not results_path.exists():
+            if trimmed_path.exists():
+                try:
+                    trimmed_path.unlink()
+                except OSError:
+                    pass
+            context.logger.info("No results available for trimming")
+            return
+
+        runtime = context.runtime_config
+        url_limit = max(runtime.trim_url_max_per_host, 0)
+        finding_limit = max(runtime.trim_finding_max_per_host, 0)
+        finding_min_score = max(runtime.trim_finding_min_score, 0)
+        tag_limit = max(runtime.trim_tag_per_host_limit, 0)
+
+        order = 0
+        url_best: Dict[str, tuple[int, int, Dict[str, object], str]] = {}
+        finding_buckets: Dict[str, List[tuple[int, int, Dict[str, object], str]]] = defaultdict(list)
+        low_priority_findings: List[Dict[str, object]] = []
+        other_entries: List[tuple[int, Dict[str, object]]] = []
+
+        stats: Dict[str, int] = {
+            "urls_total": 0,
+            "urls_unique": 0,
+            "urls_retained": 0,
+            "urls_dropped": 0,
+            "findings_total": 0,
+            "findings_retained": 0,
+            "findings_low_priority": 0,
+            "findings_dropped_limit": 0,
+        }
+
+        for entry in iter_jsonl(results_path):
+            if not isinstance(entry, dict):
+                continue
+            order += 1
+            etype = entry.get("type")
+            if etype == "url":
+                stats["urls_total"] += 1
+                cloned = self._clone_entry(entry)
+                host = self._extract_host(cloned)
+                if host and not cloned.get("hostname"):
+                    cloned["hostname"] = host
+                url_value = cloned.get("url")
+                if not isinstance(url_value, str):
+                    continue
+                score = self._coerce_int(cloned.get("score", 0))
+                existing = url_best.get(url_value)
+                host_key = host or ""
+                if existing:
+                    prev_score, prev_order, _, _ = existing
+                    if score > prev_score or (score == prev_score and order < prev_order):
+                        url_best[url_value] = (score, order, cloned, host_key)
+                else:
+                    url_best[url_value] = (score, order, cloned, host_key)
+                continue
+            if etype == "finding":
+                stats["findings_total"] += 1
+                score = self._coerce_int(entry.get("score", 0))
+                if score < finding_min_score:
+                    low_priority_findings.append(self._clone_entry(entry))
+                    stats["findings_low_priority"] += 1
+                    continue
+                cloned = self._clone_entry(entry)
+                host = cloned.get("hostname") or ""
+                bucket = finding_buckets[host]
+                item = (score, order, cloned, host)
+                if finding_limit > 0:
+                    if len(bucket) < finding_limit:
+                        heapq.heappush(bucket, item)
+                    else:
+                        worst = bucket[0]
+                        if score > worst[0] or (score == worst[0] and order < worst[1]):
+                            heapq.heapreplace(bucket, item)
+                            stats["findings_dropped_limit"] += 1
+                        else:
+                            stats["findings_dropped_limit"] += 1
+                else:
+                    bucket.append(item)
+                continue
+            other_entries.append((order, self._clone_entry(entry)))
+
+        per_host_urls: Dict[str, List[tuple[int, int, Dict[str, object]]]] = defaultdict(list)
+        for score, order_idx, entry_data, host in url_best.values():
+            bucket = host or "__unknown__"
+            per_host_urls[bucket].append((score, order_idx, entry_data))
+
+        selected_urls: List[tuple[int, Dict[str, object]]] = []
+        urls_dropped = 0
+        for entries in per_host_urls.values():
+            entries.sort(key=lambda item: (-item[0], item[1]))
+            limit = len(entries) if url_limit <= 0 else min(url_limit, len(entries))
+            keep = entries[:limit]
+            urls_dropped += len(entries) - len(keep)
+            for _, order_idx, entry_data in keep:
+                selected_urls.append((order_idx, entry_data))
+        stats["urls_unique"] = len(url_best)
+        stats["urls_retained"] = len(selected_urls)
+        stats["urls_dropped"] = urls_dropped
+
+        selected_findings: List[tuple[int, Dict[str, object]]] = []
+        for bucket in finding_buckets.values():
+            ordered = sorted(bucket, key=lambda item: (-item[0], item[1]))
+            for _, order_idx, entry_data, _ in ordered:
+                selected_findings.append((order_idx, entry_data))
+        stats["findings_retained"] = len(selected_findings)
+
+        final_entries = other_entries + selected_findings + selected_urls
+        final_entries.sort(key=lambda item: item[0])
+
+        tag_tracker: Dict[str, Counter] = defaultdict(Counter)
+        for _, entry in final_entries:
+            host = self._extract_host(entry)
+            if host:
+                self._apply_tag_limit(entry, host, tag_tracker, tag_limit)
+
+        with trimmed_path.open("w", encoding="utf-8") as handle:
+            for _, entry in final_entries:
+                json.dump(entry, handle, separators=(",", ":"), ensure_ascii=True)
+                handle.write("\n")
+
+        trim_dir = context.record.paths.ensure_subdir("trim")
+        low_priority_path = trim_dir / "low_priority_findings.jsonl"
+        if low_priority_findings:
+            with low_priority_path.open("w", encoding="utf-8") as handle:
+                for entry in low_priority_findings:
+                    json.dump(entry, handle, separators=(",", ":"), ensure_ascii=True)
+                    handle.write("\n")
+        elif low_priority_path.exists():
+            low_priority_path.unlink()
+
+        stats["entries_written"] = len(final_entries)
+        context.record.metadata.stats["trim"] = stats
+        context.manager.update_metadata(context.record)
+        context.logger.info(
+            "Trimmed results to %s entries (%s/%s URLs, %s/%s findings)",
+            stats["entries_written"],
+            stats["urls_retained"],
+            stats["urls_total"],
+            stats["findings_retained"],
+            stats["findings_total"],
+        )
+
+    @staticmethod
+    def _clone_entry(entry: Dict[str, object]) -> Dict[str, object]:
+        cloned = dict(entry)
+        tags = entry.get("tags")
+        if isinstance(tags, list):
+            cloned["tags"] = list(tags)
+        return cloned
+
+    @staticmethod
+    def _extract_host(entry: Dict[str, object]) -> str:
+        host = entry.get("hostname")
+        if isinstance(host, str) and host:
+            return host
+        url_value = entry.get("url")
+        if isinstance(url_value, str):
+            try:
+                parsed = urlparse(url_value)
+            except ValueError:
+                return ""
+            return parsed.hostname or ""
+        return ""
+
+    @staticmethod
+    def _apply_tag_limit(entry: Dict[str, object], host: str, tracker: Dict[str, Counter], limit: int) -> None:
+        if limit <= 0:
+            return
+        tags = entry.get("tags")
+        if not isinstance(tags, list) or not host:
+            return
+        counter = tracker.setdefault(host, Counter())
+        filtered: List[str] = []
+        mutated = False
+        for tag in tags:
+            count = counter[tag]
+            if count >= limit:
+                mutated = True
+                continue
+            counter[tag] = count + 1
+            filtered.append(tag)
+        if filtered:
+            if mutated:
+                entry["tags"] = filtered
+        else:
+            entry.pop("tags", None)
+
+    @staticmethod
+    def _coerce_int(value: object) -> int:
+        try:
+            return int(value) if value is not None else 0
+        except (TypeError, ValueError):
+            return 0
 class CorrelationStage(Stage):
     name = "correlation"
 
     def execute(self, context: PipelineContext) -> None:
         results_path = context.record.paths.results_jsonl
-        records = iter_jsonl(results_path)
+        trimmed_path = context.record.paths.trimmed_results_jsonl
         logger = context.logger
+        source_path = trimmed_path if trimmed_path.exists() else results_path
+        if trimmed_path.exists():
+            logger.info("Correlation using trimmed results (%s)", trimmed_path.name)
+        records = iter_jsonl(source_path)
+        if records is None:
+            logger.info("No results recorded; skipping correlation stage")
+            return
 
         graph = Graph()
         ip_hosts: Dict[str, set] = defaultdict(set)
@@ -1208,11 +1640,35 @@ class CorrelationStage(Stage):
         tag_histogram: Dict[str, Counter] = defaultdict(Counter)
 
         processed = 0
+        runtime = context.runtime_config
+        max_records = max(0, getattr(runtime, "correlation_max_records", 0))
+        svg_node_limit = max(0, getattr(runtime, "correlation_svg_node_limit", 0))
+        truncated = False
         urls_seen = 0
         api_path_total = 0
         seen_any = False
 
+        registered_hosts: Dict[str, Tuple[str, str]] = {}
+
+        def ensure_host(host: str) -> Tuple[str, str]:
+            if host in registered_hosts:
+                return registered_hosts[host]
+            root = root_domain(host)
+            graph.add_node("domain", root)
+            graph.add_node("subdomain", host)
+            graph.add_edge("subdomain", host, "belongs_to", "domain", root)
+            registered_hosts[host] = (root, host)
+            return registered_hosts[host]
+
         for entry in records:
+            if max_records and processed >= max_records:
+                truncated = True
+                logger.info(
+                    "Correlation truncated after %s records (limit=%s)",
+                    processed,
+                    max_records,
+                )
+                break
             seen_any = True
             processed += 1
             if processed % 5000 == 0:
@@ -1229,15 +1685,17 @@ class CorrelationStage(Stage):
                 host = entry.get("hostname")
                 if not host:
                     continue
-                graph.add_node("domain", host, tags=entry.get("tags"), sources=[entry.get("source")])
-                _ = features_by_host[host]
+                root, subdomain = ensure_host(host)
+                graph.add_node("domain", root, sources=[entry.get("source")])
+                graph.add_node("subdomain", subdomain, tags=entry.get("tags"))
+                _ = features_by_host[subdomain]
             elif etype == "asset":
                 host = entry.get("hostname")
                 ip = entry.get("ip")
                 if not host or not ip:
                     continue
-                graph.add_node("domain", host)
-                features = features_by_host[host]
+                root, subdomain = ensure_host(host)
+                features = features_by_host[subdomain]
                 graph.add_node(
                     "ip",
                     ip,
@@ -1245,35 +1703,36 @@ class CorrelationStage(Stage):
                     org=entry.get("org"),
                     country=entry.get("country"),
                 )
-                graph.add_edge("domain", host, "resolves_to", "ip", ip, source=entry.get("source"))
-                ip_hosts[ip].add(host)
+                graph.add_edge("subdomain", subdomain, "resolves_to", "ip", ip, source=entry.get("source"))
+                ip_hosts[ip].add(subdomain)
                 features["asn_score"] = max(features.get("asn_score", 0.0), compute_asn_score(entry.get("asn")))
                 asn = entry.get("asn")
                 if asn:
                     graph.add_node("asn", asn, org=entry.get("org"))
                     graph.add_edge("ip", ip, "belongs_to", "asn", asn)
-                    asn_hosts[asn].add(host)
+                    asn_hosts[asn].add(subdomain)
             elif etype == "asset_enrichment":
                 host = entry.get("hostname")
                 ip = entry.get("ip")
                 provider = entry.get("provider")
+                subdomain = None
                 if host:
-                    graph.add_node("domain", host)
+                    root, subdomain = ensure_host(host)
                 if ip:
                     graph.add_node("ip", ip)
-                if host and ip:
-                    graph.add_edge("domain", host, "resolves_to", "ip", ip)
-                if provider and host:
+                if subdomain and ip:
+                    graph.add_edge("subdomain", subdomain, "resolves_to", "ip", ip)
+                if provider and subdomain:
                     graph.add_node("provider", provider)
-                    graph.add_edge("domain", host, "served_by", "provider", provider)
-                    provider_hosts[provider].add(host)
+                    graph.add_edge("subdomain", subdomain, "served_by", "provider", provider)
+                    provider_hosts[provider].add(subdomain)
             elif etype == "url":
                 url = entry.get("url")
                 if not url:
                     continue
                 urls_seen += 1
                 host = entry.get("hostname") or urlparse(url).hostname
-                tags = entry.get("tags", [])
+                tags = list(entry.get("tags", []))
                 graph.add_node(
                     "url",
                     url,
@@ -1281,52 +1740,68 @@ class CorrelationStage(Stage):
                     tags=tags,
                     priority=entry.get("priority"),
                 )
+                subdomain = None
                 if host:
-                    graph.add_node("domain", host)
-                    graph.add_edge("domain", host, "serves", "url", url, status=entry.get("status_code"))
-                    features = features_by_host[host]
+                    root, subdomain = ensure_host(host)
+                    graph.add_edge("subdomain", subdomain, "serves", "url", url, status=entry.get("status_code"))
+                    features = features_by_host[subdomain]
                     features["url_count"] = features.get("url_count", 0.0) + 1.0
                 parsed = urlparse(url)
                 if parsed.path.endswith(".js"):
                     graph.add_edge("url", url, "category", "resource", "javascript")
                 if "/api" in (parsed.path or ""):
-                    endpoint_host = host or parsed.netloc or ""
+                    endpoint_host = subdomain or parsed.netloc or ""
                     if endpoint_host:
+                        if endpoint_host != subdomain:
+                            _, endpoint_host = ensure_host(endpoint_host)
                         path_value = parsed.path or "/"
                         paths = api_endpoints[endpoint_host]
                         if path_value not in paths:
                             paths.add(path_value)
                             api_path_total += 1
-                        graph.add_edge("domain", endpoint_host, "exposes_api", "endpoint", path_value)
+                        graph.add_edge("subdomain", endpoint_host, "exposes_api", "endpoint", path_value)
                         features_by_host[endpoint_host]["has_api"] = 1.0
-                    tags = set(tags)
-                    tags.add("service:api")
-                    entry_tags = list(tags)
-                    graph.add_node("url", url, tags=entry_tags)
+                    if "service:api" not in tags:
+                        tags.append("service:api")
+                    graph.add_node("url", url, tags=tags)
                 if tags:
-                    if host:
-                        tag_histogram[host].update(tags)
+                    if subdomain:
+                        tag_histogram[subdomain].update(tags)
                         if any(tag in {"surface:login", "service:sso", "surface:admin"} for tag in tags):
-                            features_by_host[host]["has_login"] = 1.0
+                            features_by_host[subdomain]["has_login"] = 1.0
+                    for tag in tags:
+                        graph.add_node("tag", tag)
+                        graph.add_edge("url", url, "tag", "tag", tag)
+                        if subdomain:
+                            graph.add_edge("subdomain", subdomain, "has_tag", "tag", tag)
                 if parsed.query:
                     params = {name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
                     if params:
                         graph.add_edge("url", url, "has_params", "param_group", ",".join(sorted(params)))
                 server = entry.get("server")
                 if server:
-                    tech_counter[f"server:{server.lower()}"] += 1
+                    tech_label = server.lower()
+                    graph.add_node("tech", tech_label)
+                    graph.add_edge("url", url, "served_by", "tech", tech_label)
+                    if subdomain:
+                        graph.add_edge("subdomain", subdomain, "uses", "tech", tech_label)
+                    tech_counter[f"server:{tech_label}"] += 1
                 for tag in entry.get("tags", []):
                     if tag.startswith("service:") or tag.startswith("env:"):
                         tech_counter[tag] += 1
+                        graph.add_node("tag", tag)
+                        graph.add_edge("url", url, "tag", "tag", tag)
+                        if subdomain:
+                            graph.add_edge("subdomain", subdomain, "has_tag", "tag", tag)
             elif etype == "finding":
                 description = entry.get("description") or entry.get("url") or entry.get("hostname") or "finding"
                 finding_id = f"{entry.get('source','finding')}::{hash(description)}"
                 graph.add_node("finding", finding_id, description=description, priority=entry.get("priority"), score=entry.get("score"))
                 host = entry.get("hostname")
                 if host:
-                    graph.add_node("domain", host)
-                    graph.add_edge("finding", finding_id, "impacts", "domain", host)
-                    features = features_by_host[host]
+                    root, subdomain = ensure_host(host)
+                    graph.add_edge("finding", finding_id, "impacts", "subdomain", subdomain)
+                    features = features_by_host[subdomain]
                     features["finding_count"] = features.get("finding_count", 0.0) + 1.0
                     source = str(entry.get("source", ""))
                     if source.startswith("active-js-secrets") or source.startswith("secrets"):
@@ -1352,7 +1827,26 @@ class CorrelationStage(Stage):
 
         artifacts_dir = context.record.paths.ensure_subdir("correlation")
         graph_path = artifacts_dir / "graph.json"
-        graph.save(graph_path)
+        try:
+            graph.save(graph_path)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to save correlation graph JSON: %s", exc)
+            graph_path = None
+        svg_path = artifacts_dir / "graph.svg"
+        node_count = graph.node_count()
+        svg_generated = False
+        if svg_node_limit and node_count > svg_node_limit:
+            logger.info(
+                "Skipping SVG generation; node count %s exceeds limit %s",
+                node_count,
+                svg_node_limit,
+            )
+        else:
+            try:
+                svg_generated = graph.save_svg(svg_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to render correlation SVG: %s", exc)
+                svg_generated = False
 
         clusters = {
             "ip": [
@@ -1384,15 +1878,37 @@ class CorrelationStage(Stage):
             (artifacts_dir / "api_endpoints.json").write_text(
                 json.dumps(api_report, indent=2, sort_keys=True), encoding="utf-8"
             )
+        api_clusters = [
+            {"subdomain": host, "paths": sorted(paths), "count": len(paths)}
+            for host, paths in api_endpoints.items()
+            if len(paths) > 1
+        ]
+        api_clusters.sort(key=lambda item: item["count"], reverse=True)
+
+        provider_common = [
+            {"provider": provider, "hosts": sorted(hosts), "count": len(hosts)}
+            for provider, hosts in provider_hosts.items()
+        ]
+        provider_common.sort(key=lambda item: item["count"], reverse=True)
+
+        top_nodes = graph.top_connected(limit=10)
 
         correlation_summary = {
-            "graph_nodes": graph.node_count(),
+            "graph_nodes": node_count,
             "graph_edges": graph.edge_count(),
             "ip_clusters": len(clusters["ip"]),
             "asn_clusters": len(clusters["asn"]),
             "provider_clusters": len(clusters["provider"]),
             "api_hosts": len(api_report),
+            "top_nodes": top_nodes,
+            "top_api_clusters": api_clusters[:10],
+            "common_providers": provider_common[:10],
+            "truncated": truncated,
+            "max_records": max_records,
+            "processed": processed,
         }
+        if svg_generated:
+            correlation_summary["graph_svg"] = str(svg_path)
         (artifacts_dir / "correlation_report.json").write_text(
             json.dumps(
                 {
@@ -1715,6 +2231,9 @@ class FinalizeStage(Stage):
         summary.generate_summary(context)
 
 
+from recon_cli.pipeline.stage_idor import IDORStage
+from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage
+
 PIPELINE_STAGES: List[Stage] = [
     NormalizeStage(),
     PassiveEnumerationStage(),
@@ -1723,10 +2242,13 @@ PIPELINE_STAGES: List[Stage] = [
     EnrichmentStage(),
     HttpProbeStage(),
     ScoringStage(),
+    IDORStage(),
+    AuthMatrixStage(),
     FuzzStage(),
     ActiveIntelligenceStage(),
     SecretsDetectionStage(),
     RuntimeCrawlStage(),
+    TrimResultsStage(),
     CorrelationStage(),
     LearningStage(),
     ScannerStage(),
