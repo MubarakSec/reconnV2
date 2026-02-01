@@ -6,6 +6,8 @@
 ![Kali](https://img.shields.io/badge/Kali-Linux-557C94.svg)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+[![CI/CD](https://github.com/username/reconnv2/workflows/CI/badge.svg)](https://github.com/username/reconnv2/actions)
+[![codecov](https://codecov.io/gh/username/reconnv2/branch/main/graph/badge.svg)](https://codecov.io/gh/username/reconnv2)
 
 **أداة استطلاع أمني متقدمة ومؤتمتة لاكتشاف الثغرات والأصول**
 
@@ -13,6 +15,8 @@
 [الاستخدام](#-الاستخدام) •
 [الواجهات](#-طرق-الاستخدام-المتعددة) •
 [المراحل](#-مراحل-الفحص) •
+[Dashboard](#-لوحة-التحكم) •
+[API](#-rest-api) •
 [Docker](#-docker)
 
 </div>
@@ -32,10 +36,38 @@ reconnV2/
 ├── 🐳 Dockerfile           # صورة Docker
 ├── 🐳 docker-compose.yml   # تكوين Docker Compose
 ├── 📁 recon_cli/           # الكود الرئيسي
+│   ├── cli.py              # واجهة سطر الأوامر
+│   ├── api.py              # REST API
+│   ├── pipeline/           # مراحل الفحص
+│   ├── web/                # لوحة التحكم
+│   ├── plugins/            # نظام الإضافات
+│   ├── db/                 # قاعدة البيانات
+│   └── utils/              # أدوات مساعدة
 ├── 📁 config/              # ملفات التكوين
 ├── 📁 jobs/                # نتائج الفحص
+├── 📁 docs/                # التوثيق
+│   ├── API.md              # توثيق REST API
+│   ├── CLI.md              # مرجع الأوامر
+│   └── PLUGINS.md          # دليل الإضافات
 └── 📁 tests/               # الاختبارات
 ```
+
+---
+
+## ✨ الميزات الجديدة (2026)
+
+| الميزة | الوصف |
+|--------|-------|
+| 🌐 **لوحة تحكم ويب** | واجهة رسومية حديثة مع RTL عربي |
+| 📊 **REST API** | API كامل لإدارة الفحص |
+| 📄 **تقارير PDF** | تقارير مهنية بدعم العربية |
+| 🔔 **إشعارات متعددة** | Telegram, Slack, Discord, Email |
+| 🗄️ **قاعدة بيانات** | SQLite لحفظ النتائج |
+| 🔌 **نظام إضافات** | قابل للتوسيع بسهولة |
+| ⚡ **Rate Limiter** | تحكم في سرعة الطلبات |
+| 💾 **Cache** | تخزين مؤقت ذكي |
+| 🔒 **كشف الأسرار** | اكتشاف API Keys و Tokens |
+| 🤖 **CI/CD** | GitHub Actions للاختبار التلقائي |
 
 ---
 
@@ -269,6 +301,198 @@ recon-cli scan sensitive-target.com --profile stealth --inline
 
 ---
 
+## 🌐 لوحة التحكم
+
+```bash
+# تشغيل لوحة التحكم
+recon dashboard
+
+# منفذ مخصص
+recon dashboard --port 9000
+
+# افتح في المتصفح
+# http://localhost:8080
+```
+
+### مميزات لوحة التحكم:
+- 📊 إحصائيات مباشرة (Hosts, URLs, Vulns, Secrets)
+- 📋 قائمة الوظائف مع حالتها
+- 🔍 تصفية وبحث متقدم
+- 📥 تحميل التقارير (HTML, PDF, JSON)
+- 🌙 دعم RTL للعربية
+- 🔄 تحديث تلقائي
+
+---
+
+## 🔌 REST API
+
+```bash
+# تشغيل الخادم
+recon serve --port 8000
+```
+
+### الـ Endpoints:
+
+| Method | Endpoint | الوصف |
+|--------|----------|-------|
+| GET | `/api/status` | حالة الخادم |
+| GET | `/api/stats` | الإحصائيات |
+| GET | `/api/jobs` | قائمة الوظائف |
+| POST | `/api/scan` | بدء فحص جديد |
+| GET | `/api/jobs/{id}` | تفاصيل وظيفة |
+| GET | `/api/jobs/{id}/results` | نتائج الفحص |
+| GET | `/api/jobs/{id}/report` | تحميل التقرير |
+
+### مثال Python:
+
+```python
+import requests
+
+# بدء فحص
+response = requests.post(
+    "http://localhost:8000/api/scan",
+    json={"target": "example.com", "profile": "bugbounty"}
+)
+job_id = response.json()["job_id"]
+
+# جلب النتائج
+results = requests.get(f"http://localhost:8000/api/jobs/{job_id}/results")
+print(results.json())
+```
+
+📖 التوثيق الكامل: [docs/API.md](docs/API.md)
+
+---
+
+## 📄 تقارير PDF
+
+```bash
+# تقرير PDF
+recon pdf <job_id>
+
+# تقرير بالعربية (RTL)
+recon pdf <job_id> --rtl
+
+# مع logo مخصص
+recon pdf <job_id> --logo logo.png
+
+# تقرير تنفيذي فقط
+recon pdf <job_id> --executive-only
+```
+
+---
+
+## 🔔 الإشعارات
+
+### Telegram
+```bash
+export TELEGRAM_BOT_TOKEN="your_token"
+export TELEGRAM_CHAT_ID="your_chat_id"
+
+recon notify "تم اكتشاف ثغرة!" --channel telegram
+```
+
+### Slack
+```bash
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/..."
+recon notify "Scan completed" --channel slack
+```
+
+### Discord
+```bash
+export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+recon notify "New vulnerability found" --channel discord
+```
+
+---
+
+## 🔌 نظام الإضافات
+
+```bash
+# عرض الإضافات المتاحة
+recon plugins
+
+# تشغيل إضافة
+recon run-plugin MyScanner --target example.com
+```
+
+### أنواع الإضافات:
+
+| النوع | الوصف |
+|-------|-------|
+| Scanner | ماسحات مخصصة |
+| Enricher | إثراء البيانات |
+| Reporter | صيغ تقارير |
+| Notifier | قنوات إشعارات |
+
+📖 دليل التطوير: [docs/PLUGINS.md](docs/PLUGINS.md)
+
+---
+
+## 🗄️ قاعدة البيانات
+
+```bash
+# تهيئة قاعدة البيانات
+recon db-init
+
+# عرض الإحصائيات
+recon db-stats
+```
+
+---
+
+## 🤖 CI/CD (التكامل المستمر)
+
+المشروع يستخدم **GitHub Actions** للاختبار والبناء التلقائي.
+
+### ما هو CI/CD؟
+
+**CI (Continuous Integration)** - التكامل المستمر:
+- يفحص الكود تلقائياً عند كل commit
+- يشغل الاختبارات
+- يتحقق من جودة الكود
+
+**CD (Continuous Deployment)** - النشر المستمر:
+- يبني الحزم تلقائياً
+- يبني صور Docker
+- ينشر الإصدارات الجديدة
+
+### الـ Workflow:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Push/PR → Lint → Test → Security → Build → Deploy     │
+└─────────────────────────────────────────────────────────┘
+```
+
+| المرحلة | الوصف |
+|---------|-------|
+| **Lint** | فحص الكود (Ruff, MyPy) |
+| **Test** | تشغيل الاختبارات (pytest) |
+| **Security** | فحص أمني (Bandit, Safety) |
+| **Build** | بناء الحزمة |
+| **Docker** | بناء صورة Docker |
+| **Release** | نشر الإصدار |
+
+### ملف الـ Workflow:
+
+📄 [.github/workflows/ci.yml](.github/workflows/ci.yml)
+
+```yaml
+# يعمل عند كل push أو pull request
+on: [push, pull_request]
+
+jobs:
+  lint:     # فحص الكود
+  test:     # الاختبارات (Python 3.10-3.12, Linux/Windows/Mac)
+  security: # فحص أمني
+  build:    # بناء الحزمة
+  docker:   # بناء Docker
+  release:  # نشر الإصدار
+```
+
+---
+
 ## 🛠️ إدارة المهام
 
 ```bash
@@ -446,6 +670,37 @@ python -c "import recon_cli; print('OK')"
 ## 📄 License
 
 MIT License - استخدم بمسؤولية وأخلاقية فقط.
+
+---
+
+## 📚 التوثيق الكامل
+
+| الملف | الوصف |
+|-------|-------|
+| [docs/CLI.md](docs/CLI.md) | مرجع أوامر سطر الأوامر |
+| [docs/API.md](docs/API.md) | توثيق REST API |
+| [docs/PLUGINS.md](docs/PLUGINS.md) | دليل تطوير الإضافات |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | دليل المساهمة |
+
+---
+
+## 🤝 المساهمة
+
+نرحب بمساهماتكم! راجع [CONTRIBUTING.md](CONTRIBUTING.md) للتفاصيل.
+
+```bash
+# Fork & Clone
+git clone https://github.com/YOUR_USERNAME/reconnv2.git
+
+# Create Branch
+git checkout -b feature/amazing-feature
+
+# Commit
+git commit -m "feat: add amazing feature"
+
+# Push & PR
+git push origin feature/amazing-feature
+```
 
 ---
 

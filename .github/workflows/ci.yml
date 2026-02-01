@@ -1,0 +1,274 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # ============================================
+  # Lint and Code Quality
+  # ============================================
+  lint:
+    name: 🔍 Lint & Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+          pip install -e ".[dev]" || pip install -e .
+      
+      - name: 🔍 Run Ruff (linting)
+        run: |
+          ruff check recon_cli/ --output-format=github || true
+      
+      - name: 🔍 Run Ruff (formatting)
+        run: |
+          ruff format --check recon_cli/ || true
+      
+      - name: 📝 Run MyPy (type checking)
+        run: |
+          mypy recon_cli/ --ignore-missing-imports || true
+
+  # ============================================
+  # Unit Tests
+  # ============================================
+  test:
+    name: 🧪 Tests (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+        include:
+          - os: windows-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.11"
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov pytest-asyncio
+          pip install -e ".[dev]" || pip install -e .
+      
+      - name: 🧪 Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=recon_cli --cov-report=xml --cov-report=term-missing
+      
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest'
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ============================================
+  # Security Scan
+  # ============================================
+  security:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+          pip install -e . || true
+      
+      - name: 🔒 Run Bandit (security linter)
+        run: |
+          bandit -r recon_cli/ -f json -o bandit-report.json || true
+          bandit -r recon_cli/ -ll || true
+      
+      - name: 🔒 Run Safety (dependency check)
+        run: |
+          safety check --full-report || true
+
+  # ============================================
+  # Build Package
+  # ============================================
+  build:
+    name: 📦 Build Package
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+      
+      - name: 🔨 Build package
+        run: |
+          python -m build
+      
+      - name: 📤 Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ============================================
+  # Docker Build
+  # ============================================
+  docker:
+    name: 🐳 Docker Build
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: 🔨 Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: reconnv2:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================
+  # Integration Tests
+  # ============================================
+  integration:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name == 'push'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -e .
+      
+      - name: 🔗 Run integration tests
+        run: |
+          pytest tests/smoke/ -v || true
+      
+      - name: 🧪 Test CLI commands
+        run: |
+          python -m recon_cli --help
+          python -m recon_cli jobs list || true
+
+  # ============================================
+  # Documentation
+  # ============================================
+  docs:
+    name: 📚 Build Documentation
+    runs-on: ubuntu-latest
+    needs: [lint]
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mkdocs mkdocs-material mkdocstrings[python] || true
+          pip install -e . || true
+      
+      - name: 📚 Build docs
+        run: |
+          if [ -f mkdocs.yml ]; then
+            mkdocs build
+          else
+            echo "No mkdocs.yml found, skipping docs build"
+          fi
+
+  # ============================================
+  # Release (on tag)
+  # ============================================
+  release:
+    name: 🚀 Create Release
+    runs-on: ubuntu-latest
+    needs: [build, test, security]
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 📥 Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}

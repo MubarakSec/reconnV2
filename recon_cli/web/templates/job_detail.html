@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تفاصيل المهمة - ReconnV2</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #6366f1;
+            --secondary-color: #8b5cf6;
+            --success-color: #22c55e;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --info-color: #3b82f6;
+            --dark-bg: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+        }
+        
+        body {
+            background: var(--dark-bg);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
+        }
+        
+        .card {
+            background: var(--card-bg);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .info-item {
+            background: var(--dark-bg);
+            padding: 1rem;
+            border-radius: 10px;
+        }
+        
+        .info-item .label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-bottom: 0.3rem;
+        }
+        
+        .info-item .value {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        .results-section {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        
+        .result-item {
+            background: var(--dark-bg);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-right: 4px solid var(--primary-color);
+        }
+        
+        .result-item.host { border-right-color: var(--info-color); }
+        .result-item.url { border-right-color: var(--success-color); }
+        .result-item.vulnerability { border-right-color: var(--danger-color); }
+        .result-item.secret { border-right-color: var(--warning-color); }
+        
+        .severity-critical { color: #dc2626; }
+        .severity-high { color: #ea580c; }
+        .severity-medium { color: #f59e0b; }
+        .severity-low { color: #22c55e; }
+        .severity-info { color: #3b82f6; }
+        
+        .badge-type {
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .badge-host { background: var(--info-color); }
+        .badge-url { background: var(--success-color); }
+        .badge-vulnerability { background: var(--danger-color); }
+        .badge-secret { background: var(--warning-color); }
+        
+        .progress-stages {
+            display: flex;
+            overflow-x: auto;
+            gap: 0.5rem;
+            padding: 1rem 0;
+        }
+        
+        .stage-item {
+            background: var(--dark-bg);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            white-space: nowrap;
+            font-size: 0.85rem;
+        }
+        
+        .stage-item.completed {
+            background: var(--success-color);
+            color: white;
+        }
+        
+        .stage-item.current {
+            background: var(--primary-color);
+            color: white;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .btn-action {
+            border-radius: 10px;
+            padding: 0.6rem 1.5rem;
+        }
+        
+        .table {
+            color: var(--text-primary);
+        }
+        
+        .table th, .table td {
+            border-color: rgba(255,255,255,0.1);
+        }
+        
+        pre {
+            background: var(--dark-bg);
+            padding: 1rem;
+            border-radius: 10px;
+            color: var(--text-primary);
+            overflow-x: auto;
+        }
+        
+        .nav-tabs .nav-link {
+            color: var(--text-secondary);
+            border: none;
+            padding: 1rem 1.5rem;
+        }
+        
+        .nav-tabs .nav-link.active {
+            background: var(--primary-color);
+            color: white;
+            border-radius: 10px 10px 0 0;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="/">
+                <i class="bi bi-shield-check me-2"></i>ReconnV2
+            </a>
+            <div class="navbar-nav me-auto">
+                <a class="nav-link" href="/"><i class="bi bi-house me-1"></i> الرئيسية</a>
+                <a class="nav-link" href="/jobs"><i class="bi bi-list-task me-1"></i> المهام</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2><i class="bi bi-file-earmark-code me-2"></i>تفاصيل المهمة</h2>
+                <code class="text-secondary">{{ job.id }}</code>
+            </div>
+            <div>
+                <a href="/jobs/{{ job.id }}/report" class="btn btn-success btn-action me-2">
+                    <i class="bi bi-file-earmark-text me-1"></i> تقرير HTML
+                </a>
+                <a href="/api/jobs/{{ job.id }}/results" class="btn btn-outline-light btn-action">
+                    <i class="bi bi-download me-1"></i> JSON
+                </a>
+            </div>
+        </div>
+
+        <!-- Job Info -->
+        <div class="card p-4 mb-4">
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="label">الحالة</div>
+                    <div class="value">
+                        <span class="badge bg-{{ 'success' if job.status == 'finished' else 'warning' if job.status == 'running' else 'secondary' }}">
+                            {{ job.status }}
+                        </span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="label">الهدف</div>
+                    <div class="value">{{ job.target or 'N/A' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">البروفايل</div>
+                    <div class="value">{{ job.profile or 'passive' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">وقت البدء</div>
+                    <div class="value">{{ job.started_at or 'لم يبدأ' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">وقت الانتهاء</div>
+                    <div class="value">{{ job.finished_at or 'لم ينتهِ' }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">المرحلة الحالية</div>
+                    <div class="value">{{ job.stage or 'N/A' }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        {% if job.stats %}
+        <div class="card p-4 mb-4">
+            <h5 class="mb-3"><i class="bi bi-bar-chart me-2"></i>الإحصائيات</h5>
+            <div class="row g-3">
+                {% for key, value in job.stats.items() %}
+                <div class="col-md-3 col-6">
+                    <div class="info-item text-center">
+                        <div class="value">{{ value }}</div>
+                        <div class="label">{{ key }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Results Tabs -->
+        <div class="card">
+            <ul class="nav nav-tabs p-3 pb-0" role="tablist">
+                <li class="nav-item">
+                    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#hosts">
+                        <i class="bi bi-hdd-network me-1"></i> المضيفين ({{ results.hosts|length }})
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#urls">
+                        <i class="bi bi-link-45deg me-1"></i> الروابط ({{ results.urls|length }})
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#vulns">
+                        <i class="bi bi-bug me-1"></i> الثغرات ({{ results.vulnerabilities|length }})
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#secrets">
+                        <i class="bi bi-key me-1"></i> الأسرار ({{ results.secrets|length }})
+                    </button>
+                </li>
+            </ul>
+            
+            <div class="tab-content p-4">
+                <!-- Hosts Tab -->
+                <div class="tab-pane fade show active" id="hosts">
+                    {% if results.hosts %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>المضيف</th>
+                                    <th>IP</th>
+                                    <th>المصدر</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for host in results.hosts[:50] %}
+                                <tr>
+                                    <td>{{ host.hostname or host.host }}</td>
+                                    <td>{{ host.ip or 'N/A' }}</td>
+                                    <td>{{ host.source or 'N/A' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if results.hosts|length > 50 %}
+                    <p class="text-secondary text-center">... و {{ results.hosts|length - 50 }} آخرين</p>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-center text-secondary py-4">لا توجد مضيفين</p>
+                    {% endif %}
+                </div>
+                
+                <!-- URLs Tab -->
+                <div class="tab-pane fade" id="urls">
+                    {% if results.urls %}
+                    {% for url in results.urls[:50] %}
+                    <div class="result-item url">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <a href="{{ url.url }}" target="_blank" class="text-decoration-none">
+                                    {{ url.url }}
+                                </a>
+                                <div class="text-secondary small mt-1">
+                                    Status: {{ url.status_code or 'N/A' }} | 
+                                    Server: {{ url.server or 'N/A' }}
+                                </div>
+                            </div>
+                            <span class="badge badge-type badge-url">URL</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="text-center text-secondary py-4">لا توجد روابط</p>
+                    {% endif %}
+                </div>
+                
+                <!-- Vulnerabilities Tab -->
+                <div class="tab-pane fade" id="vulns">
+                    {% if results.vulnerabilities %}
+                    {% for vuln in results.vulnerabilities %}
+                    <div class="result-item vulnerability">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong class="severity-{{ vuln.severity or 'info' }}">
+                                    {{ vuln.name or vuln.template_id or 'Unknown' }}
+                                </strong>
+                                <div class="text-secondary small mt-1">
+                                    {{ vuln.host or vuln.url or 'N/A' }}
+                                </div>
+                                {% if vuln.description %}
+                                <p class="mt-2 mb-0 small">{{ vuln.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge bg-{{ 'danger' if vuln.severity == 'critical' else 'warning' if vuln.severity == 'high' else 'info' }}">
+                                {{ vuln.severity or 'info' }}
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="text-center text-secondary py-4">لا توجد ثغرات</p>
+                    {% endif %}
+                </div>
+                
+                <!-- Secrets Tab -->
+                <div class="tab-pane fade" id="secrets">
+                    {% if results.secrets %}
+                    {% for secret in results.secrets %}
+                    <div class="result-item secret">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>{{ secret.type or 'Secret' }}</strong>
+                                <div class="text-secondary small mt-1">
+                                    {{ secret.file or secret.url or 'N/A' }}
+                                </div>
+                                <code class="d-block mt-2">{{ secret.match or secret.value or '***REDACTED***' }}</code>
+                            </div>
+                            <span class="badge badge-type badge-secret">Secret</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="text-center text-secondary py-4">لا توجد أسرار</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -559,6 +559,187 @@ def serve(
         typer.echo("❌ FastAPI/Uvicorn not installed. Run: pip install fastapi uvicorn", err=True)
         raise typer.Exit(code=1)
 
+
+@app.command("dashboard")
+def dashboard(
+    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind"),
+    port: int = typer.Option(8080, "--port", help="Port to bind"),
+) -> None:
+    """Start the web dashboard."""
+    try:
+        from recon_cli.web.app import run_dashboard
+        run_dashboard(host=host, port=port)
+    except ImportError as e:
+        typer.echo(f"❌ Missing dependencies: {e}", err=True)
+        typer.echo("Run: pip install fastapi uvicorn jinja2", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command("notify")
+def notify(
+    message: str = typer.Argument(..., help="Message to send"),
+    channel: str = typer.Option("telegram", "--channel", "-c", help="Channel: telegram, slack, discord, email"),
+) -> None:
+    """Send a notification to configured channels."""
+    from recon_cli.utils.notify import NotificationManager, NotificationConfig
+    
+    # Load config from environment or defaults
+    import os
+    cfg = NotificationConfig(
+        telegram_token=os.environ.get("TELEGRAM_TOKEN"),
+        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
+        slack_webhook_url=os.environ.get("SLACK_WEBHOOK_URL"),
+        discord_webhook_url=os.environ.get("DISCORD_WEBHOOK_URL"),
+    )
+    
+    manager = NotificationManager(cfg)
+    results = manager.send(message, channels=[channel])
+    
+    for ch, success in results.items():
+        if success:
+            typer.secho(f"✅ {ch}: Message sent", fg=typer.colors.GREEN)
+        else:
+            typer.secho(f"❌ {ch}: Failed to send", fg=typer.colors.RED)
+
+
+@app.command("db-init")
+def db_init() -> None:
+    """Initialize the SQLite database."""
+    from recon_cli.db.models import init_db, get_db_path
+    init_db()
+    typer.secho(f"✅ Database initialized at {get_db_path()}", fg=typer.colors.GREEN)
+
+
+@app.command("db-stats")
+def db_stats() -> None:
+    """Show database statistics."""
+    from recon_cli.db.storage import get_dashboard_stats
+    stats = get_dashboard_stats()
+    
+    rich_print("[bold]📊 Database Statistics[/bold]")
+    rich_print("\n[bold]Jobs:[/bold]")
+    for status, count in stats.get("jobs", {}).items():
+        rich_print(f"  {status}: {count}")
+    
+    rich_print("\n[bold]Vulnerabilities:[/bold]")
+    for severity, count in stats.get("vulnerabilities", {}).items():
+        rich_print(f"  {severity}: {count}")
+
+
+@app.command("optimize")
+def optimize() -> None:
+    """Run performance optimizations."""
+    from recon_cli.utils.performance import optimize_memory, get_pool
+    
+    rich_print("[bold]🔧 Running optimizations...[/bold]")
+    
+    # Memory optimization
+    result = optimize_memory()
+    rich_print(f"  Resources cleaned: {result['resources_cleaned']}")
+    
+    # Pool stats
+    pool = get_pool()
+    pool_stats = pool.stats()
+    rich_print(f"  Active sessions: {pool_stats['active_sessions']}")
+    
+    typer.secho("✅ Optimization complete", fg=typer.colors.GREEN)
+
+
+@app.command("pdf")
+def pdf_report(
+    job_id: str = typer.Argument(..., help="Job ID to generate PDF report for"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
+    title: str = typer.Option("تقرير الاستطلاع الأمني", "--title", help="Report title"),
+) -> None:
+    """Generate PDF report for a job."""
+    from recon_cli.utils.pdf_reporter import generate_pdf_report, PDFReportConfig
+    
+    manager = JobManager()
+    record = manager.load_job(job_id)
+    
+    if not record:
+        typer.echo(f"Job {job_id} not found", err=True)
+        raise typer.Exit(code=3)
+    
+    job_path = record.path
+    
+    config = PDFReportConfig(
+        title=title,
+        company_name="ReconnV2"
+    )
+    
+    try:
+        pdf_path = generate_pdf_report(job_path, output, config)
+        typer.secho(f"✅ PDF report generated: {pdf_path}", fg=typer.colors.GREEN)
+    except RuntimeError as e:
+        typer.secho(f"❌ Error: {e}", fg=typer.colors.RED)
+        typer.secho("💡 Install dependencies with: pip install weasyprint reportlab", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+
+@app.command("plugins")
+def list_plugins(
+    plugin_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by type: scanner, enricher, reporter, notifier"),
+) -> None:
+    """List available plugins."""
+    from recon_cli.plugins import get_registry, PluginType
+    
+    registry = get_registry()
+    registry.setup()
+    
+    type_filter = None
+    if plugin_type:
+        try:
+            type_filter = PluginType(plugin_type.lower())
+        except ValueError:
+            typer.secho(f"Invalid type: {plugin_type}", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+    
+    plugins = registry.loader.list_plugins(plugin_type=type_filter)
+    
+    if not plugins:
+        typer.secho("No plugins found", fg=typer.colors.YELLOW)
+        return
+    
+    rich_print("[bold]📦 Available Plugins[/bold]")
+    for meta in plugins:
+        rich_print(f"\n[bold cyan]{meta.name}[/bold cyan] v{meta.version}")
+        rich_print(f"  Type: {meta.plugin_type.value}")
+        rich_print(f"  Description: {meta.description}")
+        rich_print(f"  Author: {meta.author}")
+        if meta.tags:
+            rich_print(f"  Tags: {', '.join(meta.tags)}")
+
+
+@app.command("run-plugin")
+def run_plugin(
+    name: str = typer.Argument(..., help="Plugin name to run"),
+    target: Optional[str] = typer.Option(None, "--target", "-t", help="Target for scanner plugins"),
+    message: Optional[str] = typer.Option(None, "--message", "-m", help="Message for notifier plugins"),
+) -> None:
+    """Run a plugin."""
+    from recon_cli.plugins import get_registry
+    
+    registry = get_registry()
+    registry.setup()
+    
+    context = {}
+    if target:
+        context["target"] = target
+    if message:
+        context["message"] = message
+    
+    result = registry.loader.execute_plugin(name, context)
+    
+    if result.success:
+        typer.secho(f"✅ Plugin executed successfully", fg=typer.colors.GREEN)
+        if result.data:
+            rich_print(f"  Result: {result.data}")
+        rich_print(f"  Execution time: {result.execution_time:.2f}s")
+    else:
+        typer.secho(f"❌ Plugin failed: {result.error}", fg=typer.colors.RED)
+
+
 def main() -> None:
     app()
 
