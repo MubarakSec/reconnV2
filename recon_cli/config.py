@@ -20,6 +20,7 @@ LOG_LEVEL = getattr(logging, LOG_LEVEL_NAME, logging.INFO)
 LOG_FORMAT = os.environ.get("RECON_LOG_FORMAT", "text").lower()
 
 RECON_HOME: Path = _default_home()
+CONFIG_DIR: Path = RECON_HOME / "config"
 JOBS_ROOT: Path = RECON_HOME / "jobs"
 QUEUED_JOBS: Path = JOBS_ROOT / "queued"
 RUNNING_JOBS: Path = JOBS_ROOT / "running"

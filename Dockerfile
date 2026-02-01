@@ -37,7 +37,6 @@ RUN apt-get update && apt-get install -y \
     nuclei \
     httpx-toolkit \
     naabu \
-    dalfox \
     sqlmap \
     wpscan \
     whatweb \
@@ -53,7 +52,8 @@ RUN go install github.com/tomnomnom/waybackurls@latest && \
     go install github.com/lc/gau/v2/cmd/gau@latest && \
     go install github.com/projectdiscovery/httpx/cmd/httpx@latest && \
     go install github.com/projectdiscovery/uncover/cmd/uncover@latest && \
-    go install github.com/projectdiscovery/katana/cmd/katana@latest
+    go install github.com/projectdiscovery/katana/cmd/katana@latest && \
+    go install github.com/hahwul/dalfox/v2@latest
 
 # Create app directory
 WORKDIR /app
@@ -62,25 +62,25 @@ WORKDIR /app
 COPY pyproject.toml .
 
 # Create venv and install dependencies (including optional ones)
-RUN python3 -m venv /app/.venv && \
-    /app/.venv/bin/pip install --upgrade pip && \
-    /app/.venv/bin/pip install \
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install \
     typer rich requests numpy scikit-learn \
-    fastapi uvicorn pydantic pydantic-settings \
-    aiohttp psutil pyyaml jinja2 \
+    fastapi "uvicorn[standard]" pydantic pydantic-settings \
+    aiohttp psutil pyyaml jinja2 websockets \
     weasyprint reportlab
 
 # Copy application
 COPY . .
 
 # Install the package
-RUN /app/.venv/bin/pip install -e .
+RUN /opt/venv/bin/pip install -e .
 
 # Create directories
 RUN mkdir -p jobs/{queued,running,finished,failed} config archive
 
 # Set environment
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH"
 ENV RECON_HOME=/app
 
 # Expose web dashboard port
