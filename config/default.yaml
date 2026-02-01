@@ -1,0 +1,251 @@
+# ReconnV2 Default Configuration
+# ================================
+# هذا الملف يحتوي على جميع الإعدادات الافتراضية
+# انسخه إلى settings.yaml وعدّل حسب حاجتك
+
+# معلومات التطبيق
+app_name: ReconnV2
+version: "1.0.0"
+debug: false
+
+# ═══════════════════════════════════════════════════════════
+#                     قاعدة البيانات
+# ═══════════════════════════════════════════════════════════
+database:
+  # مسار ملف SQLite
+  path: data/recon.db
+  
+  # حجم connection pool
+  pool_size: 5
+  
+  # timeout للاستعلامات (ثواني)
+  timeout: 30.0
+  
+  # استخدام WAL mode للأداء
+  wal_mode: true
+
+# ═══════════════════════════════════════════════════════════
+#                     الـ API
+# ═══════════════════════════════════════════════════════════
+api:
+  # عنوان الاستماع (0.0.0.0 للسماح من الخارج)
+  host: "127.0.0.1"
+  
+  # المنفذ
+  port: 8080
+  
+  # عدد workers
+  workers: 4
+  
+  # CORS origins المسموحة
+  cors_origins:
+    - "*"
+  
+  # الحد الأقصى للطلبات في الدقيقة
+  rate_limit: 100
+  
+  # مفتاح API (اختياري، اتركه فارغاً للتعطيل)
+  # api_key: "your-secret-key"
+
+# ═══════════════════════════════════════════════════════════
+#                     الـ Pipeline
+# ═══════════════════════════════════════════════════════════
+pipeline:
+  # الحد الأقصى للعمليات المتزامنة
+  max_concurrent: 50
+  
+  # timeout للمرحلة (ثواني)
+  stage_timeout: 3600.0
+  
+  # عدد محاولات الإعادة
+  retry_attempts: 3
+  
+  # التأخير بين المحاولات (ثواني)
+  retry_delay: 5.0
+  
+  # تنفيذ المراحل المستقلة بالتوازي
+  parallel_stages: true
+  
+  # حفظ النتائج الوسيطة
+  save_intermediate: true
+  
+  # تشغيل GC بين المراحل
+  gc_between_stages: true
+
+# ═══════════════════════════════════════════════════════════
+#                     HTTP Client
+# ═══════════════════════════════════════════════════════════
+http:
+  # timeout للطلبات (ثواني)
+  timeout: 30.0
+  
+  # الحد الأقصى للاتصالات الكلية
+  max_connections: 100
+  
+  # الحد الأقصى للاتصالات لكل host
+  max_per_host: 10
+  
+  # التحقق من SSL
+  verify_ssl: true
+  
+  # متابعة redirects
+  follow_redirects: true
+  
+  # الحد الأقصى للـ redirects
+  max_redirects: 10
+  
+  # User-Agent header
+  user_agent: "recon-cli/1.0"
+
+# ═══════════════════════════════════════════════════════════
+#                     DNS
+# ═══════════════════════════════════════════════════════════
+dns:
+  # قائمة resolvers
+  resolvers:
+    - "8.8.8.8"
+    - "8.8.4.4"
+    - "1.1.1.1"
+    - "1.0.0.1"
+    - "9.9.9.9"
+  
+  # timeout للاستعلام (ثواني)
+  timeout: 5.0
+  
+  # عدد المحاولات
+  retries: 2
+  
+  # TTL للـ cache (ثواني)
+  cache_ttl: 300
+  
+  # استعلامات متزامنة
+  max_concurrent: 100
+
+# ═══════════════════════════════════════════════════════════
+#                     الأدوات الخارجية
+# ═══════════════════════════════════════════════════════════
+tools:
+  # مسار الأدوات (افتراضي: البحث في PATH)
+  path: /usr/local/bin
+  
+  # timeout للأدوات (ثواني)
+  timeout: 300.0
+  
+  # مسارات محددة (اتركها فارغة للبحث التلقائي)
+  # subfinder: /path/to/subfinder
+  # httpx: /path/to/httpx
+  # nuclei: /path/to/nuclei
+  # naabu: /path/to/naabu
+  # katana: /path/to/katana
+
+# ═══════════════════════════════════════════════════════════
+#                     فحص الأسرار
+# ═══════════════════════════════════════════════════════════
+secrets:
+  # الحد الأدنى للـ entropy
+  min_entropy: 3.5
+  
+  # الحد الأقصى لحجم الملف (bytes)
+  max_file_size: 10485760  # 10MB
+  
+  # الامتدادات للفحص
+  scan_extensions:
+    - ".js"
+    - ".json"
+    - ".xml"
+    - ".yaml"
+    - ".yml"
+    - ".env"
+    - ".config"
+    - ".txt"
+    - ".md"
+  
+  # أنماط للاستبعاد
+  exclude_patterns:
+    - "node_modules"
+    - ".git"
+    - "__pycache__"
+    - "vendor"
+    - "dist"
+
+# ═══════════════════════════════════════════════════════════
+#                     الإشعارات
+# ═══════════════════════════════════════════════════════════
+notifications:
+  # تفعيل الإشعارات
+  enabled: false
+  
+  # Slack
+  # slack_webhook: "https://hooks.slack.com/services/..."
+  # slack_channel: "#security-alerts"
+  
+  # Discord
+  # discord_webhook: "https://discord.com/api/webhooks/..."
+  
+  # Telegram
+  # telegram_token: "bot_token"
+  # telegram_chat_id: "chat_id"
+  
+  # Email (SMTP)
+  # smtp_host: "smtp.gmail.com"
+  # smtp_port: 587
+  # smtp_user: "user@example.com"
+  # smtp_password: "password"
+  # email_to: "alerts@example.com"
+  
+  # Alert thresholds
+  alert_on_critical: true
+  alert_on_high: true
+  alert_on_medium: false
+  alert_on_error: true
+
+# ═══════════════════════════════════════════════════════════
+#                     التسجيل (Logging)
+# ═══════════════════════════════════════════════════════════
+logging:
+  # مستوى التسجيل: DEBUG, INFO, WARNING, ERROR
+  level: INFO
+  
+  # تنسيق السجلات: text, json
+  format: text
+  
+  # ملف السجلات (اتركه فارغاً للـ stdout فقط)
+  # file: logs/recon.log
+  
+  # الحد الأقصى لحجم الملف (bytes)
+  max_size: 10485760  # 10MB
+  
+  # عدد النسخ الاحتياطية
+  backup_count: 5
+  
+  # إضافة timestamps
+  include_timestamps: true
+  
+  # إضافة trace ID
+  include_trace_id: true
+
+# ═══════════════════════════════════════════════════════════
+#                     الـ Jobs
+# ═══════════════════════════════════════════════════════════
+jobs:
+  # مسار الـ jobs
+  base_path: jobs
+  
+  # الحد الأقصى للـ jobs المتزامنة
+  max_concurrent_jobs: 5
+  
+  # حذف الـ jobs القديمة بعد أيام
+  cleanup_after_days: 30
+  
+  # تنظيف تلقائي
+  auto_cleanup: true
+
+# ═══════════════════════════════════════════════════════════
+#                     مسارات
+# ═══════════════════════════════════════════════════════════
+
+# مسار ملفات الإعدادات
+config_path: config
+
+# مسار البيانات
+data_path: data

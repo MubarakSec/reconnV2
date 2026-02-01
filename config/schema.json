@@ -1,0 +1,414 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://reconnv2.local/config/schema.json",
+  "title": "ReconnV2 Configuration Schema",
+  "description": "JSON Schema للتحقق من ملفات إعدادات ReconnV2",
+  "type": "object",
+  "properties": {
+    "app_name": {
+      "type": "string",
+      "description": "اسم التطبيق",
+      "default": "ReconnV2"
+    },
+    "version": {
+      "type": "string",
+      "description": "إصدار التطبيق",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "debug": {
+      "type": "boolean",
+      "description": "وضع التصحيح",
+      "default": false
+    },
+    "database": {
+      "type": "object",
+      "description": "إعدادات قاعدة البيانات",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "مسار ملف SQLite"
+        },
+        "pool_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "timeout": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 30
+        },
+        "wal_mode": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "description": "إعدادات الـ API",
+      "properties": {
+        "host": {
+          "type": "string",
+          "format": "ipv4",
+          "default": "127.0.0.1"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535,
+          "default": 8080
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 4
+        },
+        "cors_origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": ["*"]
+        },
+        "rate_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100
+        },
+        "api_key": {
+          "type": "string",
+          "description": "مفتاح API للتوثيق"
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "description": "إعدادات الـ Pipeline",
+      "properties": {
+        "max_concurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 50,
+          "description": "الحد الأقصى للعمليات المتزامنة"
+        },
+        "stage_timeout": {
+          "type": "number",
+          "minimum": 60,
+          "default": 3600,
+          "description": "timeout للمرحلة بالثواني"
+        },
+        "retry_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3
+        },
+        "retry_delay": {
+          "type": "number",
+          "minimum": 1,
+          "default": 5
+        },
+        "parallel_stages": {
+          "type": "boolean",
+          "default": true
+        },
+        "save_intermediate": {
+          "type": "boolean",
+          "default": true
+        },
+        "gc_between_stages": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "http": {
+      "type": "object",
+      "description": "إعدادات HTTP Client",
+      "properties": {
+        "timeout": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 30
+        },
+        "max_connections": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 1000,
+          "default": 100
+        },
+        "max_per_host": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "verify_ssl": {
+          "type": "boolean",
+          "default": true
+        },
+        "follow_redirects": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_redirects": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50,
+          "default": 10
+        },
+        "user_agent": {
+          "type": "string",
+          "default": "recon-cli/1.0"
+        }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "description": "إعدادات DNS",
+      "properties": {
+        "resolvers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "minItems": 1,
+          "default": ["8.8.8.8", "1.1.1.1"]
+        },
+        "timeout": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 5
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 2
+        },
+        "cache_ttl": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "default": 300
+        },
+        "max_concurrent": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 500,
+          "default": 100
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "إعدادات الأدوات الخارجية",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "مسار الأدوات"
+        },
+        "timeout": {
+          "type": "number",
+          "minimum": 30,
+          "default": 300
+        },
+        "subfinder": {
+          "type": "string",
+          "description": "مسار subfinder"
+        },
+        "httpx": {
+          "type": "string",
+          "description": "مسار httpx"
+        },
+        "nuclei": {
+          "type": "string",
+          "description": "مسار nuclei"
+        },
+        "naabu": {
+          "type": "string",
+          "description": "مسار naabu"
+        },
+        "katana": {
+          "type": "string",
+          "description": "مسار katana"
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "إعدادات فحص الأسرار",
+      "properties": {
+        "min_entropy": {
+          "type": "number",
+          "minimum": 2,
+          "maximum": 5,
+          "default": 3.5
+        },
+        "max_file_size": {
+          "type": "integer",
+          "minimum": 1024,
+          "default": 10485760
+        },
+        "scan_extensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\.[a-z0-9]+$"
+          }
+        },
+        "exclude_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "description": "إعدادات الإشعارات",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "slack_webhook": {
+          "type": "string",
+          "format": "uri"
+        },
+        "slack_channel": {
+          "type": "string",
+          "pattern": "^#"
+        },
+        "discord_webhook": {
+          "type": "string",
+          "format": "uri"
+        },
+        "telegram_token": {
+          "type": "string"
+        },
+        "telegram_chat_id": {
+          "type": "string"
+        },
+        "smtp_host": {
+          "type": "string",
+          "format": "hostname"
+        },
+        "smtp_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 587
+        },
+        "smtp_user": {
+          "type": "string"
+        },
+        "smtp_password": {
+          "type": "string"
+        },
+        "email_to": {
+          "type": "string",
+          "format": "email"
+        },
+        "alert_on_critical": {
+          "type": "boolean",
+          "default": true
+        },
+        "alert_on_high": {
+          "type": "boolean",
+          "default": true
+        },
+        "alert_on_medium": {
+          "type": "boolean",
+          "default": false
+        },
+        "alert_on_error": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "إعدادات التسجيل",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+          "default": "INFO"
+        },
+        "format": {
+          "type": "string",
+          "enum": ["text", "json"],
+          "default": "text"
+        },
+        "file": {
+          "type": "string",
+          "description": "مسار ملف السجلات"
+        },
+        "max_size": {
+          "type": "integer",
+          "minimum": 1024,
+          "default": 10485760
+        },
+        "backup_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 5
+        },
+        "include_timestamps": {
+          "type": "boolean",
+          "default": true
+        },
+        "include_trace_id": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "jobs": {
+      "type": "object",
+      "description": "إعدادات الـ Jobs",
+      "properties": {
+        "base_path": {
+          "type": "string",
+          "default": "jobs"
+        },
+        "max_concurrent_jobs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "cleanup_after_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
+        },
+        "auto_cleanup": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "config_path": {
+      "type": "string",
+      "default": "config"
+    },
+    "data_path": {
+      "type": "string",
+      "default": "data"
+    }
+  },
+  "additionalProperties": false
+}
