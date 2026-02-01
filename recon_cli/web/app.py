@@ -486,8 +486,8 @@ if WEB_AVAILABLE:
         # Move to failed
         try:
             from recon_cli.jobs.lifecycle import JobLifecycle
-            lifecycle = JobLifecycle()
-            lifecycle.cancel_job(job_id)
+            lifecycle = JobLifecycle(manager)
+            lifecycle.move_to_failed(job_id)
             return {"success": True, "message": f"Job {job_id} cancelled"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -502,9 +502,9 @@ if WEB_AVAILABLE:
         
         try:
             from recon_cli.jobs.lifecycle import JobLifecycle
-            lifecycle = JobLifecycle()
-            new_job_id = lifecycle.retry_job(job_id)
-            return {"success": True, "job_id": new_job_id, "message": f"Job retried as {new_job_id}"}
+            lifecycle = JobLifecycle(manager)
+            lifecycle.requeue(job_id)
+            return {"success": True, "job_id": job_id, "message": f"Job {job_id} requeued"}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
