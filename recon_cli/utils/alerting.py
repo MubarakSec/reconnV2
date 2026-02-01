@@ -767,6 +767,76 @@ alerter = Alerter()
 alerter.add_channel(ConsoleChannel())
 
 
+class AlertManager:
+    """
+    مدير التنبيهات للـ Web Dashboard.
+    يتيح اختبار وإرسال الإشعارات.
+    """
+    
+    def __init__(self):
+        self.alerter = Alerter()
+    
+    async def send_test(self, channel: str, config: Dict[str, Any]) -> bool:
+        """إرسال رسالة تجريبية"""
+        test_alert = Alert(
+            name="Test Notification",
+            message="🎉 This is a test notification from ReconnV2!",
+            severity=AlertSeverity.INFO,
+            source="web-dashboard",
+            labels={"type": "test"},
+        )
+        
+        if channel == "telegram":
+            bot_token = config.get("bot_token", "")
+            chat_id = config.get("chat_id", "")
+            if not bot_token or not chat_id:
+                return False
+            ch = TelegramChannel(bot_token=bot_token, chat_id=chat_id)
+            return await ch.send(test_alert)
+        
+        elif channel == "slack":
+            webhook_url = config.get("webhook_url", "")
+            if not webhook_url:
+                return False
+            ch = SlackChannel(webhook_url=webhook_url)
+            return await ch.send(test_alert)
+        
+        elif channel == "discord":
+            webhook_url = config.get("webhook_url", "")
+            if not webhook_url:
+                return False
+            ch = DiscordChannel(webhook_url=webhook_url)
+            return await ch.send(test_alert)
+        
+        elif channel == "email":
+            smtp_host = config.get("smtp_host", "")
+            smtp_port = config.get("smtp_port", 587)
+            smtp_user = config.get("smtp_user", "")
+            smtp_pass = config.get("smtp_pass", "")
+            from_addr = config.get("from", "")
+            to_addr = config.get("to", "")
+            if not smtp_host or not to_addr:
+                return False
+            ch = EmailChannel(
+                smtp_host=smtp_host,
+                smtp_port=smtp_port,
+                username=smtp_user,
+                password=smtp_pass,
+                from_addr=from_addr or smtp_user,
+                to_addrs=[to_addr],
+            )
+            return await ch.send(test_alert)
+        
+        elif channel == "webhook":
+            url = config.get("url", "")
+            if not url:
+                return False
+            ch = WebhookChannel(url=url)
+            return await ch.send(test_alert)
+        
+        return False
+
+
 def get_alerter() -> Alerter:
     """الحصول على المُنبه"""
     return alerter

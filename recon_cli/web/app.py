@@ -386,18 +386,17 @@ if WEB_AVAILABLE:
             if not target:
                 raise HTTPException(status_code=400, detail="Target is required")
             
-            from recon_cli.jobs.lifecycle import JobLifecycle
+            from recon_cli.jobs.manager import JobManager
             
-            lifecycle = JobLifecycle()
-            job_id = lifecycle.create_job(
+            manager = JobManager()
+            record = manager.create_job(
                 target=target,
                 profile=profile,
-                notify=notify,
             )
             
             return {
                 "success": True,
-                "job_id": job_id,
+                "job_id": record.spec.job_id,
                 "message": f"Scan started for {target}",
             }
         except Exception as e:
