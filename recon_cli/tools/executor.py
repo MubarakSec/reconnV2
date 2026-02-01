@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+"""
+Command Executor Module - تنفيذ الأوامر الخارجية
+
+هذا الموديول مسؤول عن تشغيل الأدوات الخارجية مثل subfinder, nuclei, httpx
+مع دعم:
+- Timeout للأوامر الطويلة
+- Redaction للبيانات الحساسة في الـ logs
+- Error handling شامل
+- كتابة النتائج لملفات
+
+Example:
+    >>> executor = CommandExecutor(logger)
+    >>> result = executor.run(["subfinder", "-d", "example.com"])
+    >>> print(result.stdout)
+"""
+
 import shlex
 import shutil
 import subprocess
@@ -10,17 +26,77 @@ from recon_cli.utils.sanitizer import redact as redact_text
 
 
 class CommandError(RuntimeError):
+    """
+    استثناء لأخطاء تنفيذ الأوامر.
+    
+    Attributes:
+        message: رسالة الخطأ
+        returncode: كود الخروج من الأمر (None إذا لم يبدأ)
+    
+    Example:
+        >>> try:
+        ...     executor.run(["nonexistent-tool"])
+        ... except CommandError as e:
+        ...     print(f"Failed with code {e.returncode}: {e}")
+    """
+    
     def __init__(self, message: str, returncode: int | None = None) -> None:
         super().__init__(message)
         self.returncode = returncode
 
 
 class CommandExecutor:
+    """
+    منفذ الأوامر الخارجية مع دعم كامل للـ logging والـ error handling.
+    
+    يوفر واجهة موحدة لتشغيل أي أداة خارجية مع:
+    - تسجيل الأوامر في الـ log
+    - إخفاء البيانات الحساسة (API keys, tokens)
+    - التعامل مع Timeout
+    - كتابة النتائج لملفات
+    
+    Attributes:
+        logger: كائن الـ logger للتسجيل
+    
+    Example:
+        >>> import logging
+        >>> logger = logging.getLogger("recon")
+        >>> executor = CommandExecutor(logger)
+        >>> 
+        >>> # تشغيل أمر بسيط
+        >>> result = executor.run(["echo", "hello"])
+        >>> 
+        >>> # تشغيل مع timeout
+        >>> result = executor.run(["nuclei", "-u", "target.com"], timeout=300)
+        >>> 
+        >>> # كتابة النتائج لملف
+        >>> executor.run_to_file(["subfinder", "-d", "target.com"], Path("subs.txt"))
+    """
+    
     def __init__(self, logger) -> None:
+        """
+        تهيئة المنفذ.
+        
+        Args:
+            logger: كائن logging.Logger للتسجيل
+        """
         self.logger = logger
 
     @staticmethod
     def available(command: str) -> bool:
+        """
+        التحقق من وجود أداة في النظام.
+        
+        Args:
+            command: اسم الأداة (مثل "subfinder", "nuclei")
+            
+        Returns:
+            True إذا كانت الأداة متاحة، False خلاف ذلك
+            
+        Example:
+            >>> if CommandExecutor.available("subfinder"):
+            ...     print("Subfinder is installed")
+        """
         return shutil.which(command) is not None
 
     def run(
@@ -33,6 +109,32 @@ class CommandExecutor:
         capture_output: bool = False,
         redact: bool = True,
     ) -> subprocess.CompletedProcess:
+        """
+        تشغيل أمر خارجي.
+        
+        Args:
+            command: الأمر كقائمة من السلاسل النصية
+            cwd: المجلد الذي سيُنفذ فيه الأمر
+            env: متغيرات البيئة الإضافية
+            timeout: الحد الأقصى للتنفيذ بالثواني
+            check: رفع استثناء عند الفشل
+            capture_output: التقاط stdout و stderr
+            redact: إخفاء البيانات الحساسة في الـ logs
+            
+        Returns:
+            subprocess.CompletedProcess مع نتيجة التنفيذ
+            
+        Raises:
+            CommandError: عند فشل الأمر أو انتهاء الوقت
+            
+        Example:
+            >>> result = executor.run(
+            ...     ["httpx", "-l", "urls.txt", "-sc"],
+            ...     timeout=120,
+            ...     capture_output=True
+            ... )
+            >>> print(result.stdout)
+        """
         cmd_list = [str(part) for part in command]
         command_str = " ".join(shlex.quote(part) for part in cmd_list)
         message = redact_text(command_str) if redact else command_str
@@ -76,6 +178,30 @@ class CommandExecutor:
         redact: bool = True,
         timeout: Optional[int] = None,
     ) -> subprocess.CompletedProcess:
+        """
+        تشغيل أمر وكتابة النتائج لملف.
+        
+        يُنفذ الأمر ويكتب stdout (و stderr) لملف محدد.
+        مفيد للأوامر التي تُنتج كمية كبيرة من البيانات.
+        
+        Args:
+            command: الأمر كقائمة
+            output_path: مسار الملف للكتابة
+            cwd: مجلد التنفيذ
+            env: متغيرات البيئة
+            redact: إخفاء البيانات الحساسة
+            timeout: الحد الأقصى للتنفيذ
+            
+        Returns:
+            subprocess.CompletedProcess مع النتيجة
+            
+        Example:
+            >>> executor.run_to_file(
+            ...     ["subfinder", "-d", "example.com", "-silent"],
+            ...     Path("subdomains.txt"),
+            ...     timeout=300
+            ... )
+        """
         output_path.parent.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(
             [str(part) for part in command],

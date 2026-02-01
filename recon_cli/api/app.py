@@ -162,6 +162,57 @@ def create_app() -> "FastAPI":
             uptime=str(uptime).split('.')[0]
         )
     
+    @app.get("/api/health")
+    async def health_check():
+        """
+        Health check endpoint للتحقق من صحة الخدمة.
+        
+        يُستخدم من قبل:
+        - Load balancers
+        - Kubernetes probes
+        - Monitoring systems
+        
+        Returns:
+            dict: حالة الخدمة وتفاصيلها
+        """
+        import sys
+        import platform
+        
+        # Check critical components
+        checks = {
+            "api": "healthy",
+            "jobs_dir": "healthy" if config.RECON_HOME.exists() else "unhealthy",
+            "queued_dir": "healthy" if config.QUEUED_JOBS.exists() else "unhealthy",
+        }
+        
+        overall = "healthy" if all(v == "healthy" for v in checks.values()) else "unhealthy"
+        
+        return {
+            "status": overall,
+            "checks": checks,
+            "timestamp": datetime.now().isoformat(),
+            "python_version": sys.version.split()[0],
+            "platform": platform.system(),
+        }
+    
+    @app.get("/api/version")
+    async def get_version():
+        """
+        معلومات الإصدار.
+        
+        Returns:
+            dict: رقم الإصدار ومعلومات البناء
+        """
+        return {
+            "version": "0.1.0",
+            "api_version": "v1",
+            "name": "ReconnV2",
+            "description": "Advanced Security Reconnaissance Pipeline",
+            "build_date": "2026-02-01",
+            "python_required": ">=3.10",
+            "docs_url": "/docs",
+        }
+
     @app.get("/api/stats", response_model=StatsResponse)
     async def get_stats():
         """إحصائيات النظام"""

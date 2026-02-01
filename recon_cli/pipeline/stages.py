@@ -182,17 +182,27 @@ class NormalizeStage(Stage):
 
 
 class PassiveEnumerationStage(Stage):
+    """
+    مرحلة الاكتشاف السلبي للنطاقات الفرعية.
+    
+    تستخدم أدوات مثل subfinder, amass, waybackurls
+    لاكتشاف النطاقات الفرعية بدون إرسال طلبات للهدف مباشرة.
+    """
     name = "passive_enumeration"
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return context.record.spec.profile in {"passive", "full"}
 
     def execute(self, context: PipelineContext) -> None:
+        logger = context.logger
         executor = context.executor
         targets = context.targets
         artifacts = context.record.paths
         allow_ip = context.record.spec.allow_ip
         tool_timeout = context.runtime_config.tool_timeout
+
+        logger.info("Starting passive enumeration for %d targets", len(targets))
+        logger.debug("Tool timeout: %ds, Allow IP: %s", tool_timeout, allow_ip)
 
         subfinder_out = artifacts.artifact("subfinder.txt")
         amass_out = artifacts.artifact("amass.json")
@@ -211,9 +221,12 @@ class PassiveEnumerationStage(Stage):
             try:
                 seed_hosts.add(validation.normalize_hostname(target))
             except ValueError:
+                logger.debug("Skipping invalid target: %s", target)
                 continue
 
+        # ── Subfinder ──────────────────────────────────────────────────
         if executor.available("subfinder"):
+            logger.info("Running subfinder...")
             try:
                 completed = executor.run(
                     ["subfinder", "-dL", str(targets_file), "-silent"],
@@ -226,13 +239,18 @@ class PassiveEnumerationStage(Stage):
                     lines = [line.strip() for line in output.splitlines() if line.strip()]
                     subfinder_hosts.update(lines)
                     subfinder_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            except CommandError:
-                context.logger.warning("subfinder execution failed; continuing")
+                    logger.info("subfinder found %d subdomains", len(lines))
+                else:
+                    logger.debug("subfinder returned no output")
+            except CommandError as e:
+                logger.warning("subfinder execution failed: %s", e)
         else:
-            context.logger.warning("subfinder not available; skipping")
+            logger.warning("subfinder not available; skipping")
             _note_missing_tool(context, "subfinder")
 
+        # ── Amass ──────────────────────────────────────────────────────
         if executor.available("amass"):
+            logger.info("Running amass passive enum...")
             try:
                 executor.run(
                     [
