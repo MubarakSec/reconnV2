@@ -426,8 +426,8 @@ if WEB_AVAILABLE:
         if config_file.exists():
             try:
                 settings_data = json.loads(config_file.read_text())
-            except:
-                pass
+            except (json.JSONDecodeError, OSError):
+                pass  # Settings file corrupted or unreadable, use defaults
         
         # Load available profiles
         profiles = list(config.available_profiles().keys())
