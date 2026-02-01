@@ -1,0 +1,547 @@
+"""
+HTML Report Generator - مولد تقارير HTML احترافية
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+
+from recon_cli.utils.jsonl import read_jsonl
+
+
+@dataclass
+class ReportConfig:
+    """إعدادات التقرير"""
+    title: str = "ReconnV2 Scan Report"
+    include_raw_data: bool = False
+    include_screenshots: bool = True
+    theme: str = "dark"  # dark, light
+    language: str = "ar"  # ar, en
+
+
+def generate_html_report(
+    job_dir: Path,
+    output_path: Optional[Path] = None,
+    config: Optional[ReportConfig] = None
+) -> Path:
+    """
+    إنشاء تقرير HTML من نتائج الفحص
+    
+    Args:
+        job_dir: مجلد المهمة
+        output_path: مسار ملف التقرير (اختياري)
+        config: إعدادات التقرير
+    
+    Returns:
+        مسار ملف التقرير
+    """
+    config = config or ReportConfig()
+    
+    # قراءة البيانات
+    metadata_path = job_dir / "metadata.json"
+    spec_path = job_dir / "spec.json"
+    results_path = job_dir / "results.jsonl"
+    
+    metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+    spec = json.loads(spec_path.read_text()) if spec_path.exists() else {}
+    results = list(read_jsonl(results_path)) if results_path.exists() else []
+    
+    # تحليل النتائج
+    stats = _analyze_results(results)
+    
+    # إنشاء HTML
+    html = _generate_html(spec, metadata, results, stats, config)
+    
+    # حفظ الملف
+    if output_path is None:
+        output_path = job_dir / "report.html"
+    
+    output_path.write_text(html, encoding="utf-8")
+    
+    return output_path
+
+
+def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
+    """تحليل النتائج وإنشاء إحصائيات"""
+    stats = {
+        "total": len(results),
+        "by_type": {},
+        "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+        "by_source": {},
+        "hostnames": set(),
+        "urls": set(),
+        "secrets": [],
+        "findings": [],
+    }
+    
+    for result in results:
+        result_type = result.get("type", "unknown")
+        stats["by_type"][result_type] = stats["by_type"].get(result_type, 0) + 1
+        
+        source = result.get("source", "unknown")
+        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1
+        
+        if "hostname" in result:
+            stats["hostnames"].add(result["hostname"])
+        
+        if "url" in result:
+            stats["urls"].add(result["url"])
+        
+        severity = result.get("severity", result.get("priority", "info"))
+        if severity in stats["by_severity"]:
+            stats["by_severity"][severity] += 1
+        
+        if result_type == "secret":
+            stats["secrets"].append(result)
+        
+        if result_type == "finding":
+            stats["findings"].append(result)
+    
+    stats["hostnames"] = len(stats["hostnames"])
+    stats["urls"] = len(stats["urls"])
+    
+    return stats
+
+
+def _generate_html(
+    spec: Dict,
+    metadata: Dict,
+    results: List[Dict],
+    stats: Dict,
+    config: ReportConfig
+) -> str:
+    """إنشاء HTML الكامل"""
+    
+    theme_colors = {
+        "dark": {
+            "bg": "#1a1a2e",
+            "card": "#16213e",
+            "text": "#eaeaea",
+            "accent": "#0f3460",
+            "primary": "#e94560",
+            "success": "#00d26a",
+            "warning": "#f9c74f",
+            "danger": "#e94560",
+        },
+        "light": {
+            "bg": "#f5f5f5",
+            "card": "#ffffff",
+            "text": "#333333",
+            "accent": "#e0e0e0",
+            "primary": "#2196f3",
+            "success": "#4caf50",
+            "warning": "#ff9800",
+            "danger": "#f44336",
+        }
+    }
+    
+    colors = theme_colors.get(config.theme, theme_colors["dark"])
+    
+    # الترجمات
+    translations = {
+        "ar": {
+            "title": "تقرير الفحص",
+            "summary": "ملخص",
+            "target": "الهدف",
+            "profile": "الملف الشخصي",
+            "status": "الحالة",
+            "started": "بدأ في",
+            "finished": "انتهى في",
+            "total_results": "إجمالي النتائج",
+            "hostnames": "المضيفين",
+            "urls": "الروابط",
+            "findings": "الاكتشافات",
+            "secrets": "الأسرار المكتشفة",
+            "by_type": "حسب النوع",
+            "by_severity": "حسب الخطورة",
+            "critical": "حرج",
+            "high": "عالي",
+            "medium": "متوسط",
+            "low": "منخفض",
+            "info": "معلومات",
+            "details": "التفاصيل",
+            "generated": "تم إنشاؤه في",
+        },
+        "en": {
+            "title": "Scan Report",
+            "summary": "Summary",
+            "target": "Target",
+            "profile": "Profile",
+            "status": "Status",
+            "started": "Started",
+            "finished": "Finished",
+            "total_results": "Total Results",
+            "hostnames": "Hostnames",
+            "urls": "URLs",
+            "findings": "Findings",
+            "secrets": "Secrets Found",
+            "by_type": "By Type",
+            "by_severity": "By Severity",
+            "critical": "Critical",
+            "high": "High",
+            "medium": "Medium",
+            "low": "Low",
+            "info": "Info",
+            "details": "Details",
+            "generated": "Generated at",
+        }
+    }
+    
+    t = translations.get(config.language, translations["en"])
+    rtl = 'dir="rtl"' if config.language == "ar" else ""
+    
+    html = f'''<!DOCTYPE html>
+<html lang="{config.language}" {rtl}>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{config.title}</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: {colors["bg"]};
+            color: {colors["text"]};
+            line-height: 1.6;
+            padding: 20px;
+        }}
+        
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        
+        .header {{
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, {colors["accent"]}, {colors["card"]});
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }}
+        
+        .header h1 {{
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            color: {colors["primary"]};
+        }}
+        
+        .header .meta {{
+            opacity: 0.8;
+        }}
+        
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        
+        .card {{
+            background: {colors["card"]};
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }}
+        
+        .card h3 {{
+            color: {colors["primary"]};
+            margin-bottom: 15px;
+            border-bottom: 2px solid {colors["accent"]};
+            padding-bottom: 10px;
+        }}
+        
+        .stat-number {{
+            font-size: 2.5em;
+            font-weight: bold;
+            color: {colors["primary"]};
+        }}
+        
+        .stat-label {{
+            opacity: 0.7;
+            font-size: 0.9em;
+        }}
+        
+        .severity-badge {{
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin: 2px;
+        }}
+        
+        .severity-critical {{ background: #dc3545; color: white; }}
+        .severity-high {{ background: #fd7e14; color: white; }}
+        .severity-medium {{ background: #ffc107; color: black; }}
+        .severity-low {{ background: #17a2b8; color: white; }}
+        .severity-info {{ background: #6c757d; color: white; }}
+        
+        .progress-bar {{
+            height: 8px;
+            background: {colors["accent"]};
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 5px 0;
+        }}
+        
+        .progress-fill {{
+            height: 100%;
+            background: {colors["primary"]};
+            border-radius: 4px;
+        }}
+        
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }}
+        
+        th, td {{
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid {colors["accent"]};
+        }}
+        
+        th {{
+            background: {colors["accent"]};
+            font-weight: bold;
+        }}
+        
+        tr:hover {{
+            background: {colors["accent"]}40;
+        }}
+        
+        .findings-list {{
+            max-height: 400px;
+            overflow-y: auto;
+        }}
+        
+        .finding-item {{
+            padding: 15px;
+            margin: 10px 0;
+            background: {colors["accent"]}30;
+            border-radius: 8px;
+            border-left: 4px solid {colors["primary"]};
+        }}
+        
+        .finding-title {{
+            font-weight: bold;
+            margin-bottom: 5px;
+        }}
+        
+        .footer {{
+            text-align: center;
+            padding: 20px;
+            opacity: 0.6;
+            margin-top: 30px;
+        }}
+        
+        .chart-container {{
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 10px;
+        }}
+        
+        .chart-item {{
+            text-align: center;
+        }}
+        
+        .chart-bar {{
+            width: 40px;
+            background: {colors["accent"]};
+            border-radius: 4px 4px 0 0;
+            margin: 0 auto;
+            min-height: 20px;
+            transition: height 0.3s;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 {t["title"]}</h1>
+            <div class="meta">
+                <strong>{t["target"]}:</strong> {spec.get("target", "N/A")} |
+                <strong>{t["profile"]}:</strong> {spec.get("profile", "N/A")} |
+                <strong>{t["status"]}:</strong> {metadata.get("status", "N/A")}
+            </div>
+        </div>
+        
+        <!-- إحصائيات سريعة -->
+        <div class="grid">
+            <div class="card" style="text-align: center;">
+                <div class="stat-number">{stats["total"]}</div>
+                <div class="stat-label">{t["total_results"]}</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div class="stat-number">{stats["hostnames"]}</div>
+                <div class="stat-label">{t["hostnames"]}</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div class="stat-number">{stats["urls"]}</div>
+                <div class="stat-label">{t["urls"]}</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div class="stat-number">{len(stats["findings"])}</div>
+                <div class="stat-label">{t["findings"]}</div>
+            </div>
+        </div>
+        
+        <!-- الخطورة -->
+        <div class="grid">
+            <div class="card">
+                <h3>{t["by_severity"]}</h3>
+                <div class="chart-container">
+                    {_generate_severity_chart(stats["by_severity"], t)}
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>{t["by_type"]}</h3>
+                <table>
+                    <tr><th>النوع</th><th>العدد</th></tr>
+                    {"".join(f'<tr><td>{k}</td><td>{v}</td></tr>' for k, v in stats["by_type"].items())}
+                </table>
+            </div>
+        </div>
+        
+        <!-- الأسرار -->
+        {_generate_secrets_section(stats["secrets"], t, colors) if stats["secrets"] else ""}
+        
+        <!-- الاكتشافات -->
+        {_generate_findings_section(stats["findings"], t, colors) if stats["findings"] else ""}
+        
+        <div class="footer">
+            <p>🛡️ ReconnV2 - Advanced Reconnaissance Pipeline</p>
+            <p>{t["generated"]}: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+        </div>
+    </div>
+</body>
+</html>'''
+    
+    return html
+
+
+def _generate_severity_chart(severity_data: Dict, t: Dict) -> str:
+    """إنشاء رسم بياني للخطورة"""
+    max_val = max(severity_data.values()) if severity_data.values() else 1
+    
+    items = []
+    for sev, count in severity_data.items():
+        height = max(20, int((count / max_val) * 100)) if max_val > 0 else 20
+        items.append(f'''
+            <div class="chart-item">
+                <div class="chart-bar severity-{sev}" style="height: {height}px;"></div>
+                <div><strong>{count}</strong></div>
+                <div class="stat-label">{t.get(sev, sev)}</div>
+            </div>
+        ''')
+    
+    return "".join(items)
+
+
+def _generate_secrets_section(secrets: List[Dict], t: Dict, colors: Dict) -> str:
+    """إنشاء قسم الأسرار"""
+    if not secrets:
+        return ""
+    
+    rows = []
+    for secret in secrets[:20]:  # أول 20 فقط
+        rows.append(f'''
+            <tr>
+                <td>{secret.get("pattern", "N/A")}</td>
+                <td>{secret.get("url", secret.get("source", "N/A"))[:50]}...</td>
+                <td><span class="severity-badge severity-high">High</span></td>
+            </tr>
+        ''')
+    
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🔐 {t["secrets"]} ({len(secrets)})</h3>
+            <table>
+                <tr><th>النوع</th><th>المصدر</th><th>الخطورة</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_findings_section(findings: List[Dict], t: Dict, colors: Dict) -> str:
+    """إنشاء قسم الاكتشافات"""
+    if not findings:
+        return ""
+    
+    items = []
+    for finding in findings[:20]:  # أول 20 فقط
+        severity = finding.get("severity", "info")
+        items.append(f'''
+            <div class="finding-item">
+                <div class="finding-title">
+                    <span class="severity-badge severity-{severity}">{severity.upper()}</span>
+                    {finding.get("title", finding.get("name", "Finding"))}
+                </div>
+                <div>{finding.get("description", finding.get("url", ""))[:200]}</div>
+            </div>
+        ''')
+    
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🎯 {t["findings"]} ({len(findings)})</h3>
+            <div class="findings-list">
+                {"".join(items)}
+            </div>
+        </div>
+    '''
+
+
+# أمر CLI للتقارير
+def report_command(job_id: str, output: Optional[str] = None, theme: str = "dark", lang: str = "ar"):
+    """
+    أمر إنشاء التقرير من CLI
+    
+    مثال:
+        python -m recon_cli.utils.reporter <job-id>
+    """
+    from recon_cli import config
+    
+    # البحث عن مجلد المهمة
+    job_dir = None
+    for status_dir in [config.FINISHED_JOBS, config.FAILED_JOBS, config.RUNNING_JOBS]:
+        candidate = status_dir / job_id
+        if candidate.exists():
+            job_dir = candidate
+            break
+    
+    if not job_dir:
+        print(f"Job not found: {job_id}")
+        return
+    
+    output_path = Path(output) if output else None
+    
+    report_config = ReportConfig(
+        theme=theme,
+        language=lang
+    )
+    
+    result_path = generate_html_report(job_dir, output_path, report_config)
+    print(f"Report generated: {result_path}")
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        job_id = sys.argv[1]
+        output = sys.argv[2] if len(sys.argv) > 2 else None
+        report_command(job_id, output)
+    else:
+        print("Usage: python reporter.py <job-id> [output-path]")

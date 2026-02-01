@@ -18,6 +18,22 @@ from recon_cli.crawl.runtime import (
     save_results as save_crawl_results,
 )
 
+# Import rate limiter and cache utilities
+try:
+    from recon_cli.utils.rate_limiter import RateLimiter, RateLimitConfig
+    RATE_LIMITER_AVAILABLE = True
+except ImportError:
+    RATE_LIMITER_AVAILABLE = False
+    RateLimiter = None
+    RateLimitConfig = None
+
+try:
+    from recon_cli.utils.cache import HybridCache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    HybridCache = None
+
 FEATURE_KEYS = ["has_api", "has_login", "js_secrets_count", "url_count", "finding_count", "asn_score", "tag_entropy"]
 
 HIGH_RISK_ASNS = {"AS46606", "AS16276", "AS45102", "AS36351", "AS137409", "AS20473", "AS13414"}
@@ -686,6 +702,14 @@ class HttpProbeStage(Stage):
         import http.client
         import ssl
 
+        # Initialize rate limiter if available
+        rate_limiter = None
+        if RATE_LIMITER_AVAILABLE and RateLimiter:
+            rate_limiter = RateLimiter(RateLimitConfig(
+                requests_per_second=context.runtime_config.requests_per_second if hasattr(context.runtime_config, 'requests_per_second') else 10,
+                per_host_limit=context.runtime_config.per_host_limit if hasattr(context.runtime_config, 'per_host_limit') else 5,
+            ))
+
         tracker = context.results
         with hosts_path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -698,6 +722,11 @@ class HttpProbeStage(Stage):
                         continue
                     if url in seen_urls:
                         continue
+                    
+                    # Apply rate limiting
+                    if rate_limiter:
+                        rate_limiter.wait_for_slot(url)
+                    
                     conn = None
                     try:
                         if scheme == "https":
@@ -714,6 +743,11 @@ class HttpProbeStage(Stage):
                                 headers["If-Modified-Since"] = cache_entry["last_modified"]
                         conn.request("GET", "/", headers=headers)
                         resp = conn.getresponse()
+                        
+                        # Report response to rate limiter
+                        if rate_limiter:
+                            rate_limiter.on_response(url, resp.status)
+                        
                         if resp.status == 304 and not context.force:
                             break
                         body = resp.read(2048) or b""

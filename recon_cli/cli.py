@@ -447,10 +447,10 @@ def export(job_id: str, fmt: str = typer.Option("jsonl", "--format", case_sensit
 
 
 @app.command()
-def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json")) -> None:
+def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html")) -> None:
     """Emit a shareable report for a finished job."""
     fmt = fmt.lower()
-    if fmt not in {"txt", "md", "json"}:
+    if fmt not in {"txt", "md", "json", "html"}:
         typer.echo(f"Unsupported format: {fmt}", err=True)
         raise typer.Exit(code=1)
     manager = JobManager()
@@ -462,6 +462,12 @@ def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitiv
         content = record.paths.results_txt.read_text(encoding="utf-8")
         md_lines = ["# recon-cli report", f"Job: {job_id}", "", "```", content.strip(), "```"]
         typer.echo("\n".join(md_lines))
+        return
+    if fmt == "html":
+        from recon_cli.utils.reporter import generate_html_report
+        output_path = record.paths.root / "report.html"
+        generate_html_report(record.paths.root, output_path)
+        typer.secho(f"✅ HTML report generated: {output_path}", fg=typer.colors.GREEN)
         return
     payload = {
         "job_id": job_id,
@@ -512,6 +518,46 @@ def schema(fmt: str = typer.Option("json", "--format", help="Output format: json
         typer.echo(f"Unsupported format: {fmt}", err=True)
         raise typer.Exit(code=1)
     typer.echo(api.schema_json())
+
+
+@app.command("cache-stats")
+def cache_stats() -> None:
+    """Show cache statistics."""
+    from recon_cli.utils.cache import HybridCache
+    cache = HybridCache(config.RECON_HOME / "cache")
+    stats = cache.stats()
+    rich_print("[bold]📊 Cache Statistics[/bold]")
+    rich_print(f"  Memory hits  : {stats.get('memory_hits', 0)}")
+    rich_print(f"  Memory misses: {stats.get('memory_misses', 0)}")
+    rich_print(f"  Disk hits    : {stats.get('disk_hits', 0)}")
+    rich_print(f"  Disk misses  : {stats.get('disk_misses', 0)}")
+    rich_print(f"  Disk size    : {stats.get('disk_size', 0)} bytes")
+
+
+@app.command("cache-clear")
+def cache_clear() -> None:
+    """Clear all cached data."""
+    from recon_cli.utils.cache import HybridCache
+    cache = HybridCache(config.RECON_HOME / "cache")
+    cache.clear()
+    typer.secho("✅ Cache cleared", fg=typer.colors.GREEN)
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind"),
+    port: int = typer.Option(8080, "--port", help="Port to bind"),
+) -> None:
+    """Start the REST API server."""
+    try:
+        import uvicorn
+        from recon_cli.api.app import app as api_app
+        typer.secho(f"🚀 Starting API server at http://{host}:{port}", fg=typer.colors.GREEN)
+        typer.echo("   Docs: http://{host}:{port}/docs")
+        uvicorn.run(api_app, host=host, port=port)
+    except ImportError:
+        typer.echo("❌ FastAPI/Uvicorn not installed. Run: pip install fastapi uvicorn", err=True)
+        raise typer.Exit(code=1)
 
 def main() -> None:
     app()
