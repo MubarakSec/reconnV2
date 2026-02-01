@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Any, Optional
 
-import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+try:
+    import numpy as np
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    np = None  # type: ignore
+    LogisticRegression = None  # type: ignore
+    StandardScaler = None  # type: ignore
+    SKLEARN_AVAILABLE = False
 
 from recon_cli.learning.collector import DatasetStore, HostFeatures
 from recon_cli.utils import time as time_utils
@@ -15,18 +22,22 @@ from recon_cli.utils import time as time_utils
 MODEL_FILENAME = "model_logreg.npz"
 
 
-def _feature_vector(record: Dict[str, object], feature_keys: List[str]) -> np.ndarray:
+def _feature_vector(record: Dict[str, object], feature_keys: List[str]) -> Any:
+    if not SKLEARN_AVAILABLE:
+        raise RuntimeError("sklearn is required for learning features")
     features = record.get("features", {})
     return np.array([float(features.get(key, 0.0)) for key in feature_keys], dtype=float)
 
 
 class LearningModel:
     def __init__(self, learning_root: Path, feature_keys: List[str]) -> None:
+        if not SKLEARN_AVAILABLE:
+            raise RuntimeError("sklearn is required for LearningModel")
         self.learning_root = learning_root
         self.model_path = self.learning_root / MODEL_FILENAME
         self.feature_keys = feature_keys
-        self.scaler: StandardScaler | None = None
-        self.model: LogisticRegression | None = None
+        self.scaler: Optional[Any] = None
+        self.model: Optional[Any] = None
 
     def train(self, labeled_records: List[Dict[str, object]]) -> bool:
         positives = [rec for rec in labeled_records if rec.get("label") == 1]

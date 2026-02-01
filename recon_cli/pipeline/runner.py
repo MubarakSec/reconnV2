@@ -8,7 +8,8 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages import PIPELINE_STAGES, Stage, StageError
 from recon_cli.utils.notify import send_pipeline_notification
 from recon_cli.utils import time as time_utils
-from recon_cli.plugins import load_stage_plugins
+# Import from plugins.py module explicitly (not plugins/ package)
+import recon_cli.plugins as plugins_module
 from recon_cli import metrics
 import os
 
@@ -60,7 +61,7 @@ class PipelineRunner:
 
 def run_pipeline(record, manager: JobManager, force: bool = False) -> None:
     context = PipelineContext(record=record, manager=manager, force=force)
-    plugin_stages = load_stage_plugins(logger=context.logger)
+    plugin_stages = plugins_module.load_stage_plugins(logger=context.logger)
     runner = PipelineRunner(list(PIPELINE_STAGES) + plugin_stages)
     runner.run(context)
     if os.environ.get("RECON_METRICS", "0") not in {"0", "false", "False"}:

@@ -19,10 +19,10 @@ import pytest
 
 try:
     from recon_cli.pipeline.runner import PipelineRunner
-    from recon_cli.pipeline.stages import Stage, StageResult
+    from recon_cli.pipeline.stages import Stage
     from recon_cli.pipeline.context import PipelineContext
     from recon_cli.jobs.lifecycle import JobLifecycle
-    from recon_cli.jobs.models import JobSpec, JobStatus
+    from recon_cli.jobs.models import JobSpec, JobMetadata
     HAS_PIPELINE = True
 except ImportError:
     HAS_PIPELINE = False
@@ -366,9 +366,9 @@ class TestJobLifecycle:
             stages=["subdomain-enum"],
         )
         
-        # Should start as queued or pending
+        # Should start as queued or pending (using string status)
         status = lifecycle.get_status(job_id)
-        assert status in [JobStatus.QUEUED, JobStatus.PENDING, None]
+        assert status in ["queued", "pending", None]
     
     @pytest.mark.asyncio
     async def test_run_job_to_completion(

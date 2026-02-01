@@ -2,7 +2,8 @@ import os
 import sys
 from pathlib import Path
 
-from recon_cli.plugins import load_stage_plugins
+# Import from plugins.py module explicitly (not plugins/ package)
+import recon_cli.plugins as plugins_module
 from recon_cli.pipeline.stages import Stage
 
 
@@ -21,7 +22,7 @@ class DemoStage(Stage):
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setenv("RECON_PLUGIN_STAGES", "plugin_stage:DemoStage")
-    stages = load_stage_plugins()
+    stages = plugins_module.load_stage_plugins()
     assert stages, "Expected plugin stage to load"
     assert isinstance(stages[0], Stage)
     assert getattr(stages[0], "name", "") == "demo_stage"
