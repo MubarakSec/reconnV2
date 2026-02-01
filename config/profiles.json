@@ -1,6 +1,7 @@
 {
   "quick": {
     "base_profile": "passive",
+    "description": "فحص سريع وخفيف - مناسب للاستكشاف الأولي",
     "runtime": {
       "timeout_http": 5,
       "httpx_threads": 25,
@@ -19,6 +20,7 @@
   },
   "deep": {
     "base_profile": "full",
+    "description": "فحص عميق ومكثف - لاكتشاف كل شيء",
     "runtime": {
       "timeout_http": 20,
       "httpx_threads": 80,
@@ -37,6 +39,7 @@
   },
   "api-only": {
     "base_profile": "full",
+    "description": "فحص متخصص للـ APIs والـ GraphQL",
     "runtime": {
       "enable_fuzz": true,
       "enable_runtime_crawl": true,
@@ -49,6 +52,60 @@
       "secrets_max_files": 30,
       "httpx_threads": 40,
       "timeout_http": 10
+    }
+  },
+  "bugbounty": {
+    "base_profile": "full",
+    "description": "مُحسَّن لصيد الثغرات - شامل ومنظم",
+    "runtime": {
+      "timeout_http": 15,
+      "httpx_threads": 60,
+      "runtime_crawl_max_urls": 30,
+      "runtime_crawl_concurrency": 3,
+      "runtime_crawl_timeout": 25,
+      "max_fuzz_hosts": 10,
+      "enable_fuzz": true,
+      "enable_runtime_crawl": true,
+      "enable_screenshots": true,
+      "enable_secrets": true,
+      "secrets_max_files": 50,
+      "max_screenshots": 30,
+      "retry_count": 1
+    }
+  },
+  "stealth": {
+    "base_profile": "passive",
+    "description": "فحص هادئ - لتجنب الاكتشاف",
+    "runtime": {
+      "timeout_http": 10,
+      "httpx_threads": 5,
+      "runtime_crawl_max_urls": 3,
+      "runtime_crawl_timeout": 15,
+      "runtime_crawl_concurrency": 1,
+      "max_global_concurrency": 3,
+      "max_fuzz_hosts": 0,
+      "enable_fuzz": false,
+      "enable_runtime_crawl": false,
+      "enable_screenshots": false,
+      "enable_secrets": true,
+      "secrets_max_files": 5,
+      "retry_count": 0,
+      "request_delay_ms": 1000
+    }
+  },
+  "wordpress": {
+    "base_profile": "full",
+    "description": "مُحسَّن لمواقع WordPress",
+    "runtime": {
+      "timeout_http": 15,
+      "httpx_threads": 30,
+      "enable_fuzz": true,
+      "enable_runtime_crawl": true,
+      "enable_screenshots": true,
+      "enable_secrets": true,
+      "url_path_allow_regex": "(wp-|/plugins/|/themes/)",
+      "max_fuzz_hosts": 5,
+      "secrets_max_files": 25
     }
   }
 }

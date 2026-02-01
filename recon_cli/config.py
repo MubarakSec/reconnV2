@@ -18,7 +18,6 @@ def _default_home() -> Path:
 LOG_LEVEL_NAME = os.environ.get("RECON_LOG_LEVEL", "INFO").upper()
 LOG_LEVEL = getattr(logging, LOG_LEVEL_NAME, logging.INFO)
 LOG_FORMAT = os.environ.get("RECON_LOG_FORMAT", "text").lower()
-LOG_FORMAT = os.environ.get("RECON_LOG_FORMAT", "text").lower()
 
 RECON_HOME: Path = _default_home()
 JOBS_ROOT: Path = RECON_HOME / "jobs"
@@ -231,11 +230,11 @@ class RuntimeConfig:
     runtime_crawl_per_host_limit: int = int(os.environ.get("RECON_RUNTIME_CRAWL_PER_HOST", 3))
     runtime_crawl_timeout: int = int(os.environ.get("RECON_RUNTIME_CRAWL_TIMEOUT", 15))
     runtime_crawl_concurrency: int = int(os.environ.get("RECON_RUNTIME_CRAWL_CONCURRENCY", 2))
-    enable_fuzz: bool = os.environ.get("RECON_ENABLE_FUZZ", "0") not in {"0", "false", "False"}
-    enable_runtime_crawl: bool = os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0") not in {"0", "false", "False"}
-    enable_secrets: bool = os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"}
-    enable_screenshots: bool = os.environ.get("RECON_ENABLE_SCREENSHOTS", "0") not in {"0", "false", "False"}
-    verify_tls: bool = os.environ.get("RECON_VERIFY_TLS", "1") not in {"0", "false", "False"}
+    enable_fuzz: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_FUZZ", "0") not in {"0", "false", "False"})
+    enable_runtime_crawl: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0") not in {"0", "false", "False"})
+    enable_secrets: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"})
+    enable_screenshots: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_SCREENSHOTS", "0") not in {"0", "false", "False"})
+    verify_tls: bool = field(default_factory=lambda: os.environ.get("RECON_VERIFY_TLS", "1") not in {"0", "false", "False"})
     url_path_allow_regex: Optional[str] = os.environ.get("RECON_URL_PATH_ALLOW_REGEX")
     trim_url_max_per_host: int = int(os.environ.get("RECON_TRIM_URL_MAX_PER_HOST", 200))
     trim_finding_max_per_host: int = int(os.environ.get("RECON_TRIM_FINDING_MAX_PER_HOST", 100))

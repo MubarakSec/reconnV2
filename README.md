@@ -1,134 +1,464 @@
-# recon-cli
+# 🔍 ReconnV2 - Advanced Reconnaissance Pipeline
 
-`recon-cli` orchestrates reconnaissance jobs through a deterministic pipeline (passive discovery -> dedupe -> resolution -> HTTP probing -> optional fuzzing/screenshotting) while persisting machine-readable JSONL data, human summaries, metadata, and raw artifacts.
+<div align="center">
 
-## Features
-- Queue-based job lifecycle with inline execution or background workers.
-- Stage checkpoints with retry/backoff and resumable artifacts.
-- Append-only `results.jsonl` plus scored `results.txt` summaries.
-- Built-in enrichment and prioritisation: optional ASN/org lookups, heuristic tagging (env/service/internal), noise suppression, and priority scoring for URLs.
-- Optional active intelligence modules (backup hunting, CORS checks, response diffing, JS secret harvesting) gated per job.
-- Secrets/token detector (regex + entropy) with revocation guidance.
-- Runtime JavaScript crawl via Playwright that captures DOM snapshots, network telemetry, and JavaScript asset inventories for high-priority URLs.
-- Smart scanner triggers (nuclei, WPScan) based on detected surfaces and tech signals.
-- Graph correlation across domains/IPs/ASNs/tech to highlight shared infrastructure and API surface.
-- Learning mode that captures features and produces vulnerability probability hints.
-- Configurable performance knobs via `RECON_*` environment variables and SecLists integration.
-- Management commands for status, log tailing, requeueing, pruning, and exporting jobs.
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
+![Kali](https://img.shields.io/badge/Kali-Linux-557C94.svg)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-## Roadmap
-- Graph-based asset correlation (domains -> IPs -> ASNs -> tech stacks) with shared asset detection and JS/API linking.
-- Integration with exploit/scanner APIs: trigger nuclei/WPScan/etc. based on detected surfaces, store findings with risk tags.
-- Optional external intelligence feeds (crt.sh, urlscan.io, favfreak) to enrich the graph.
+**أداة استطلاع أمني متقدمة ومؤتمتة لاكتشاف الثغرات والأصول**
 
-## Installation
-1. Ensure Python 3.10+ is installed.
-2. Install the package (editable is convenient during development):
-   ```bash
-   python -m pip install -e .
-   ```
-   You can alternatively install dependencies with `python -m pip install typer rich`.
-3. Provide external binaries in your `PATH` as needed (subfinder, amass, massdns, httpx, ffuf, waybackurls/gau, playwright). Override paths with `RECON_HOME`, `SECLISTS_ROOT`, or other `RECON_*` variables if required.
+[التثبيت](#-التثبيت-السريع) •
+[الاستخدام](#-الاستخدام) •
+[الواجهات](#-طرق-الاستخدام-المتعددة) •
+[المراحل](#-مراحل-الفحص) •
+[Docker](#-docker)
 
-## CLI commands
-```text
-recon-cli scan <target> [--profile passive|full|fuzz-only] [--inline] [--wordlist PATH] \
-                 [--max-screenshots N] [--force] [--allow-ip] [--targets-file PATH] \
-                 [--active-module MODULE] [--quickstart]
-recon-cli worker-run [--poll-interval 5] [--max-workers 1]
-recon-cli status <job_id>
-recon-cli tail-logs <job_id>
-recon-cli list-jobs [status]
-recon-cli requeue <job_id>
-recon-cli prune --days N [--archive]
-recon-cli export <job_id> --format jsonl|txt|zip
-recon-cli report <job_id> --format txt|md|json
-recon-cli verify-job <job_id>
+</div>
+
+---
+
+## 📁 هيكل المشروع
+
+```
+reconnV2/
+├── 📜 install.sh          # سكربت التثبيت التلقائي
+├── 📜 recon.sh             # واجهة تفاعلية بالعربية
+├── 📜 quick-scan.sh        # فحص سريع بأمر واحد
+├── 📜 wizard.py            # معالج تفاعلي بواجهة ملونة
+├── 📜 cheatsheet.sh        # مرجع سريع للأوامر
+├── 📜 Makefile             # أوامر Make مختصرة
+├── 🐳 Dockerfile           # صورة Docker
+├── 🐳 docker-compose.yml   # تكوين Docker Compose
+├── 📁 recon_cli/           # الكود الرئيسي
+├── 📁 config/              # ملفات التكوين
+├── 📁 jobs/                # نتائج الفحص
+└── 📁 tests/               # الاختبارات
 ```
 
-`scan --inline` runs the pipeline immediately and prints the finished results path. Without `--inline`, jobs land in `jobs/queued/` for a worker to process. `--targets-file` accepts one host per line; `--force` reruns stages even if checkpoints exist.
+---
 
-## Profiles
-- `passive` (default): conservative, passive-only recon.
-- `full`: enables fuzzing/runtime crawl/screenshots (respecting limits).
-- `fuzz-only`: fuzzing-centric runs.
-- `quick`: minimal passive scan with tight limits.
-- `secure`: safe defaults with TLS verification enforced, active modules off, low concurrency/limits.
-- `deep`: aggressive/full run with higher limits.
-- `api-only`: focuses on API paths and related modules.
+## ⚡ التثبيت السريع (Kali Linux)
 
-## Pipeline stages
-1. `normalize_scope` - strict hostname validation, punycode normalization, and target manifest creation.
-2. `passive_enumeration` - subfinder/amass/waybackurls (or gau) with JSONL hostname/URL emission.
-3. `dedupe_canonicalize` - normalization/deduplication into `artifacts/dedupe_hosts.txt`.
-4. `dns_resolve` - massdns (or system resolver fallback) producing `asset` objects.
-5. `asset_enrichment` - ASN/org/country lookups, CDN/cloud heuristics, and hostname tagging with environment/service hints.
-6. `http_probe` - httpx (or built-in HTTP client fallback) emitting URL metadata.
-7. `scoring_tagging` - false-positive filtering, service tagging, and priority scoring.
-8. `fuzzing` - ffuf + SecLists when enabled by profile or CLI flags.
-9. `active_intelligence` - optional active modules (backup hunt, CORS, response diffing, JS secret extraction).
-10. `secrets_detection` - regex + entropy analysis for tokens/credentials with revocation guidance.
-11. `runtime_crawl` - Playwright runtime crawl that records DOM snapshots, network activity, and JavaScript assets for top-scoring URLs.
-12. `correlation` - builds the internal asset graph (domains -> IPs -> ASNs -> tech) and detects reuse/api clusters.
-13. `learning` - captures host features and predicts probability of follow-up vulnerabilities.
-14. `scanner` - smart triggers for nuclei/WPScan based on detected surfaces and tech stack.
-15. `screenshots` - Playwright screenshots and HAR capture (profile `full` or explicit limit).
-16. `finalize` - summary generation, stats roll-up, and final metadata write.
+### الطريقة 1: التثبيت التلقائي (موصى به)
+```bash
+# استنساخ المشروع
+git clone https://github.com/your-repo/reconnV2.git
+cd reconnV2
 
-Each stage logs to `jobs/<state>/<job_id>/logs/pipeline.log`, records checkpoints in `metadata.json`, and respects `RECON_RETRY_COUNT` (default 1).
-
-The runtime crawl stage stores artifacts under `artifacts/runtime_crawl/`, including `runtime_crawl.json` with network/console data and deterministic `dom_<sha1>.html` snapshots for each crawled URL. It also appends `runtime_crawl` entries to `results.jsonl` summarising JavaScript discovery and errors.
-
-## Job layout
+# تشغيل سكربت التثبيت
+chmod +x install.sh recon.sh quick-scan.sh cheatsheet.sh
+./install.sh
 ```
-jobs/
-  queued/<job_id>/
-  running/<job_id>/
-  finished/<job_id>/
-  failed/<job_id>/
+
+### الطريقة 2: التثبيت اليدوي
+```bash
+# إنشاء بيئة افتراضية
+python3 -m venv .venv
+source .venv/bin/activate
+
+# تثبيت المشروع
+pip install -e .
+
+# تثبيت الأدوات الخارجية
+sudo apt install subfinder amass nuclei httpx-toolkit
 ```
-Inside each job directory:
+
+### الطريقة 3: Docker
+```bash
+docker build -t reconnv2 .
+docker run -it reconnv2 --help
 ```
-spec.json
-metadata.json
-results.jsonl
-results.txt
-artifacts/
-logs/pipeline.log
+
+---
+
+## 🎮 طرق الاستخدام المتعددة
+
+### 1️⃣ الواجهة التفاعلية بالعربية (الأسهل)
+```bash
+./recon.sh
 ```
-Artifacts include raw outputs such as `subfinder.txt`, `amass.json`, `massdns.out`, `httpx_raw.json`, `ffuf_*.json`, `artifacts/active/`, `artifacts/runtime_crawl/`, and optional `artifacts/screenshots/` and `artifacts/hars/`.
+تفتح قائمة تفاعلية سهلة الاستخدام:
+```
+╔═══════════════════════════════════════╗
+║          القائمة الرئيسية             ║
+╠═══════════════════════════════════════╣
+║ [1] 🔍 فحص سريع (Quick Scan)          ║
+║ [2] 🎯 فحص سلبي (Passive Scan)        ║
+║ [3] 🚀 فحص شامل (Full Scan)           ║
+║ [4] 🔬 فحص عميق (Deep Scan)           ║
+║ [5] 🐛 فحص Bug Bounty                 ║
+║ ...                                   ║
+╚═══════════════════════════════════════╝
+```
 
-## Configuration knobs
-Tune behaviour via environment variables:
-- `RECON_MAX_GLOBAL_CONCURRENCY`, `RECON_HTTPX_THREADS`, `RECON_MAX_FUZZ_HOSTS`, `RECON_FFUF_THREADS`, `RECON_MAX_SCREENSHOTS`, `RECON_RETRY_COUNT`, `RECON_TIMEOUT_HTTP`, `RECON_FALLBACK_DNS_LIMIT`.
-- `IPINFO_TOKEN` for optional IP enrichment via ipinfo.io (leave unset to use local heuristics only).
-- `RECON_SUMMARY_TOP` to control how many findings appear in `results.txt`.
-- `RECON_ACTIVE_MODULES` comma-separated defaults for `--active-module`.
-- `RECON_SCANNERS` comma-separated defaults for `--scanner`.
-- `RECON_MAX_SCANNER_HOSTS` to cap the number of hosts scanned per job.
-- `RECON_SCANNER_TIMEOUT` to control scanner command timeouts (seconds).
-- `RECON_RUNTIME_CRAWL_MAX_URLS`, `RECON_RUNTIME_CRAWL_PER_HOST`, `RECON_RUNTIME_CRAWL_TIMEOUT`, `RECON_RUNTIME_CRAWL_CONCURRENCY` to tune the Playwright runtime crawl scope, per-host limits, and resource usage.
-- `RECON_MAX_TARGETS_PER_JOB`, `RECON_MAX_PROBE_HOSTS`, `RECON_HTTPX_MAX_HOSTS` to cap workload size for targets/HTTP probing.
-- `RECON_ENABLE_FUZZ`, `RECON_ENABLE_RUNTIME_CRAWL`, `RECON_ENABLE_SCREENSHOTS`, `RECON_ENABLE_SECRETS` to toggle heavy modules (fuzzing/crawl/screenshots default off, secrets on).
-- `RECON_LOG_FORMAT` to choose `text` (default) or `json` structured logs.
-- `RECON_PLUGIN_STAGES` to load extra pipeline stages as `module:Class` entries (comma-separated).
-- `SECLISTS_ROOT` to override the SecLists base directory.
-- RECON_TELEGRAM_TOKEN, RECON_TELEGRAM_CHAT_ID, RECON_TELEGRAM_TIMEOUT to push Telegram alerts when jobs finish or fail.
-- `RECON_HOME` to relocate job storage.
-- `RECON_CORRELATION_MAX_RECORDS` to cap how many results are processed in the correlation stage (default 10k); `RECON_CORRELATION_SVG_NODE_LIMIT` to skip SVG rendering when the graph exceeds this node count (default 2500).
-- `RECON_RETRY_BACKOFF_BASE`, `RECON_RETRY_BACKOFF_FACTOR` to control retry delays between failed stage attempts.
-- `RECON_METRICS` to emit per-job metrics JSON under `artifacts/metrics.json`.
+### 2️⃣ المعالج التفاعلي (Python)
+```bash
+source .venv/bin/activate
+python wizard.py
+```
+واجهة ملونة مع خيارات متقدمة!
 
-## Notes
-- Missing external binaries trigger warnings and the stage is skipped; the pipeline still completes so you can test locally without the full toolchain.
-- Heavy modules (fuzzing, runtime crawl, screenshots) are disabled by default; enable via profiles or `RECON_ENABLE_*` flags.
-- The initial target is always seeded into the host list so fallback resolution/probing will still run even when enumeration tools are absent.
-- Requeued jobs retain completed checkpoints but reset attempts and rerun from the last stage, making recovery from transient failures predictable.
-- `worker-run` currently processes jobs sequentially; run multiple workers for concurrency if required.
-- Only scan targets you are authorized to assess.
+### 3️⃣ الفحص السريع
+```bash
+# فحص بسيط
+./quick-scan.sh target.com
 
-## Performance defaults & hardware
-- Default profiles are conservative: fuzzing/runtime crawl/screenshots are disabled unless explicitly enabled; caps exist for targets/job and probe/httpx hosts.
-- Recommended minimum: 2 vCPUs, 4 GB RAM, 10 GB free disk; quick profile should finish a 1–5 target job in minutes on this footprint.
-- Worker concurrency: `recon-cli worker-run --max-workers N` starts N worker loops; jobs are locked per worker to avoid double-processing.
+# فحص مع خيارات
+./quick-scan.sh target.com -p full -s nuclei
 
+# فحص Bug Bounty
+./quick-scan.sh target.com -p bugbounty -s nuclei -a js-secrets
+```
+
+### 4️⃣ أوامر Make
+```bash
+make help                      # عرض المساعدة
+make install                   # تثبيت
+make scan TARGET=target.com    # فحص
+make scan-full TARGET=target.com
+make scan-quick TARGET=target.com
+make jobs                      # عرض المهام
+make doctor                    # فحص النظام
+```
+
+### 5️⃣ سطر الأوامر المباشر
+```bash
+source .venv/bin/activate
+recon-cli scan target.com --profile passive --inline
+```
+
+### 6️⃣ عرض المرجع السريع
+```bash
+./cheatsheet.sh
+```
+
+---
+
+## 🚀 الأوامر الأساسية
+
+```bash
+# تفعيل البيئة أولاً
+source .venv/bin/activate
+
+# فحص سريع
+recon-cli scan example.com --inline
+
+# فحص سلبي (آمن)
+recon-cli scan example.com --profile passive --inline
+
+# فحص شامل
+recon-cli scan example.com --profile full --inline
+
+# فحص عميق مع nuclei
+recon-cli scan example.com --profile deep --scanner nuclei --inline
+
+# فحص متعدد الأهداف
+recon-cli scan --targets-file targets.txt --profile deep --inline
+```
+
+---
+
+## 📋 الملفات الشخصية (Profiles)
+
+| الملف | الوصف | الاستخدام |
+|-------|-------|-----------|
+| `passive` | فحص سلبي آمن، لا يُكتشف | الاستكشاف الأولي |
+| `full` | فحص نشط وشامل | الفحص الكامل |
+| `quick` | فحص سريع وخفيف | نظرة سريعة |
+| `deep` | فحص عميق ومكثف | تحليل شامل |
+| `bugbounty` | مُحسَّن لصيد الثغرات | Bug Bounty |
+| `stealth` | فحص خفي وبطيء | تجنب الاكتشاف |
+| `api-only` | APIs و GraphQL فقط | فحص APIs |
+| `wordpress` | مُحسَّن لـ WordPress | مواقع WP |
+
+---
+
+## 🔧 خيارات الفحص
+
+| الخيار | الوصف | مثال |
+|--------|-------|------|
+| `--profile` | نوع الفحص | `--profile deep` |
+| `--inline` | تشغيل فوري | `--inline` |
+| `--targets-file` | ملف الأهداف | `--targets-file list.txt` |
+| `--scanner` | ماسح إضافي | `--scanner nuclei` |
+| `--active-module` | وحدة نشطة | `--active-module js-secrets` |
+| `--force` | إعادة كل المراحل | `--force` |
+| `--quickstart` | أسرع فحص | `--quickstart` |
+| `-v` / `-vv` | زيادة التفاصيل | `-vv` |
+
+---
+
+## 🎯 أمثلة عملية
+
+### استطلاع سلبي بسيط
+```bash
+recon-cli scan target.com --profile passive --inline
+```
+
+### فحص مع اكتشاف الأسرار
+```bash
+recon-cli scan target.com --active-module js-secrets --inline
+```
+
+### فحص شامل مع Nuclei
+```bash
+recon-cli scan target.com --profile full --scanner nuclei --inline
+```
+
+### فحص WordPress
+```bash
+recon-cli scan wordpress-site.com --profile wordpress --scanner wpscan --inline
+```
+
+### فحص قائمة أهداف
+```bash
+# إنشاء ملف الأهداف
+cat > targets.txt << EOF
+target1.com
+target2.com
+target3.com
+EOF
+
+# تشغيل الفحص
+recon-cli scan --targets-file targets.txt --profile deep --inline
+```
+
+### فحص Bug Bounty الكامل
+```bash
+recon-cli scan bugbounty-target.com \
+    --profile bugbounty \
+    --scanner nuclei \
+    --active-module js-secrets \
+    --active-module backup \
+    --inline
+```
+
+### فحص خفي (Stealth)
+```bash
+recon-cli scan sensitive-target.com --profile stealth --inline
+```
+
+---
+
+## 🔄 مراحل الفحص
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  1. Normalize      → تطبيع الأهداف                      │
+│  2. Passive Enum   → اكتشاف النطاقات الفرعية            │
+│  3. Dedupe         → إزالة المكرر                       │
+│  4. DNS Resolve    → حل عناوين DNS                     │
+│  5. Enrichment     → إثراء البيانات                     │
+│  6. HTTP Probe     → فحص خدمات HTTP                    │
+│  7. Scoring        → تقييم المخاطر                      │
+│  8. IDOR Check     → فحص ثغرات IDOR                    │
+│  9. Auth Matrix    → فحص التراخيص                      │
+│ 10. Fuzzing        → الفحص بالقوة الغاشمة               │
+│ 11. Active Intel   → الاستطلاع النشط                    │
+│ 12. Secrets        → اكتشاف الأسرار                     │
+│ 13. Runtime Crawl  → الزحف التفاعلي                    │
+│ 14. Correlation    → ربط النتائج                       │
+│ 15. Learning       → التعلم الآلي                       │
+│ 16. Scanner        → Nuclei/WPScan                     │
+│ 17. Screenshots    → لقطات الشاشة                      │
+│ 18. Finalize       → إنهاء وتقرير                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🛠️ إدارة المهام
+
+```bash
+# عرض المهام
+recon-cli list-jobs
+recon-cli list-jobs --status running
+
+# عرض حالة مهمة
+recon-cli status <job-id>
+
+# متابعة السجلات
+recon-cli tail-logs <job-id>
+
+# إعادة تشغيل مهمة فاشلة
+recon-cli requeue <job-id>
+
+# تصدير النتائج
+recon-cli export <job-id> --format json
+recon-cli export <job-id> --format txt
+
+# إنشاء تقرير
+recon-cli report <job-id>
+
+# فحص النظام
+recon-cli doctor
+
+# تنظيف المهام القديمة
+recon-cli prune --days 7
+```
+
+---
+
+## 📁 هيكل النتائج
+
+```
+jobs/finished/<job-id>/
+├── metadata.json      # بيانات المهمة
+├── spec.json          # مواصفات الفحص
+├── results.jsonl      # النتائج (JSON Lines)
+├── results.txt        # النتائج (نص)
+├── artifacts/         # الملفات المستخرجة
+│   ├── targets.txt
+│   ├── subfinder.txt
+│   ├── amass.json
+│   ├── httpx.json
+│   └── ...
+└── logs/
+    └── pipeline.log   # سجل التنفيذ
+```
+
+---
+
+## 🐳 Docker
+
+### بناء الصورة
+```bash
+docker build -t reconnv2 .
+```
+
+### تشغيل فحص
+```bash
+# فحص سريع
+docker run -v $(pwd)/jobs:/app/jobs reconnv2 scan target.com --inline
+
+# فحص تفاعلي
+docker run -it -v $(pwd)/jobs:/app/jobs reconnv2 scan target.com --profile full --inline
+```
+
+### Docker Compose
+```bash
+# تشغيل
+docker-compose run recon scan target.com --inline
+
+# عرض المهام
+docker-compose run recon list-jobs
+```
+
+---
+
+## 🔧 التكوين
+
+### ملفات التعريف (`config/profiles.json`)
+
+```json
+{
+  "quick": {
+    "base_profile": "passive",
+    "description": "فحص سريع وخفيف",
+    "runtime": {
+      "enable_fuzz": false,
+      "enable_secrets": true
+    }
+  },
+  "bugbounty": {
+    "base_profile": "full",
+    "description": "مُحسَّن لصيد الثغرات",
+    "runtime": {
+      "enable_fuzz": true,
+      "enable_runtime_crawl": true,
+      "enable_screenshots": true
+    }
+  }
+}
+```
+
+### DNS Resolvers (`config/resolvers.txt`)
+```
+1.1.1.1
+8.8.8.8
+9.9.9.9
+```
+
+---
+
+## 📦 الأدوات المطلوبة
+
+| الأداة | الوظيفة | التثبيت |
+|--------|---------|---------|
+| subfinder | اكتشاف النطاقات | `apt install subfinder` |
+| amass | استطلاع شامل | `apt install amass` |
+| httpx | فحص HTTP | `apt install httpx-toolkit` |
+| nuclei | فحص الثغرات | `apt install nuclei` |
+| wpscan | فحص WordPress | `apt install wpscan` |
+| waybackurls | URLs التاريخية | `go install github.com/tomnomnom/waybackurls@latest` |
+| gau | URLs إضافية | `go install github.com/lc/gau/v2/cmd/gau@latest` |
+
+---
+
+## 🔥 One-Liners سريعة
+
+```bash
+# اكتشاف سريع للنطاقات الفرعية
+recon-cli scan target.com -p passive --inline 2>/dev/null | grep hostname
+
+# فحص وعرض النتائج مباشرة
+JOB=$(recon-cli scan target.com -p quick --inline 2>&1 | grep -oP 'Job \K\S+')
+cat jobs/finished/$JOB/results.txt
+
+# عرض آخر نتائج
+cat jobs/finished/$(ls -t jobs/finished/ | head -1)/results.txt
+
+# فحص قائمة من stdin
+echo -e "site1.com\nsite2.com" | tee targets.txt && \
+    recon-cli scan --targets-file targets.txt --inline
+```
+
+---
+
+## 🎯 نصائح للاستخدام
+
+1. **ابدأ بـ passive** - دائماً ابدأ بالفحص السلبي للاستكشاف
+2. **استخدم الواجهة التفاعلية** - `./recon.sh` للمبتدئين
+3. **راجع cheatsheet** - `./cheatsheet.sh` للمرجع السريع
+4. **تابع السجلات** - `tail-logs` لمتابعة التقدم
+5. **استخدم --force** - لإعادة الفحص من البداية
+6. **نظف المهام** - `prune --days 7` بانتظام
+
+---
+
+## 🐛 استكشاف الأخطاء
+
+```bash
+# فحص النظام والأدوات
+recon-cli doctor
+
+# تشغيل مع تفاصيل أكثر
+recon-cli scan target.com -vv --inline
+
+# التحقق من التثبيت
+python -c "import recon_cli; print('OK')"
+```
+
+---
+
+## 📄 License
+
+MIT License - استخدم بمسؤولية وأخلاقية فقط.
+
+---
+
+<div align="center">
+
+### ⚠️ تحذير مهم
+
+**استخدم هذه الأداة فقط على الأنظمة التي لديك إذن صريح باختبارها**
+
+الاستخدام غير المصرح به يُعد انتهاكاً للقانون
+
+---
+
+Made with ❤️ for Security Researchers
+
+</div>

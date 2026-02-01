@@ -58,6 +58,7 @@ class JobSpec:
     job_id: str
     target: str
     profile: str
+    project: Optional[str] = None
     inline: bool = False
     wordlist: Optional[str] = None
     targets_file: Optional[str] = None
@@ -71,12 +72,14 @@ class JobSpec:
     initiator: Optional[str] = None
     execution_profile: Optional[str] = None
     runtime_overrides: Dict[str, Any] = field(default_factory=dict)
+    incremental_from: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.job_id,
             "target": self.target,
             "profile": self.profile,
+            "project": self.project,
             "inline": self.inline,
             "wordlist": self.wordlist,
             "targets_file": self.targets_file,
@@ -90,6 +93,7 @@ class JobSpec:
             "initiator": self.initiator,
             "execution_profile": self.execution_profile,
             "runtime_overrides": self.runtime_overrides,
+            "incremental_from": self.incremental_from,
         }
 
     @classmethod
@@ -98,6 +102,7 @@ class JobSpec:
             job_id=payload["job_id"],
             target=payload["target"],
             profile=payload.get("profile", "passive"),
+            project=payload.get("project"),
             inline=payload.get("inline", False),
             wordlist=payload.get("wordlist"),
             targets_file=payload.get("targets_file"),
@@ -111,6 +116,7 @@ class JobSpec:
             initiator=payload.get("initiator"),
             execution_profile=payload.get("execution_profile"),
             runtime_overrides=dict(payload.get("runtime_overrides", {})),
+            incremental_from=payload.get("incremental_from"),
         )
 
 

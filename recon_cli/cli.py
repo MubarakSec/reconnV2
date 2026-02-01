@@ -77,6 +77,8 @@ def scan(
     target: Optional[str] = typer.Argument(None, help="Domain or hostname to scan"),
     profile: str = typer.Option("passive", "--profile", case_sensitive=False, help=PROFILE_HELP, show_default=True),
     quickstart: bool = typer.Option(False, "--quickstart", help="Use the quick profile if available (passive-minimal)"),
+    project: Optional[str] = typer.Option(None, "--project", help="Associate job with a project name"),
+    incremental_from: Optional[str] = typer.Option(None, "--incremental-from", help="Job ID to reuse artifacts (incremental recon)"),
     inline: bool = typer.Option(False, "--inline", help="Run the pipeline immediately"),
     wordlist: Optional[Path] = typer.Option(None, "--wordlist", help="Override default wordlist"),
     max_screenshots: Optional[int] = typer.Option(None, "--max-screenshots", min=0, help="Limit screenshots"),
@@ -96,6 +98,7 @@ def scan(
         show_default=False,
     ),
     insecure: bool = typer.Option(False, "--insecure", help="Disable TLS verification for HTTP requests (not recommended)"),
+    split_targets: bool = typer.Option(False, "--split-targets", help="When using --targets-file, create one job per target"),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
@@ -151,10 +154,39 @@ def scan(
         raise typer.Exit(code=1)
 
     manager = JobManager()
+    created: list[str] = []
+    if split_targets and targets_file:
+        target_lines = Path(targets_file).read_text(encoding="utf-8").splitlines()
+        targets_list = [line.strip() for line in target_lines if line.strip()]
+        if not targets_list:
+            typer.echo("No targets found in file", err=True)
+            raise typer.Exit(code=1)
+        for tgt in targets_list:
+            record = manager.create_job(
+                target=tgt,
+                profile=selected_profile,
+                inline=inline,
+                project=project,
+                wordlist=str(wordlist) if wordlist else None,
+                targets_file=None,
+                max_screenshots=max_screenshots,
+                force=force,
+                allow_ip=allow_ip,
+                active_modules=modules,
+                scanners=scanners,
+                execution_profile=execution_profile,
+                runtime_overrides=runtime_overrides,
+                insecure=insecure,
+                incremental_from=incremental_from,
+            )
+            created.append(record.spec.job_id)
+        typer.echo(f"Jobs created: {', '.join(created)}")
+        return
     record = manager.create_job(
         target=target or "",
         profile=selected_profile,
         inline=inline,
+        project=project,
         wordlist=str(wordlist) if wordlist else None,
         targets_file=str(targets_file) if targets_file else None,
         max_screenshots=max_screenshots,
@@ -165,6 +197,7 @@ def scan(
         execution_profile=execution_profile,
         runtime_overrides=runtime_overrides,
         insecure=insecure,
+        incremental_from=incremental_from,
     )
     job_id = record.spec.job_id
     typer.echo(f"Job created: {job_id}")
@@ -268,8 +301,11 @@ def tail_logs(job_id: str) -> None:
 
 
 @app.command("list-jobs")
-def list_jobs(status: Optional[str] = typer.Argument(None, help="Optional status filter")) -> None:
-    """List jobs, optionally filtered by status."""
+def list_jobs(
+    status: Optional[str] = typer.Argument(None, help="Optional status filter"),
+    project: Optional[str] = typer.Option(None, "--project", help="Filter jobs by project"),
+) -> None:
+    """List jobs, optionally filtered by status or project."""
     if status and status not in STATUS_CHOICES:
         typer.echo(f"Invalid status filter: {status}", err=True)
         raise typer.Exit(code=1)
@@ -451,6 +487,31 @@ def verify_job(job_id: str) -> None:
     for issue in issues:
         typer.echo(f"- {issue}", err=True)
     raise typer.Exit(code=4)
+
+
+@app.command()
+def projects() -> None:
+    """List configured projects."""
+    from recon_cli import projects as projects_mod
+
+    names = projects_mod.list_projects()
+    if not names:
+        typer.echo("No projects found")
+        return
+    for name in names:
+        typer.echo(name)
+
+
+@app.command()
+def schema(fmt: str = typer.Option("json", "--format", help="Output format: json")) -> None:
+    """Emit machine-readable schema for automation clients."""
+    from recon_cli import api
+
+    fmt = fmt.lower()
+    if fmt != "json":
+        typer.echo(f"Unsupported format: {fmt}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(api.schema_json())
 
 def main() -> None:
     app()

@@ -31,7 +31,7 @@ class PipelineContext:
     def __post_init__(self) -> None:
         spec = self.record.spec
         overrides = getattr(spec, 'runtime_overrides', {}) or {}
-        base_config = config.RUNTIME_CONFIG.clone()
+        base_config = config.RuntimeConfig()
         if getattr(spec, "insecure", False):
             overrides = {**overrides, "verify_tls": False}
         if overrides:

@@ -62,6 +62,7 @@ class JobManager:
         self,
         target: str,
         profile: str,
+        project: Optional[str] = None,
         inline: bool = False,
         wordlist: Optional[str] = None,
         targets_file: Optional[str] = None,
@@ -74,6 +75,7 @@ class JobManager:
         execution_profile: Optional[str] = None,
         runtime_overrides: Optional[Dict[str, Any]] = None,
         insecure: bool = False,
+        incremental_from: Optional[str] = None,
     ) -> JobRecord:
         job_id = self.generate_job_id()
         root = config.QUEUED_JOBS / job_id
@@ -128,6 +130,7 @@ class JobManager:
             job_id=job_id,
             target=target,
             profile=profile,
+            project=project,
             inline=inline,
             wordlist=prepared_wordlist,
             targets_file=prepared_targets_file,
@@ -140,8 +143,15 @@ class JobManager:
             execution_profile=execution_profile,
             runtime_overrides=prepared_overrides,
             insecure=insecure,
+            incremental_from=incremental_from,
         )
         metadata = JobMetadata(job_id=job_id, queued_at=time_utils.iso_now())
+        if project:
+            try:
+                from recon_cli.projects import ensure_project
+                ensure_project(project)
+            except Exception:
+                pass
         fs.write_json(paths.spec_path, spec.to_dict())
         fs.write_json(paths.metadata_path, metadata.to_dict())
         paths.results_jsonl.touch(exist_ok=True)
@@ -162,7 +172,7 @@ class JobManager:
         metadata = JobMetadata.from_dict(metadata_payload)
         return JobRecord(spec=spec, metadata=metadata, paths=paths)
 
-    def list_jobs(self, status: Optional[str] = None) -> List[str]:
+    def list_jobs(self, status: Optional[str] = None, project: Optional[str] = None) -> List[str]:
         groups = {
             None: [config.QUEUED_JOBS, config.RUNNING_JOBS, config.FINISHED_JOBS, config.FAILED_JOBS],
             "queued": [config.QUEUED_JOBS],
@@ -179,6 +189,10 @@ class JobManager:
                 continue
             for child in directory.iterdir():
                 if child.is_dir():
+                    if project:
+                        spec_payload = fs.read_json(child / config.SPEC_NAME, default={})
+                        if spec_payload.get("project") != project:
+                            continue
                     job_ids.append(child.name)
         return sorted(job_ids)
 

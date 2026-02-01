@@ -56,6 +56,8 @@ from recon_cli.active import modules as active_modules
 from recon_cli.utils import time as time_utils
 from recon_cli.utils import validation
 from recon_cli.utils.jsonl import iter_jsonl, read_jsonl
+from recon_cli.pipeline.progress import ProgressLogger
+from recon_cli import rules as rules_engine
 try:
     from recon_cli.learning.collector import DatasetStore, HostFeatures
     from recon_cli.learning.model import LearningModel
@@ -374,6 +376,21 @@ class DedupeStage(Stage):
         dedupe_path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
         context.record.metadata.stats["dedupe_hosts"] = len(normalized)
         context.manager.update_metadata(context.record)
+        # Incremental: seed prior dedupe hosts if available
+        prev_job_id = getattr(context.record.spec, "incremental_from", None)
+        if prev_job_id:
+            prev = context.manager.load_job(prev_job_id)
+            if prev:
+                prev_dedupe = prev.paths.artifact("dedupe_hosts.txt")
+                if prev_dedupe.exists():
+                    try:
+                        prev_hosts = {line.strip() for line in prev_dedupe.read_text(encoding="utf-8").splitlines() if line.strip()}
+                        merged = sorted(set(normalized) | prev_hosts)
+                        dedupe_path.write_text("\n".join(merged) + "\n", encoding="utf-8")
+                        context.record.metadata.stats["dedupe_hosts"] = len(merged)
+                        context.manager.update_metadata(context.record)
+                    except Exception:
+                        context.logger.warning("Failed to merge previous dedupe hosts for incremental run")
 
 
 class ResolveStage(Stage):
@@ -497,6 +514,8 @@ class EnrichmentStage(Stage):
         enrichment_store: Dict[str, dict] = {}
         artifacts_path = context.record.paths.artifact("ip_enrichment.json")
         appended = 0
+        cache_path = config.RECON_HOME / "cache" / "enrich.json"
+        cache_data: Dict[str, dict] = fs.read_json(cache_path, default={}) if cache_path.exists() else {}
         for asset in assets:
             hostname = asset.get("hostname")
             ip = asset.get("ip")
@@ -504,6 +523,14 @@ class EnrichmentStage(Stage):
                 continue
             key = f"{hostname}:{ip}"
             if key in enrichment_store:
+                continue
+            cached = cache_data.get(key)
+            if cached:
+                cached = dict(cached)
+                cached["source"] = cached.get("source", "cache")
+                enrichment_store[key] = cached
+                if context.results.append(cached):
+                    appended += 1
                 continue
             try:
                 info = enrich_utils.enrich_asset(hostname, ip, client)
@@ -534,6 +561,12 @@ class EnrichmentStage(Stage):
                 hostname = data["hostname"]
                 mapped.setdefault(hostname, []).append(data)
             artifacts_path.write_text(json.dumps(mapped, indent=2, sort_keys=True), encoding="utf-8")
+            try:
+                fs.ensure_directory(cache_path.parent)
+                cache_data.update(enrichment_store)
+                cache_path.write_text(json.dumps(cache_data, indent=2, sort_keys=True), encoding="utf-8")
+            except Exception:
+                context.logger.debug("Failed to persist enrichment cache")
             context.record.metadata.stats["asset_enrichments"] = appended
             context.manager.update_metadata(context.record)
 
@@ -824,6 +857,7 @@ class ScoringStage(Stage):
     ENV_BOOST_TAGS = {"env:dev", "env:staging", "env:test", "env:qa", "env:preprod"}
 
     def execute(self, context: PipelineContext) -> None:
+        self.rules = getattr(self, "rules", rules_engine.load_rules())
         results_path = context.record.paths.results_jsonl
         if not results_path.exists():
             return
@@ -849,6 +883,7 @@ class ScoringStage(Stage):
                 if hostname:
                     tags = set(entry.get("tags", []))
                     tags.update(enrich_utils.hostname_tags(hostname))
+                    tags.update(rules_engine.apply_rules(entry, self.rules))
                     if tags:
                         entry["tags"] = sorted(tags)
                 updated.append(entry)
@@ -928,6 +963,10 @@ class ScoringStage(Stage):
                     score = max(score, 95)
                 server = entry.get("server")
                 score += enrich_utils.legacy_score(server)
+
+            rule_tags = rules_engine.apply_rules(entry, self.rules)
+            if rule_tags:
+                tags.update(rule_tags)
 
             entry["tags"] = sorted(tags)
             entry["score"] = max(score, 0)
@@ -1491,11 +1530,14 @@ class TrimResultsStage(Stage):
         finding_limit = max(runtime.trim_finding_max_per_host, 0)
         finding_min_score = max(runtime.trim_finding_min_score, 0)
         tag_limit = max(runtime.trim_tag_per_host_limit, 0)
+        progress = ProgressLogger(context.logger, interval=2.0)
+        progress = ProgressLogger(context.logger, interval=2.0)
 
         order = 0
+        progress = ProgressLogger(context.logger, interval=2.0)
         url_best: Dict[str, tuple[int, int, Dict[str, object], str]] = {}
         finding_buckets: Dict[str, List[tuple[int, int, Dict[str, object], str]]] = defaultdict(list)
-        low_priority_findings: List[Dict[str, object]] = []
+        low_priority_handle = None
         other_entries: List[tuple[int, Dict[str, object]]] = []
 
         stats: Dict[str, int] = {
@@ -1513,6 +1555,7 @@ class TrimResultsStage(Stage):
             if not isinstance(entry, dict):
                 continue
             order += 1
+            progress.maybe(f"Trim progress: processed {order} entries")
             etype = entry.get("type")
             if etype == "url":
                 stats["urls_total"] += 1
@@ -1537,7 +1580,12 @@ class TrimResultsStage(Stage):
                 stats["findings_total"] += 1
                 score = self._coerce_int(entry.get("score", 0))
                 if score < finding_min_score:
-                    low_priority_findings.append(self._clone_entry(entry))
+                    if low_priority_handle is None:
+                        trim_dir = context.record.paths.ensure_subdir("trim")
+                        low_priority_path = trim_dir / "low_priority_findings.jsonl"
+                        low_priority_handle = low_priority_path.open("w", encoding="utf-8")
+                    json.dump(entry, low_priority_handle, separators=(",", ":"), ensure_ascii=True)
+                    low_priority_handle.write("\n")
                     stats["findings_low_priority"] += 1
                     continue
                 cloned = self._clone_entry(entry)
@@ -1600,11 +1648,8 @@ class TrimResultsStage(Stage):
 
         trim_dir = context.record.paths.ensure_subdir("trim")
         low_priority_path = trim_dir / "low_priority_findings.jsonl"
-        if low_priority_findings:
-            with low_priority_path.open("w", encoding="utf-8") as handle:
-                for entry in low_priority_findings:
-                    json.dump(entry, handle, separators=(",", ":"), ensure_ascii=True)
-                    handle.write("\n")
+        if low_priority_handle:
+            low_priority_handle.close()
         elif low_priority_path.exists():
             low_priority_path.unlink()
 
@@ -1703,6 +1748,7 @@ class CorrelationStage(Stage):
         urls_seen = 0
         api_path_total = 0
         seen_any = False
+        progress = ProgressLogger(context.logger, interval=2.0)
 
         registered_hosts: Dict[str, Tuple[str, str]] = {}
 
@@ -1727,14 +1773,9 @@ class CorrelationStage(Stage):
                 break
             seen_any = True
             processed += 1
-            if processed % 5000 == 0:
-                logger.info(
-                    "Correlation processed %s records (hosts=%s, urls=%s, apis=%s)",
-                    processed,
-                    len(features_by_host),
-                    urls_seen,
-                    api_path_total,
-                )
+            progress.maybe(
+                f"Correlation processed {processed} records (hosts={len(features_by_host)}, urls={urls_seen}, apis={api_path_total})"
+            )
 
             etype = entry.get("type")
             if etype == "hostname":
