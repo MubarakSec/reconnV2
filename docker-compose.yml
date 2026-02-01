@@ -44,8 +44,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./jobs:/app/jobs:ro
-      - ./config:/app/config:ro
+      - ./jobs:/app/jobs
+      - ./config:/app/config
     environment:
       - RECON_HOME=/app
       - RECON_LOG_LEVEL=INFO
