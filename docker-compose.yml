@@ -58,6 +58,24 @@ services:
       timeout: 10s
       retries: 3
 
+  # Worker - processes queued jobs from web dashboard
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: reconnv2-worker
+    command: ["worker"]
+    volumes:
+      - ./jobs:/app/jobs
+      - ./config:/app/config
+      - ./archive:/app/archive
+    environment:
+      - RECON_HOME=/app
+      - RECON_LOG_LEVEL=INFO
+    depends_on:
+      - recon
+    restart: unless-stopped
+
   # API Server (optional, uncomment if needed)
   # api:
   #   build:
