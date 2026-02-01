@@ -15,6 +15,7 @@ This package contains various helper utilities:
 - structured_logging: JSON structured logging
 - config_migrate: Configuration migration
 - error_aggregator: Error grouping
+- error_recovery: Graceful degradation and partial results
 - diff: Scan comparison
 - reporter: Report generation
 - notify: Notifications
@@ -48,6 +49,7 @@ __all__ = [
     "structured_logging",
     "config_migrate",
     "error_aggregator",
+    "error_recovery",
     "diff",
     "reporter",
     "pdf_reporter",
@@ -60,3 +62,4 @@ __all__ = [
     "logging",
     "performance",
 ]
+
