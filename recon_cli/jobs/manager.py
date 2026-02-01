@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 import shutil
 import json
@@ -25,10 +26,29 @@ class JobManager:
         self.home = home or config.RECON_HOME
         config.ensure_base_directories()
 
-    def generate_job_id(self) -> str:
-        ts = time_utils.utc_now().strftime("%Y%m%d%H%M%S")
-        suffix = secrets.token_hex(3)
-        return f"{ts}_{suffix}"
+    def _sanitize_target(self, target: str) -> str:
+        """Sanitize target for use in job ID (filesystem-safe)."""
+        # Remove protocol
+        clean = re.sub(r'^https?://', '', target)
+        # Remove wildcards
+        clean = clean.replace('*', '').replace('*.', '')
+        # Keep only alphanumeric, dots, and hyphens
+        clean = re.sub(r'[^a-zA-Z0-9.-]', '', clean)
+        # Truncate to reasonable length
+        clean = clean[:30] if len(clean) > 30 else clean
+        # Remove leading/trailing dots and hyphens
+        clean = clean.strip('.-')
+        return clean or 'scan'
+
+    def generate_job_id(self, target: str = "") -> str:
+        """Generate meaningful job ID: target_YYYYMMDD_HHMMSS_suffix."""
+        ts = time_utils.utc_now().strftime("%Y%m%d_%H%M%S")
+        suffix = secrets.token_hex(2)
+        
+        if target:
+            sanitized = self._sanitize_target(target)
+            return f"{sanitized}_{ts}_{suffix}"
+        return f"scan_{ts}_{suffix}"
 
     def _lock_path(self, root: Path) -> Path:
         return root / ".lock"
@@ -77,7 +97,7 @@ class JobManager:
         insecure: bool = False,
         incremental_from: Optional[str] = None,
     ) -> JobRecord:
-        job_id = self.generate_job_id()
+        job_id = self.generate_job_id(target)
         root = config.QUEUED_JOBS / job_id
         paths = JobPaths(root)
         paths.root.mkdir(parents=True, exist_ok=True)

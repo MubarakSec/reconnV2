@@ -58,7 +58,9 @@ all = [
 ]
 
 [project.scripts]
-recon-cli = "recon_cli.cli:app"
+recon-cli = "recon_cli.cli:main"
+recon = "recon_cli.cli:main"
+reconn = "recon_cli.cli:main"
 
 [tool.typer.codegen]
 package = "recon_cli"

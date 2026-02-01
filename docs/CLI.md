@@ -63,6 +63,25 @@ recon scan example.com --project "Client ABC"
 
 ## 📋 Job Management
 
+### Job ID Format
+
+Job IDs are meaningful and human-readable:
+
+```
+{target}_{date}_{time}_{suffix}
+```
+
+**Examples:**
+| Target | Job ID |
+|--------|--------|
+| `example.com` | `example.com_20260201_143052_a1b2` |
+| `*.target.org` | `target.org_20260201_143052_c3d4` |
+| `https://api.site.com` | `api.site.com_20260201_143052_e5f6` |
+
+This makes it easy to identify jobs at a glance!
+
+---
+
 ### recon jobs list
 
 List all jobs.
@@ -97,7 +116,7 @@ recon jobs status JOB_ID
 
 **Example:**
 ```bash
-recon jobs status 20240115_abc123
+recon jobs status example.com_20260201_143052_a1b2
 ```
 
 ---
@@ -601,6 +620,103 @@ recon run-plugin NAME
 # Performance
 recon optimize
 ```
+
+---
+
+## 🆕 New Commands (2026)
+
+### Interactive Mode & Wizards
+
+```bash
+# Start interactive mode (recommended for beginners)
+recon interactive
+
+# Step-by-step scan wizard
+recon wizard
+
+# Show quick start guide
+recon quickstart
+```
+
+### Shell Completions
+
+```bash
+# Generate completion script (auto-detect shell)
+recon completions
+
+# Install completions automatically
+recon completions --install
+
+# Generate for specific shell
+recon completions --shell bash
+recon completions --shell zsh
+recon completions --shell fish
+recon completions --shell powershell
+
+# Show script without installing
+recon completions --show
+```
+
+### Report Generation
+
+```bash
+# Generate HTML report
+recon report JOB_ID --format html --output report.html
+
+# Generate executive summary only
+recon report JOB_ID --executive
+
+# Available formats: html, json, csv, markdown, xml, pdf
+recon report JOB_ID --format markdown --output report.md
+
+# Custom title
+recon report JOB_ID --format html --title "Security Assessment Q1"
+```
+
+### Web Dashboard
+
+```bash
+# Start web dashboard (default port 8080)
+recon web
+
+# Custom host and port
+recon web --host 0.0.0.0 --port 9000
+
+# Development mode with auto-reload
+recon web --reload
+```
+
+---
+
+## 🌐 Web Dashboard Features
+
+The web dashboard at `http://localhost:8080` provides:
+
+| Feature | URL | Description |
+|---------|-----|-------------|
+| Dashboard | `/` | Overview with stats and charts |
+| Jobs List | `/jobs` | All jobs with filtering |
+| Job Detail | `/jobs/{id}` | Full job results |
+| Search | `/api/search?q=...` | Full-text search |
+| Charts | `/api/charts/severity` | Severity distribution |
+| WebSocket | `/ws/updates` | Real-time updates |
+| Reports | `/api/jobs/{id}/report` | Generate reports |
+
+---
+
+## 🧙 Interactive Mode Commands
+
+When in interactive mode (`recon interactive`):
+
+| Command | Description |
+|---------|-------------|
+| `scan` | Start scan wizard |
+| `profile` | Create/edit profile |
+| `jobs` | List jobs |
+| `results <id>` | View job results |
+| `report <id>` | Generate report |
+| `help` | Show commands |
+| `quit` | Exit interactive mode |
 
 ---
 

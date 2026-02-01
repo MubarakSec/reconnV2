@@ -740,6 +740,272 @@ def run_plugin(
         typer.secho(f"❌ Plugin failed: {result.error}", fg=typer.colors.RED)
 
 
+# ============================================================================
+# INTERACTIVE MODE & WIZARD COMMANDS
+# ============================================================================
+
+@app.command("interactive")
+def interactive_mode() -> None:
+    """Start interactive wizard mode for guided scanning."""
+    try:
+        from recon_cli.cli_wizard import InteractiveMode
+        
+        rich_print("[bold cyan]🧙 ReconnV2 Interactive Mode[/bold cyan]")
+        rich_print("Type 'help' for available commands, 'quit' to exit.\n")
+        
+        mode = InteractiveMode()
+        mode.run()
+    except ImportError as e:
+        typer.secho(f"Interactive mode not available: {e}", fg=typer.colors.RED)
+    except KeyboardInterrupt:
+        rich_print("\n[yellow]Exiting interactive mode...[/yellow]")
+
+
+@app.command("wizard")
+def scan_wizard() -> None:
+    """Launch step-by-step scan configuration wizard."""
+    try:
+        from recon_cli.cli_wizard import ScanWizard
+        
+        rich_print("[bold cyan]🧙 Scan Configuration Wizard[/bold cyan]\n")
+        
+        wizard = ScanWizard()
+        result = wizard.run()
+        
+        if result.completed:
+            rich_print("\n[bold green]✅ Wizard completed![/bold green]")
+            rich_print(f"Configuration: {json.dumps(result.data, indent=2)}")
+            
+            # Ask to run scan
+            if typer.confirm("Run scan with this configuration?"):
+                spec = result.data
+                scan(
+                    target=spec.get("target"),
+                    profile=spec.get("profile", "passive"),
+                    inline=True,
+                )
+        else:
+            rich_print("[yellow]Wizard cancelled.[/yellow]")
+    except ImportError as e:
+        typer.secho(f"Wizard not available: {e}", fg=typer.colors.RED)
+
+
+# ============================================================================
+# SHELL COMPLETIONS
+# ============================================================================
+
+@app.command("completions")
+def setup_completions(
+    shell: str = typer.Option(None, "--shell", "-s", help="Shell type: bash, zsh, fish, powershell"),
+    install: bool = typer.Option(False, "--install", "-i", help="Auto-install completions"),
+    show: bool = typer.Option(False, "--show", help="Show completion script without installing"),
+) -> None:
+    """Generate or install shell completions."""
+    try:
+        from recon_cli.completions import CompletionGenerator, CompletionInstaller, Shell
+        
+        # Auto-detect shell if not specified
+        if not shell:
+            import os
+            shell_env = os.environ.get("SHELL", "")
+            if "zsh" in shell_env:
+                shell = "zsh"
+            elif "fish" in shell_env:
+                shell = "fish"
+            elif os.name == "nt":
+                shell = "powershell"
+            else:
+                shell = "bash"
+        
+        shell_enum = Shell(shell.lower())
+        generator = CompletionGenerator()
+        
+        if show or not install:
+            script = generator.generate(shell_enum)
+            rich_print(f"[bold]Completion script for {shell}:[/bold]\n")
+            print(script)
+            rich_print(f"\n[dim]Use --install to auto-install[/dim]")
+        
+        if install:
+            installer = CompletionInstaller()
+            success, message = installer.install(shell_enum)
+            if success:
+                typer.secho(f"✅ {message}", fg=typer.colors.GREEN)
+            else:
+                typer.secho(f"❌ {message}", fg=typer.colors.RED)
+                
+    except ImportError as e:
+        typer.secho(f"Completions module not available: {e}", fg=typer.colors.RED)
+    except ValueError as e:
+        typer.secho(f"Invalid shell: {shell}. Use bash, zsh, fish, or powershell", fg=typer.colors.RED)
+
+
+# ============================================================================
+# REPORT GENERATION
+# ============================================================================
+
+@app.command("report")
+def generate_report(
+    job_id: str = typer.Argument(..., help="Job ID to generate report for"),
+    format: str = typer.Option("html", "--format", "-f", help="Report format: html, json, csv, markdown, xml, pdf"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
+    executive: bool = typer.Option(False, "--executive", "-e", help="Generate executive summary only"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Custom report title"),
+) -> None:
+    """Generate a report for a completed job."""
+    try:
+        from recon_cli.reports import ReportGenerator, ReportConfig, ReportFormat
+        from recon_cli.reports.executive import ExecutiveSummaryGenerator
+        
+        manager = JobManager()
+        record = _load_job_or_exit(manager, job_id)
+        
+        # Load job data
+        job_data = {
+            "job_id": job_id,
+            "targets": [record.spec.target] if hasattr(record.spec, 'target') else [],
+            "findings": [],
+            "hosts": [],
+            "start_time": record.metadata.started_at,
+            "end_time": record.metadata.finished_at,
+        }
+        
+        # Load results
+        if record.paths.results_jsonl.exists():
+            from recon_cli.utils.jsonl import read_jsonl
+            for item in read_jsonl(record.paths.results_jsonl):
+                item_type = item.get("type", "other")
+                if item_type == "host":
+                    job_data["hosts"].append(item)
+                else:
+                    job_data["findings"].append(item)
+        
+        if executive:
+            # Executive summary only
+            gen = ExecutiveSummaryGenerator(author="ReconnV2")
+            summary = gen.generate(job_data, title=title)
+            
+            if format == "html":
+                content = summary.to_html()
+                ext = ".html"
+            else:
+                content = summary.to_text()
+                ext = ".txt"
+            
+            if output:
+                output.write_text(content)
+                typer.secho(f"✅ Executive summary saved to {output}", fg=typer.colors.GREEN)
+            else:
+                print(content)
+        else:
+            # Full report
+            report_format = ReportFormat(format.lower())
+            config = ReportConfig(
+                format=report_format,
+                title=title or f"Reconnaissance Report - {job_id}",
+                include_executive_summary=True,
+            )
+            
+            generator = ReportGenerator(config)
+            
+            if output:
+                generator.generate_to_file(job_data, output)
+                typer.secho(f"✅ Report saved to {output}", fg=typer.colors.GREEN)
+            else:
+                content = generator.generate(job_data)
+                print(content)
+                
+    except ImportError as e:
+        typer.secho(f"Reports module not available: {e}", fg=typer.colors.RED)
+    except ValueError as e:
+        typer.secho(f"Invalid format: {format}. Use html, json, csv, markdown, xml, or pdf", fg=typer.colors.RED)
+
+
+# ============================================================================
+# WEB DASHBOARD
+# ============================================================================
+
+@app.command("web")
+def start_web(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(8080, "--port", "-p", help="Port to bind to"),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
+) -> None:
+    """Start the web dashboard."""
+    try:
+        import uvicorn
+        from recon_cli.web.app import app as web_app, WEB_AVAILABLE
+        
+        if not WEB_AVAILABLE:
+            typer.secho("Web dependencies not installed. Run: pip install fastapi uvicorn", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        
+        rich_print(f"[bold cyan]🌐 Starting ReconnV2 Web Dashboard[/bold cyan]")
+        rich_print(f"   URL: http://{host}:{port}")
+        rich_print(f"   Press Ctrl+C to stop\n")
+        
+        uvicorn.run(
+            "recon_cli.web.app:app",
+            host=host,
+            port=port,
+            reload=reload,
+            log_level="info",
+        )
+    except ImportError:
+        typer.secho("Web dependencies not installed. Run: pip install fastapi uvicorn", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+
+# ============================================================================
+# QUICK START HELPER
+# ============================================================================
+
+@app.command("quickstart")
+def quickstart_guide() -> None:
+    """Show quick start guide for new users."""
+    rich_print("""
+[bold cyan]🚀 ReconnV2 Quick Start Guide[/bold cyan]
+
+[bold]1. Basic Scan[/bold]
+   recon scan example.com --profile passive
+
+[bold]2. Full Scan with Vulnerability Detection[/bold]
+   recon scan example.com --profile full --scanner nuclei
+
+[bold]3. Interactive Mode (Recommended for Beginners)[/bold]
+   recon interactive
+
+[bold]4. Step-by-Step Wizard[/bold]
+   recon wizard
+
+[bold]5. View Job Results[/bold]
+   recon results <job_id>
+   recon results <job_id> --json
+
+[bold]6. Generate Report[/bold]
+   recon report <job_id> --format html --output report.html
+   recon report <job_id> --executive  # Summary only
+
+[bold]7. Start Web Dashboard[/bold]
+   recon web --port 8080
+   Then open http://localhost:8080
+
+[bold]8. List All Jobs[/bold]
+   recon list
+   recon list --status finished
+
+[bold]9. Install Shell Completions[/bold]
+   recon completions --install
+
+[bold]10. Get Help[/bold]
+   recon --help
+   recon scan --help
+
+[dim]Tip: Use --profile passive for safe reconnaissance,
+     --profile full for comprehensive scanning.[/dim]
+""")
+
+
 def main() -> None:
     app()
 

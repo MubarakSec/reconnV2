@@ -577,11 +577,189 @@ http://localhost:8000/openapi.json  # OpenAPI JSON
 
 ## 📝 Changelog
 
+### v2.0.0 (2026)
+- 🔍 **Search API** - Full-text search across results
+- 📊 **Charts API** - Get chart data for visualizations
+- ⚡ **WebSocket** - Real-time job updates
+- 📄 **Reports API** - Multi-format report generation
+- 🔐 **Executive Summary** - Auto-generated summaries
+
 ### v1.0.0
 - Initial API release
 - Basic CRUD operations
 - Report generation
 - Webhook support
+
+---
+
+## 🆕 New API Endpoints (v2.0)
+
+### Search API
+
+#### GET /api/search
+
+Full-text search across all job results.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string | Search query (required) |
+| `type` | string | Filter by type: `host`, `finding`, `vulnerability` |
+| `limit` | int | Max results (default: 50) |
+
+**Query Syntax:**
+- `sql injection` - Search for words
+- `"exact phrase"` - Exact match
+- `type:vulnerability` - Filter by type
+- `-exclude` - Exclude term
+- `severity:critical` - Field search
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/search?q=sql+injection&type=vulnerability"
+```
+
+**Response:**
+```json
+{
+  "query": "sql injection",
+  "total": 12,
+  "results": [
+    {
+      "id": "job123:finding456",
+      "score": 0.95,
+      "type": "vulnerability",
+      "data": { ... },
+      "highlights": ["...SQL injection..."]
+    }
+  ],
+  "aggregations": {
+    "by_type": { "vulnerability": 8, "finding": 4 }
+  }
+}
+```
+
+---
+
+### Charts API
+
+#### GET /api/charts/{chart_type}
+
+Get chart data for dashboard visualizations.
+
+**Path Parameters:**
+| Parameter | Values |
+|-----------|--------|
+| `chart_type` | `severity`, `type`, `timeline`, `top_hosts` |
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | string | Filter to specific job |
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/charts/severity"
+```
+
+**Response (Chart.js format):**
+```json
+{
+  "labels": ["Critical", "High", "Medium", "Low", "Info"],
+  "datasets": [{
+    "data": [5, 12, 25, 40, 100],
+    "backgroundColor": ["#dc2626", "#ea580c", "#eab308", "#3b82f6", "#6b7280"]
+  }]
+}
+```
+
+---
+
+### WebSocket API
+
+#### WS /ws/updates
+
+Real-time updates via WebSocket.
+
+**Connection:**
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/updates');
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log(data.type, data.payload);
+};
+```
+
+**Message Types:**
+| Type | Description |
+|------|-------------|
+| `job_started` | Job has started |
+| `job_completed` | Job finished |
+| `stage_started` | Pipeline stage started |
+| `stage_completed` | Pipeline stage finished |
+| `finding_new` | New finding discovered |
+| `heartbeat` | Keep-alive ping |
+
+**Example Message:**
+```json
+{
+  "type": "finding_new",
+  "timestamp": "2026-01-15T10:30:00Z",
+  "payload": {
+    "job_id": "abc123",
+    "title": "SQL Injection in login form",
+    "severity": "high"
+  }
+}
+```
+
+---
+
+### Reports API
+
+#### GET /api/jobs/{job_id}/report
+
+Generate report in various formats.
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `format` | string | Output format: `json`, `html`, `csv`, `markdown`, `xml` |
+| `executive` | bool | Generate executive summary only |
+
+**Examples:**
+```bash
+# Full JSON report
+curl "http://localhost:8000/api/jobs/abc123/report?format=json"
+
+# Executive summary
+curl "http://localhost:8000/api/jobs/abc123/report?executive=true"
+
+# HTML report
+curl "http://localhost:8000/api/jobs/abc123/report?format=html" -o report.html
+```
+
+**Executive Summary Response:**
+```json
+{
+  "title": "Security Assessment - example.com",
+  "generated_at": "2026-01-15T10:30:00Z",
+  "risk": {
+    "score": 7.2,
+    "level": "high",
+    "grade": "D"
+  },
+  "severity_breakdown": {
+    "critical": 2,
+    "high": 8,
+    "medium": 15,
+    "low": 30
+  },
+  "key_findings": [...],
+  "recommendations": [...]
+}
+```
 
 ---
 

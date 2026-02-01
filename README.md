@@ -68,6 +68,25 @@ reconnV2/
 | 💾 **Cache** | تخزين مؤقت ذكي |
 | 🔒 **كشف الأسرار** | اكتشاف API Keys و Tokens |
 | 🤖 **CI/CD** | GitHub Actions للاختبار التلقائي |
+| 🧙 **الوضع التفاعلي** | معالج سهل للمبتدئين |
+| 🔍 **بحث متقدم** | بحث في جميع النتائج |
+| 📈 **رسوم بيانية** | Charts للإحصائيات |
+| ⚡ **WebSocket** | تحديثات فورية مباشرة |
+
+---
+
+## 🚀 البدء السريع (للمبتدئين)
+
+```bash
+# الطريقة الأسهل - الوضع التفاعلي
+recon interactive
+
+# أو معالج الفحص خطوة بخطوة
+recon wizard
+
+# أو عرض دليل البدء السريع
+recon quickstart
+```
 
 ---
 
@@ -97,10 +116,44 @@ pip install -e .
 sudo apt install subfinder amass nuclei httpx-toolkit
 ```
 
-### الطريقة 3: Docker
+### الطريقة 3: Docker 🐳 (الأسهل للتثبيت!)
+
+> **لماذا Docker؟** تثبيت بأمر واحد - جميع الأدوات جاهزة - لا حاجة لتثبيت يدوي!
+
 ```bash
-docker build -t reconnv2 .
-docker run -it reconnv2 --help
+# أمر واحد فقط - كل شيء جاهز!
+docker-compose up -d
+
+# الآن افتح لوحة التحكم
+# http://localhost:8080
+
+# أو استخدم الوضع التفاعلي
+docker-compose exec recon recon interactive
+
+# أو الفحص المباشر
+docker-compose exec recon recon scan example.com --profile passive
+```
+
+**ما الذي يتضمنه Docker؟**
+| المكون | الحالة |
+|--------|--------|
+| ✅ Python + جميع المكتبات | مثبت |
+| ✅ subfinder, amass, nuclei | مثبت |
+| ✅ httpx, naabu, dalfox | مثبت |
+| ✅ sqlmap, wpscan | مثبت |
+| ✅ waybackurls, gau | مثبت |
+| ✅ Web Dashboard | يعمل على :8080 |
+| ✅ PDF Reports | جاهز |
+
+**أوامر Docker المفيدة:**
+```bash
+make docker-up          # تشغيل كل شيء
+make docker-interactive # وضع تفاعلي
+make docker-wizard      # معالج خطوة بخطوة
+make docker-scan TARGET=example.com
+make docker-logs        # عرض السجلات
+make docker-shell       # فتح shell
+make docker-down        # إيقاف
 ```
 
 ---
@@ -501,20 +554,20 @@ recon-cli list-jobs
 recon-cli list-jobs --status running
 
 # عرض حالة مهمة
-recon-cli status <job-id>
+recon-cli status example.com_20260201_143052_a1b2
 
 # متابعة السجلات
-recon-cli tail-logs <job-id>
+recon-cli tail-logs example.com_20260201_143052_a1b2
 
 # إعادة تشغيل مهمة فاشلة
-recon-cli requeue <job-id>
+recon-cli requeue example.com_20260201_143052_a1b2
 
 # تصدير النتائج
-recon-cli export <job-id> --format json
-recon-cli export <job-id> --format txt
+recon-cli export example.com_20260201_143052_a1b2 --format json
+recon-cli export example.com_20260201_143052_a1b2 --format txt
 
 # إنشاء تقرير
-recon-cli report <job-id>
+recon-cli report example.com_20260201_143052_a1b2
 
 # فحص النظام
 recon-cli doctor
@@ -523,12 +576,15 @@ recon-cli doctor
 recon-cli prune --days 7
 ```
 
+> 💡 **معرف المهمة (Job ID):** يتضمن اسم الهدف + التاريخ + الوقت، مثل:
+> `example.com_20260201_143052_a1b2`
+
 ---
 
 ## 📁 هيكل النتائج
 
 ```
-jobs/finished/<job-id>/
+jobs/finished/example.com_20260201_143052_a1b2/
 ├── metadata.json      # بيانات المهمة
 ├── spec.json          # مواصفات الفحص
 ├── results.jsonl      # النتائج (JSON Lines)
@@ -643,12 +699,41 @@ echo -e "site1.com\nsite2.com" | tee targets.txt && \
 
 ## 🎯 نصائح للاستخدام
 
-1. **ابدأ بـ passive** - دائماً ابدأ بالفحص السلبي للاستكشاف
-2. **استخدم الواجهة التفاعلية** - `./recon.sh` للمبتدئين
-3. **راجع cheatsheet** - `./cheatsheet.sh` للمرجع السريع
-4. **تابع السجلات** - `tail-logs` لمتابعة التقدم
-5. **استخدم --force** - لإعادة الفحص من البداية
-6. **نظف المهام** - `prune --days 7` بانتظام
+1. **ابدأ بـ interactive** - `recon interactive` للمبتدئين (الأسهل!)
+2. **استخدم wizard** - `recon wizard` لإعداد الفحص خطوة بخطوة
+3. **ابدأ بـ passive** - دائماً ابدأ بالفحص السلبي للاستكشاف
+4. **استخدم الواجهة التفاعلية** - `./recon.sh` للمبتدئين
+5. **راجع cheatsheet** - `./cheatsheet.sh` للمرجع السريع
+6. **تابع السجلات** - `tail-logs` لمتابعة التقدم
+7. **استخدم --force** - لإعادة الفحص من البداية
+8. **نظف المهام** - `prune --days 7` بانتظام
+9. **جرب الويب** - `recon web` لواجهة رسومية جميلة
+10. **ثبت الإكمال التلقائي** - `recon completions --install`
+
+---
+
+## 🆕 الأوامر الجديدة (سهلة الاستخدام)
+
+```bash
+# === للمبتدئين ===
+recon interactive          # وضع تفاعلي مع قائمة أوامر
+recon wizard               # معالج خطوة بخطوة
+recon quickstart           # عرض دليل البدء السريع
+
+# === لوحة التحكم ===
+recon web                  # تشغيل لوحة تحكم ويب
+recon web --port 9000      # مع بورت مخصص
+
+# === التقارير ===
+recon report JOB_ID --format html -o report.html
+recon report JOB_ID --executive   # ملخص تنفيذي فقط
+
+# === الإكمال التلقائي ===
+recon completions --install       # تثبيت تلقائي
+recon completions --shell bash    # لـ Bash
+recon completions --shell zsh     # لـ Zsh
+recon completions --shell fish    # لـ Fish
+```
 
 ---
 

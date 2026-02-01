@@ -186,9 +186,22 @@
                 <a href="/jobs/{{ job.id }}/report" class="btn btn-success btn-action me-2">
                     <i class="bi bi-file-earmark-text me-1"></i> تقرير HTML
                 </a>
-                <a href="/api/jobs/{{ job.id }}/results" class="btn btn-outline-light btn-action">
+                <a href="/api/jobs/{{ job.id }}/report?format=json" class="btn btn-outline-light btn-action me-2">
                     <i class="bi bi-download me-1"></i> JSON
                 </a>
+                {% if job.status == 'running' %}
+                <button class="btn btn-warning btn-action me-2" onclick="cancelJob('{{ job.id }}')">
+                    <i class="bi bi-stop-circle me-1"></i> إيقاف
+                </button>
+                {% endif %}
+                {% if job.status == 'failed' %}
+                <button class="btn btn-primary btn-action me-2" onclick="retryJob('{{ job.id }}')">
+                    <i class="bi bi-arrow-repeat me-1"></i> إعادة
+                </button>
+                {% endif %}
+                <button class="btn btn-danger btn-action" onclick="deleteJob('{{ job.id }}')">
+                    <i class="bi bi-trash me-1"></i> حذف
+                </button>
             </div>
         </div>
 
@@ -378,5 +391,88 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Job action functions
+        async function cancelJob(jobId) {
+            if (!confirm('هل تريد إلغاء هذه المهمة؟')) return;
+            
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('تم إلغاء المهمة بنجاح', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast(data.error || 'فشل في إلغاء المهمة', 'danger');
+                }
+            } catch (error) {
+                showToast('خطأ في الاتصال بالخادم', 'danger');
+            }
+        }
+        
+        async function retryJob(jobId) {
+            if (!confirm('هل تريد إعادة تشغيل هذه المهمة؟')) return;
+            
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('تم إعادة تشغيل المهمة', 'success');
+                    setTimeout(() => window.location.href = `/jobs/${data.new_job_id}`, 1500);
+                } else {
+                    showToast(data.error || 'فشل في إعادة المهمة', 'danger');
+                }
+            } catch (error) {
+                showToast('خطأ في الاتصال بالخادم', 'danger');
+            }
+        }
+        
+        async function deleteJob(jobId) {
+            if (!confirm('هل تريد حذف هذه المهمة نهائياً؟ لا يمكن التراجع!')) return;
+            
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('تم حذف المهمة', 'success');
+                    setTimeout(() => window.location.href = '/', 1000);
+                } else {
+                    showToast(data.error || 'فشل في حذف المهمة', 'danger');
+                }
+            } catch (error) {
+                showToast('خطأ في الاتصال بالخادم', 'danger');
+            }
+        }
+        
+        // Toast notification
+        function showToast(message, type = 'info') {
+            const toastHtml = `
+                <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999;">
+                    <div class="toast show bg-${type} text-white" role="alert">
+                        <div class="toast-body d-flex align-items-center">
+                            <i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i>
+                            ${message}
+                            <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="toast"></button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', toastHtml);
+            setTimeout(() => {
+                const toasts = document.querySelectorAll('.toast-container');
+                toasts.forEach(t => t.remove());
+            }, 4000);
+        }
+        
+        // Copy to clipboard
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('تم النسخ', 'success');
+            });
+        }
+    </script>
 </body>
 </html>

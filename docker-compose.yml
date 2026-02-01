@@ -2,9 +2,18 @@ version: '3.8'
 
 # ╔═══════════════════════════════════════════════════════════╗
 # ║              ReconnV2 Docker Compose                      ║
+# ║     Full setup: CLI + Web Dashboard + All Tools           ║
 # ╚═══════════════════════════════════════════════════════════╝
+#
+# Quick Start:
+#   docker-compose up -d        # Start everything
+#   docker-compose exec recon recon interactive  # Interactive mode
+#   Open http://localhost:8080  # Web Dashboard
+#
+# ╔═══════════════════════════════════════════════════════════╝
 
 services:
+  # Main ReconnV2 CLI
   recon:
     build:
       context: .
@@ -23,17 +32,49 @@ services:
     network_mode: host  # For network scanning
     stdin_open: true
     tty: true
-    
-  # Optional: Web UI (future feature)
-  # web:
+    restart: unless-stopped
+
+  # Web Dashboard
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: reconnv2-web
+    command: ["web", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./jobs:/app/jobs:ro
+      - ./config:/app/config:ro
+    environment:
+      - RECON_HOME=/app
+      - RECON_LOG_LEVEL=INFO
+    depends_on:
+      - recon
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Server (optional, uncomment if needed)
+  # api:
   #   build:
-  #     context: ./web
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: reconnv2-api
+  #   command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
   #   ports:
-  #     - "8080:8080"
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./jobs:/app/jobs
+  #     - ./config:/app/config
+  #   environment:
+  #     - RECON_HOME=/app
   #   depends_on:
   #     - recon
-  #   volumes:
-  #     - ./jobs:/app/jobs:ro
+  #   restart: unless-stopped
 
 # Volumes for persistence
 volumes:
