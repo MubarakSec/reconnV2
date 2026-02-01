@@ -46,6 +46,22 @@ from . import web
 # New modules from improvements
 from . import exceptions
 
+# Phase 8 modules
+try:
+    from . import cli_wizard
+except ImportError:
+    cli_wizard = None  # type: ignore
+
+try:
+    from . import completions
+except ImportError:
+    completions = None  # type: ignore
+
+try:
+    from . import reports
+except ImportError:
+    reports = None  # type: ignore
+
 # Optional modules that have extra dependencies
 try:
     from . import settings
@@ -90,12 +106,16 @@ __all__ = [
     "learning",
     "takeover",
     "web",
-    # New
+    # New improvements
     "exceptions",
     "settings",
     "scheduler",
     "inventory",
     "users",
+    # Phase 8 - CLI Polish & Reports
+    "cli_wizard",
+    "completions",
+    "reports",
 ]
 
 
