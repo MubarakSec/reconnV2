@@ -1,9 +1,3 @@
-def load_stage_plugins():
-    """
-    Dummy implementation for stage plugin loader.
-    Replace with actual logic to load plugins as needed.
-    """
-    return []
 from __future__ import annotations
 
 import importlib

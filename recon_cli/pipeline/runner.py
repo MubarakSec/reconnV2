@@ -8,7 +8,7 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages import PIPELINE_STAGES, Stage, StageError
 from recon_cli.utils.notify import send_pipeline_notification
 from recon_cli.utils import time as time_utils
-# Import from plugins.py module explicitly (not plugins/ package)
+# Stage plugin loader lives on the plugins package to avoid name collisions.
 import recon_cli.plugins as plugins_module
 from recon_cli import metrics
 import os

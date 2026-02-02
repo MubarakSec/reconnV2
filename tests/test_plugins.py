@@ -2,7 +2,7 @@ import os
 import sys
 from pathlib import Path
 
-# Import from plugins.py module explicitly (not plugins/ package)
+# Import from plugins package (exports stage plugin loader)
 import recon_cli.plugins as plugins_module
 from recon_cli.pipeline.stages import Stage
 

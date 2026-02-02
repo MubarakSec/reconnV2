@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING
 import importlib.util
 import inspect
 import json
@@ -16,6 +16,9 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from recon_cli.pipeline.stages import Stage
 
 
 class PluginType(Enum):
@@ -723,6 +726,54 @@ class PluginRegistry:
 def get_registry() -> PluginRegistry:
     """Get the global plugin registry"""
     return PluginRegistry()
+
+
+def _stage_log(logger_obj, level: str, message: str) -> None:
+    if logger_obj is None:
+        return
+    log_fn = getattr(logger_obj, level, None)
+    if callable(log_fn):
+        log_fn(message)
+
+
+def load_stage_plugins(logger=None) -> List["Stage"]:
+    """Load extra pipeline stages from RECON_PLUGIN_STAGES (comma-separated module:Class)."""
+    import importlib
+    import os
+
+    from recon_cli.pipeline.stages import Stage
+
+    env = os.environ.get("RECON_PLUGIN_STAGES", "")
+    if not env:
+        return []
+    stages: List[Stage] = []
+    for entry in env.split(","):
+        token = entry.strip()
+        if not token:
+            continue
+        if ":" not in token:
+            _stage_log(logger, "warning", f"Plugin stage '{token}' invalid, expected module:Class")
+            continue
+        mod_name, class_name = token.split(":", 1)
+        try:
+            module = importlib.import_module(mod_name)
+        except Exception as exc:
+            _stage_log(logger, "warning", f"Failed to import plugin module {mod_name}: {exc}")
+            continue
+        cls = getattr(module, class_name, None)
+        if cls is None:
+            _stage_log(logger, "warning", f"Plugin stage class {class_name} not found in {mod_name}")
+            continue
+        try:
+            instance = cls() if isinstance(cls, type) else cls
+        except Exception as exc:
+            _stage_log(logger, "warning", f"Failed to instantiate plugin stage {class_name}: {exc}")
+            continue
+        if not isinstance(instance, Stage):
+            _stage_log(logger, "warning", f"Plugin {class_name} is not a Stage; skipping")
+            continue
+        stages.append(instance)
+    return stages
 
 
 # Example plugins
