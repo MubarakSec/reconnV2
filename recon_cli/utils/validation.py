@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from urllib.parse import urlparse
 from typing import Iterable, List
 
 LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
@@ -37,8 +38,24 @@ def is_ip(value: str) -> bool:
         return False
 
 
-def validate_target(value: str, allow_ip: bool = False) -> str:
+def _coerce_hostname(value: str) -> str:
     candidate = value.strip()
+    if not candidate:
+        return candidate
+    parsed = None
+    if "://" in candidate:
+        parsed = urlparse(candidate)
+    else:
+        # Treat host:port or host/path as URL-like input.
+        if any(ch in candidate for ch in ("/", "?", "#")) or (":" in candidate and not is_ip(candidate)):
+            parsed = urlparse(f"http://{candidate}")
+    if parsed and parsed.hostname:
+        return parsed.hostname
+    return candidate
+
+
+def validate_target(value: str, allow_ip: bool = False) -> str:
+    candidate = _coerce_hostname(value)
     if not candidate:
         raise ValueError("Target cannot be empty")
     if is_ip(candidate):

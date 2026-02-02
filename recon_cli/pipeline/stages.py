@@ -1492,7 +1492,29 @@ class RuntimeCrawlStage(Stage):
             concurrency,
         )
 
-        results = crawl_urls(selected_urls, timeout, concurrency)
+        try:
+            results = crawl_urls(selected_urls, timeout, concurrency)
+        except Exception as exc:
+            message = str(exc)
+            missing_browsers = "playwright install" in message.lower() or "executable doesn't exist" in message.lower()
+            stats.update(
+                {
+                    "selected": len(selected_urls),
+                    "crawled": 0,
+                    "success": 0,
+                    "failures": len(selected_urls),
+                    "javascript_files": 0,
+                    "status": "playwright_browsers_missing" if missing_browsers else "crawl_error",
+                    "error": message,
+                }
+            )
+            context.manager.update_metadata(context.record)
+            if missing_browsers:
+                logger.warning("Playwright browsers not installed; skipping runtime crawl stage")
+                _note_missing_tool(context, "playwright-browsers")
+            else:
+                logger.warning("Runtime crawl failed; skipping stage: %s", message)
+            return
         if not results:
             stats.update(
                 {

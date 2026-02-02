@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import tempfile
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,11 @@ from typing import Any, Dict, Generator, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# Ensure local package imports work when running pytest without PYTHONPATH.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 # ═══════════════════════════════════════════════════════════
