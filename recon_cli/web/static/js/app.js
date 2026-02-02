@@ -346,22 +346,23 @@ function initScanForm() {
     
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
+
         const formData = {
             target: document.getElementById('target').value,
             profile: document.getElementById('profile').value,
+            scanMode: document.getElementById('scanMode') ? document.getElementById('scanMode').value : 'queued',
         };
-        
+
         if (!formData.target) {
             showToast('الرجاء إدخال الهدف', 'error');
             return;
         }
-        
+
         try {
             showLoading();
             const result = await startScan(formData);
             showToast('تم بدء الفحص بنجاح!', 'success');
-            
+
             // Redirect to job page or refresh
             if (result.job_id) {
                 window.location.href = `/jobs/${result.job_id}`;

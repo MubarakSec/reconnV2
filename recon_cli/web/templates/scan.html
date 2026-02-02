@@ -145,6 +145,14 @@
                     </h2>
                     
                     <form id="scanForm" onsubmit="startScan(event)">
+                        <!-- Scan Mode Dropdown -->
+                        <div class="mb-4">
+                            <label for="scanMode" class="form-label">وضع الفحص</label>
+                            <select class="form-select" id="scanMode" name="scanMode">
+                                <option value="queued">انتظار في قائمة المهام</option>
+                                <option value="immediate">بدء الفحص فوراً</option>
+                            </select>
+                        </div>
                         <!-- Step 1: Targets -->
                         <div class="mb-4">
                             <h5>

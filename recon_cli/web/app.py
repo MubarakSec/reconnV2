@@ -382,23 +382,41 @@ if WEB_AVAILABLE:
             target = data.get("target")
             profile = data.get("profile", "passive")
             notify = data.get("notify", False)
-            
+            scan_mode = data.get("scanMode", "queued")
+
             if not target:
                 raise HTTPException(status_code=400, detail="Target is required")
-            
+
             from recon_cli.jobs.manager import JobManager
-            
+            from recon_cli.pipeline.runner import run_pipeline
+
             manager = JobManager()
             record = manager.create_job(
                 target=target,
                 profile=profile,
             )
-            
-            return {
-                "success": True,
-                "job_id": record.spec.job_id,
-                "message": f"Scan started for {target}",
-            }
+
+            # If scanMode is 'immediate', run the pipeline right away
+            if scan_mode == "immediate":
+                try:
+                    run_pipeline(record, manager)
+                except Exception as exc:
+                    return {
+                        "success": False,
+                        "job_id": record.spec.job_id,
+                        "message": f"Failed to start scan immediately: {exc}",
+                    }
+                return {
+                    "success": True,
+                    "job_id": record.spec.job_id,
+                    "message": f"Scan started immediately for {target}",
+                }
+            else:
+                return {
+                    "success": True,
+                    "job_id": record.spec.job_id,
+                    "message": f"Scan queued for {target}",
+                }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     

@@ -11,3 +11,7 @@ __pycache__/
 .vscode/
 .idea/
 node_modules/
+jobs/
+archive/
+tmp_dummy/
+*.log
