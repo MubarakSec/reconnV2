@@ -64,7 +64,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: reconnv2-worker
-    command: ["worker"]
+    command: ["worker-run"]
     volumes:
       - ./jobs:/app/jobs
       - ./config:/app/config
