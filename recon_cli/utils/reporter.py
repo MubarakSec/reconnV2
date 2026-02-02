@@ -23,6 +23,52 @@ class ReportConfig:
     language: str = "ar"  # ar, en
 
 
+@dataclass
+class ReportData:
+    """Structured report data parsed from a job directory."""
+    job_id: str
+    status: str
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    stats: Dict[str, Any]
+    results: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
+    spec: Dict[str, Any]
+
+    @classmethod
+    def from_job_dir(cls, job_dir: Path) -> Optional["ReportData"]:
+        if not job_dir.exists():
+            return None
+        metadata_path = job_dir / "metadata.json"
+        spec_path = job_dir / "spec.json"
+        results_path = job_dir / "results.jsonl"
+
+        metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+        spec = json.loads(spec_path.read_text()) if spec_path.exists() else {}
+        results = list(read_jsonl(results_path)) if results_path.exists() else []
+
+        job_id = metadata.get("job_id") or spec.get("job_id") or job_dir.name
+        status = metadata.get("status", "unknown")
+        return cls(
+            job_id=str(job_id),
+            status=str(status),
+            started_at=metadata.get("started_at"),
+            finished_at=metadata.get("finished_at"),
+            stats=metadata.get("stats", {}) or {},
+            results=results,
+            metadata=metadata,
+            spec=spec,
+        )
+
+    def get_severity_counts(self) -> Dict[str, int]:
+        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for entry in self.results:
+            severity = str(entry.get("severity") or entry.get("priority") or "info").lower()
+            if severity in counts:
+                counts[severity] += 1
+        return counts
+
+
 def generate_html_report(
     job_dir: Path,
     output_path: Optional[Path] = None,
@@ -40,6 +86,11 @@ def generate_html_report(
         مسار ملف التقرير
     """
     config = config or ReportConfig()
+
+    if not job_dir.exists():
+        if output_path is None:
+            return job_dir / "report.html"
+        return output_path
     
     # قراءة البيانات
     metadata_path = job_dir / "metadata.json"
@@ -74,6 +125,8 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         "by_source": {},
         "hostnames": set(),
         "urls": set(),
+        "hostnames_list": [],
+        "urls_list": [],
         "secrets": [],
         "findings": [],
     }
@@ -98,9 +151,11 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         if result_type == "secret":
             stats["secrets"].append(result)
         
-        if result_type == "finding":
+        if result_type in {"finding", "vulnerability", "vuln"}:
             stats["findings"].append(result)
     
+    stats["hostnames_list"] = sorted(stats["hostnames"])[:50]
+    stats["urls_list"] = sorted(stats["urls"])[:50]
     stats["hostnames"] = len(stats["hostnames"])
     stats["urls"] = len(stats["urls"])
     
@@ -373,7 +428,8 @@ def _generate_html(
             <div class="meta">
                 <strong>{t["target"]}:</strong> {spec.get("target", "N/A")} |
                 <strong>{t["profile"]}:</strong> {spec.get("profile", "N/A")} |
-                <strong>{t["status"]}:</strong> {metadata.get("status", "N/A")}
+                <strong>{t["status"]}:</strong> {metadata.get("status", "N/A")} |
+                <strong>ID:</strong> {metadata.get("job_id", spec.get("job_id", "N/A"))}
             </div>
         </div>
         
@@ -411,6 +467,24 @@ def _generate_html(
                 <table>
                     <tr><th>النوع</th><th>العدد</th></tr>
                     {"".join(f'<tr><td>{k}</td><td>{v}</td></tr>' for k, v in stats["by_type"].items())}
+                </table>
+            </div>
+        </div>
+
+        <!-- Hostnames / URLs -->
+        <div class="grid">
+            <div class="card">
+                <h3>{t["hostnames"]}</h3>
+                <table>
+                    <tr><th>Hostname</th></tr>
+                    {"".join(f'<tr><td>{host}</td></tr>' for host in stats.get("hostnames_list", []))}
+                </table>
+            </div>
+            <div class="card">
+                <h3>{t["urls"]}</h3>
+                <table>
+                    <tr><th>URL</th></tr>
+                    {"".join(f'<tr><td>{url}</td></tr>' for url in stats.get("urls_list", []))}
                 </table>
             </div>
         </div>

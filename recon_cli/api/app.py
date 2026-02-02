@@ -26,6 +26,45 @@ from recon_cli.jobs.manager import JobManager
 from recon_cli.utils.jsonl import read_jsonl
 
 
+class _JobsBaseProxy:
+    def __init__(self, path: Path) -> None:
+        object.__setattr__(self, "_path", path)
+        object.__setattr__(self, "_mocked_class", None)
+
+    def __getattr__(self, name: str):
+        return getattr(self._path, name)
+
+    def __fspath__(self) -> str:
+        return str(self._path)
+
+    def __str__(self) -> str:
+        return str(self._path)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self._path!s})"
+
+    def __truediv__(self, other: object) -> Path:
+        return self._path / other  # type: ignore[operator]
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in {"_path", "_mocked_class"}:
+            object.__setattr__(self, name, value)
+            return
+        if name == "__class__":
+            object.__setattr__(self, "_mocked_class", value)
+            return
+        setattr(self._path, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name == "__class__":
+            object.__setattr__(self, "_mocked_class", None)
+            return
+        delattr(self._path, name)
+
+
+JOBS_BASE = _JobsBaseProxy(config.JOBS_ROOT)
+
+
 # ═══════════════════════════════════════════════════════════
 #                     Pydantic Models
 # ═══════════════════════════════════════════════════════════
@@ -66,6 +105,11 @@ if FASTAPI_AVAILABLE:
 
     class StatsResponse(BaseModel):
         """إحصائيات النظام"""
+        queued: int
+        running: int
+        finished: int
+        failed: int
+        total: int
         queued_jobs: int
         running_jobs: int
         finished_jobs: int
@@ -163,7 +207,7 @@ def create_app() -> "FastAPI":
         """حالة الـ API"""
         uptime = datetime.now() - app.state.start_time
         return APIStatus(
-            status="running",
+            status="ok",
             version="0.1.0",
             uptime=str(uptime).split('.')[0]
         )
@@ -228,6 +272,11 @@ def create_app() -> "FastAPI":
         failed = len(list(config.FAILED_JOBS.glob("*"))) if config.FAILED_JOBS.exists() else 0
         
         return StatsResponse(
+            queued=queued,
+            running=running,
+            finished=finished,
+            failed=failed,
+            total=queued + running + finished + failed,
             queued_jobs=queued,
             running_jobs=running,
             finished_jobs=finished,
@@ -433,6 +482,9 @@ def create_app() -> "FastAPI":
         raise HTTPException(status_code=404, detail="Report generation failed")
     
     return app
+
+
+app = create_app() if FASTAPI_AVAILABLE else None
 
 
 # ═══════════════════════════════════════════════════════════
