@@ -670,7 +670,7 @@ def traced(
         ... async def query_db():
         ...     return await db.query()
     """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[[Any], T]) -> Callable[[Any], T]:
         span_name = name or func.__name__
         
         if asyncio.iscoroutinefunction(func):

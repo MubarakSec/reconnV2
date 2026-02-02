@@ -321,7 +321,9 @@ class NotifierPlugin(PluginInterface):
         try:
             import time
             start = time.time()
-            success = self.send(message, **context)
+            payload = dict(context)
+            payload.pop("message", None)
+            success = self.send(message, **payload)
             execution_time = time.time() - start
             
             return PluginResult(

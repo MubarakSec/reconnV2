@@ -57,8 +57,20 @@ class MemoryCache(Generic[T]):
     - إحصائيات
     """
     
-    def __init__(self, config: Optional[CacheConfig] = None):
+    def __init__(
+        self,
+        config: Optional[CacheConfig] = None,
+        max_size: Optional[int] = None,
+        default_ttl: Optional[int] = None,
+        cleanup_interval: Optional[int] = None,
+    ):
         self.config = config or CacheConfig()
+        if max_size is not None:
+            self.config.max_size = int(max_size)
+        if default_ttl is not None:
+            self.config.default_ttl = int(default_ttl)
+        if cleanup_interval is not None:
+            self.config.cleanup_interval = int(cleanup_interval)
         self._cache: Dict[str, CacheEntry[T]] = {}
         self._lock = threading.RLock()
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
@@ -96,7 +108,7 @@ class MemoryCache(Generic[T]):
         
         self._last_cleanup = now
     
-    def get(self, key: str) -> Optional[T]:
+    def get(self, key: str, default: Optional[T] = None) -> Optional[T]:
         """الحصول على قيمة من الـ Cache"""
         hashed_key = self._make_key(key)
         
@@ -106,12 +118,12 @@ class MemoryCache(Generic[T]):
             entry = self._cache.get(hashed_key)
             if entry is None:
                 self._stats["misses"] += 1
-                return None
+                return default
             
             if entry.is_expired:
                 del self._cache[hashed_key]
                 self._stats["misses"] += 1
-                return None
+                return default
             
             entry.touch()
             self._stats["hits"] += 1
@@ -261,6 +273,12 @@ class DiskCache:
                     (key,)
                 )
                 return cursor.rowcount > 0
+
+    def clear(self) -> None:
+        """مسح كل العناصر"""
+        with self._lock:
+            with self._get_connection() as conn:
+                conn.execute("DELETE FROM cache")
     
     def cleanup(self) -> int:
         """تنظيف العناصر المنتهية"""
@@ -336,12 +354,32 @@ class HybridCache:
         memory_deleted = self._memory.delete(key)
         disk_deleted = self._disk.delete(key) if self._disk else False
         return memory_deleted or disk_deleted
+
+    def clear(self) -> None:
+        """مسح الذاكرة والقرص"""
+        self._memory.clear()
+        if self._disk:
+            self._disk.clear()
     
     def stats(self) -> Dict[str, Any]:
         """إحصائيات"""
-        stats = {"memory": self._memory.stats()}
+        memory_stats = self._memory.stats()
+        stats: Dict[str, Any] = {
+            "memory": memory_stats,
+            "memory_hits": memory_stats.get("hits", 0),
+            "memory_misses": memory_stats.get("misses", 0),
+            "memory_evictions": memory_stats.get("evictions", 0),
+        }
         if self._disk:
-            stats["disk"] = self._disk.stats()
+            disk_stats = self._disk.stats()
+            stats["disk"] = disk_stats
+            stats["disk_hits"] = disk_stats.get("total_hits", 0)
+            stats["disk_misses"] = disk_stats.get("total_misses", 0)
+            stats["disk_size"] = disk_stats.get("db_size_mb", 0)
+        else:
+            stats["disk_hits"] = 0
+            stats["disk_misses"] = 0
+            stats["disk_size"] = 0
         return stats
 
 

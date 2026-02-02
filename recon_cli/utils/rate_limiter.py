@@ -22,6 +22,8 @@ class RateLimitConfig:
     per_host_limit: float = 5.0  # الطلبات لكل مضيف
     cooldown_on_429: float = 30.0  # الانتظار عند 429
     cooldown_on_error: float = 5.0  # الانتظار عند الخطأ
+    backoff_factor: float = 2.0
+    max_backoff: float = 60.0
 
 
 @dataclass 
@@ -76,6 +78,17 @@ class TokenBucket:
                 return True
             return False
 
+    def consume(self, tokens: float = 1.0) -> bool:
+        """استهلاك tokens بدون انتظار (متوافق مع الاختبارات)"""
+        with self.lock:
+            self._refill()
+            if tokens <= 0:
+                return True
+            if self.tokens >= tokens:
+                self.tokens -= tokens
+                return True
+            return False
+
 
 class RateLimiter:
     """
@@ -96,6 +109,11 @@ class RateLimiter:
         self._host_buckets: Dict[str, TokenBucket] = {}
         self._host_cooldowns: Dict[str, float] = defaultdict(float)
         self._lock = threading.Lock()
+        self._stats = {
+            "total_requests": 0,
+            "total_429s": 0,
+            "total_errors": 0,
+        }
     
     def _get_host_bucket(self, host: str) -> TokenBucket:
         """الحصول على bucket خاص بالمضيف"""
@@ -112,7 +130,7 @@ class RateLimiter:
         from urllib.parse import urlparse
         try:
             parsed = urlparse(url)
-            return parsed.netloc or parsed.path.split('/')[0]
+            return parsed.hostname or parsed.netloc or parsed.path.split('/')[0]
         except Exception:
             return url
     
@@ -149,7 +167,10 @@ class RateLimiter:
         
         # الحصول على إذن للمضيف
         host_bucket = self._get_host_bucket(host)
-        return host_bucket.acquire(timeout=timeout)
+        allowed = host_bucket.acquire(timeout=timeout)
+        if allowed:
+            self._stats["total_requests"] += 1
+        return allowed
     
     def on_response(self, url: str, status_code: int) -> None:
         """تحديث بناءً على الاستجابة"""
@@ -158,6 +179,7 @@ class RateLimiter:
         if status_code == 429:
             # Too Many Requests - تهدئة طويلة
             self.set_cooldown(host, self.config.cooldown_on_429)
+            self._stats["total_429s"] += 1
         elif status_code >= 500:
             # Server Error - تهدئة قصيرة
             self.set_cooldown(host, self.config.cooldown_on_error)
@@ -166,17 +188,23 @@ class RateLimiter:
         """تحديث عند حدوث خطأ"""
         host = self._extract_host(url)
         self.set_cooldown(host, self.config.cooldown_on_error)
+        self._stats["total_errors"] += 1
     
     def stats(self) -> Dict[str, object]:
         """إحصائيات Rate Limiter"""
-        return {
-            "global_tokens": self._global_bucket.tokens,
-            "host_count": len(self._host_buckets),
-            "cooldowns_active": sum(
-                1 for t in self._host_cooldowns.values() 
-                if time.monotonic() < t
-            ),
-        }
+        stats = dict(self._stats)
+        stats.update(
+            {
+                "global_tokens": self._global_bucket.tokens,
+                "host_count": len(self._host_buckets),
+                "hosts_tracked": len(self._host_buckets),
+                "cooldowns_active": sum(
+                    1 for t in self._host_cooldowns.values()
+                    if time.monotonic() < t
+                ),
+            }
+        )
+        return stats
 
 
 # Decorator للاستخدام السهل

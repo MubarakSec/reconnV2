@@ -577,11 +577,14 @@ def dashboard(
 
 @app.command("notify")
 def notify(
-    message: str = typer.Argument(..., help="Message to send"),
+    message: str = typer.Argument("", help="Message to send"),
     channel: str = typer.Option("telegram", "--channel", "-c", help="Channel: telegram, slack, discord, email"),
 ) -> None:
     """Send a notification to configured channels."""
     from recon_cli.utils.notify import NotificationManager, NotificationConfig
+
+    if not message:
+        raise typer.BadParameter("message is required")
     
     # Load config from environment or defaults
     import os
@@ -647,12 +650,15 @@ def optimize() -> None:
 
 @app.command("pdf")
 def pdf_report(
-    job_id: str = typer.Argument(..., help="Job ID to generate PDF report for"),
+    job_id: str = typer.Argument("", help="Job ID to generate PDF report for"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
     title: str = typer.Option("تقرير الاستطلاع الأمني", "--title", help="Report title"),
 ) -> None:
     """Generate PDF report for a job."""
     from recon_cli.utils.pdf_reporter import generate_pdf_report, PDFReportConfig
+
+    if not job_id:
+        raise typer.BadParameter("job_id is required")
     
     manager = JobManager()
     record = manager.load_job(job_id)
@@ -713,12 +719,15 @@ def list_plugins(
 
 @app.command("run-plugin")
 def run_plugin(
-    name: str = typer.Argument(..., help="Plugin name to run"),
+    name: str = typer.Argument("", help="Plugin name to run"),
     target: Optional[str] = typer.Option(None, "--target", "-t", help="Target for scanner plugins"),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Message for notifier plugins"),
 ) -> None:
     """Run a plugin."""
     from recon_cli.plugins import get_registry
+
+    if not name:
+        raise typer.BadParameter("name is required")
     
     registry = get_registry()
     registry.setup()
@@ -846,7 +855,7 @@ def setup_completions(
 
 @app.command("report")
 def generate_report(
-    job_id: str = typer.Argument(..., help="Job ID to generate report for"),
+    job_id: str = typer.Argument("", help="Job ID to generate report for"),
     format: str = typer.Option("html", "--format", "-f", help="Report format: html, json, csv, markdown, xml, pdf"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
     executive: bool = typer.Option(False, "--executive", "-e", help="Generate executive summary only"),
@@ -856,6 +865,9 @@ def generate_report(
     try:
         from recon_cli.reports import ReportGenerator, ReportConfig, ReportFormat
         from recon_cli.reports.executive import ExecutiveSummaryGenerator
+
+        if not job_id:
+            raise typer.BadParameter("job_id is required")
         
         manager = JobManager()
         record = _load_job_or_exit(manager, job_id)

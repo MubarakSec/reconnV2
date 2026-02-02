@@ -286,8 +286,8 @@ class CircuitBreaker:
     
     def protect(
         self,
-        func: Callable[..., T],
-    ) -> Callable[..., T]:
+        func: Callable[[Any], T],
+    ) -> Callable[[Any], T]:
         """
         Decorator لحماية function.
         
@@ -396,7 +396,7 @@ registry = CircuitBreakerRegistry()
 # ═══════════════════════════════════════════════════════════
 
 async def retry_with_circuit_breaker(
-    func: Callable[..., T],
+    func: Callable[[Any], T],
     *args,
     circuit_name: str,
     max_retries: int = 3,

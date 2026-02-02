@@ -523,10 +523,12 @@ def create_websocket_router():
     @router.websocket("/connect")
     async def websocket_endpoint(
         websocket: WebSocket,
-        client_id: str = Query(...),
+        client_id: str = Query(""),
         channels: str = Query("default"),
     ):
         """WebSocket connection endpoint."""
+        if not client_id:
+            client_id = "anonymous"
         channel_list = [c.strip() for c in channels.split(",") if c.strip()]
         await manager.handle_connection(websocket, client_id, channel_list)
     
@@ -534,9 +536,11 @@ def create_websocket_router():
     async def job_websocket(
         websocket: WebSocket,
         job_id: str,
-        client_id: str = Query(...),
+        client_id: str = Query(""),
     ):
         """WebSocket for specific job updates."""
+        if not client_id:
+            client_id = "anonymous"
         await manager.handle_connection(
             websocket,
             client_id,

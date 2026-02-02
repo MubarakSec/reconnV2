@@ -72,7 +72,7 @@ JOBS_BASE = _JobsBaseProxy(config.JOBS_ROOT)
 if FASTAPI_AVAILABLE:
     class ScanRequest(BaseModel):
         """طلب فحص جديد"""
-        target: str = Field(..., description="الهدف (domain أو IP)")
+        target: str = Field("", description="الهدف (domain أو IP)")
         profile: str = Field("passive", description="الملف الشخصي")
         inline: bool = Field(False, description="تشغيل فوري")
         scanners: List[str] = Field(default_factory=list, description="الماسحات")
@@ -401,6 +401,9 @@ def create_app() -> "FastAPI":
     async def create_scan(request: ScanRequest, background_tasks: BackgroundTasks):
         """إنشاء فحص جديد"""
         manager = app.state.manager
+
+        if not request.target:
+            raise HTTPException(status_code=400, detail="target is required")
         
         try:
             record = manager.create_job(

@@ -568,7 +568,7 @@ def error_recovery_context(
 #                     Decorators
 # ═══════════════════════════════════════════════════════════
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar('F', bound=Callable)
 
 
 def with_recovery(
@@ -606,7 +606,7 @@ def with_recovery(
 
 def graceful_stage(
     optional: bool = True,
-    fallback: Optional[Callable[..., Any]] = None,
+    fallback: Optional[Callable[[Any], Any]] = None,
 ) -> Callable[[F], F]:
     """
     Decorator للمراحل القابلة للتدهور.

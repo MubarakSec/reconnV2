@@ -839,7 +839,7 @@ def count_calls(counter: Counter) -> Callable:
         ... def make_request():
         ...     pass
     """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[[Any], T]) -> Callable[[Any], T]:
         def wrapper(*args, **kwargs) -> T:
             counter.inc()
             return func(*args, **kwargs)
@@ -856,7 +856,7 @@ def time_function(histogram: Histogram) -> Callable:
         ... def run_scan():
         ...     pass
     """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[[Any], T]) -> Callable[[Any], T]:
         def wrapper(*args, **kwargs) -> T:
             with histogram.time():
                 return func(*args, **kwargs)
@@ -873,7 +873,7 @@ def track_inprogress(gauge: Gauge) -> Callable:
         ... def run_job():
         ...     pass
     """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[[Any], T]) -> Callable[[Any], T]:
         def wrapper(*args, **kwargs) -> T:
             with gauge.track_inprogress():
                 return func(*args, **kwargs)

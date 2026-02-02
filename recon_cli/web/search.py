@@ -693,12 +693,14 @@ def create_search_router():
     
     @router.get("/")
     async def search(
-        q: str = Query(..., description="Search query"),
+        q: str = Query("", description="Search query"),
         type: Optional[str] = Query(None, description="Filter by type"),
         limit: int = Query(100, le=1000),
         offset: int = Query(0, ge=0),
     ):
         """Search across all indexed content."""
+        if not q:
+            raise HTTPException(400, "Query parameter 'q' is required")
         query = SearchQuery.parse(q)
         
         if type:
@@ -715,10 +717,12 @@ def create_search_router():
     
     @router.get("/suggest")
     async def suggest(
-        q: str = Query(..., description="Search prefix"),
+        q: str = Query("", description="Search prefix"),
         limit: int = Query(10, le=50),
     ):
         """Get search suggestions."""
+        if not q:
+            raise HTTPException(400, "Query parameter 'q' is required")
         suggestions = engine.suggest(q, limit)
         return {"suggestions": suggestions}
     
