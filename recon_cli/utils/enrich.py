@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -109,6 +109,36 @@ WAF_KEYWORDS = {
     "f5": "waf:f5",
     "wallarm": "waf:wallarm",
     "radware": "waf:radware",
+}
+
+COOKIE_TECH_KEYWORDS: Dict[str, set[str]] = {
+    "wordpress": {"tech:wordpress", "cms:wordpress"},
+    "wp-": {"tech:wordpress", "cms:wordpress"},
+    "wp_": {"tech:wordpress", "cms:wordpress"},
+    "drupal": {"cms:drupal"},
+    "joomla": {"cms:joomla"},
+    "laravel": {"framework:laravel"},
+    "laravel_session": {"framework:laravel"},
+    "django": {"framework:django"},
+    "csrftoken": {"framework:django"},
+    "sessionid": {"framework:django"},
+    "jsessionid": {"tech:java"},
+    "phpsessid": {"tech:php"},
+    "asp.net": {"tech:aspnet"},
+    "aspnet": {"tech:aspnet"},
+    "express": {"framework:express"},
+    "rails": {"framework:rails"},
+    "_rails": {"framework:rails"},
+    "next-auth": {"framework:nextjs"},
+    "nextauth": {"framework:nextjs"},
+    "nextjs": {"framework:nextjs"},
+    "shopify": {"platform:shopify"},
+    "cfduid": {"waf:cloudflare", "service:waf", "service:cdn"},
+    "__cf": {"waf:cloudflare", "service:waf", "service:cdn"},
+    "incap_ses": {"waf:imperva", "service:waf"},
+    "visid_incap": {"waf:imperva", "service:waf"},
+    "awsalb": {"cloud:aws"},
+    "awsalbtg": {"cloud:aws"},
 }
 
 SOFT_404_PATTERNS = [
@@ -263,6 +293,32 @@ def infer_tech_tags(
         tags.add("cms:drupal")
     if any("joomla" in tech for tech in tech_values):
         tags.add("cms:joomla")
+    if any("laravel" in tech for tech in tech_values):
+        tags.add("framework:laravel")
+    if any("django" in tech for tech in tech_values):
+        tags.add("framework:django")
+    if any("rails" in tech for tech in tech_values):
+        tags.add("framework:rails")
+    if any("express" in tech for tech in tech_values):
+        tags.add("framework:express")
+    if any("next.js" in tech or "nextjs" in tech for tech in tech_values):
+        tags.add("framework:nextjs")
+    if any("react" in tech for tech in tech_values):
+        tags.add("framework:react")
+    if any("vue" in tech for tech in tech_values):
+        tags.add("framework:vue")
+    if any("angular" in tech for tech in tech_values):
+        tags.add("framework:angular")
+    if any("spring" in tech for tech in tech_values):
+        tags.add("framework:spring")
+    if any("node" in tech for tech in tech_values):
+        tags.add("tech:nodejs")
+    if any("php" in tech for tech in tech_values):
+        tags.add("tech:php")
+    if any("asp.net" in tech or "aspnet" in tech for tech in tech_values):
+        tags.add("tech:aspnet")
+    if any("shopify" in tech for tech in tech_values):
+        tags.add("platform:shopify")
     if any("nginx" in tech for tech in tech_values):
         tags.add("tech:nginx")
     if any("apache" in tech for tech in tech_values):
@@ -272,9 +328,40 @@ def infer_tech_tags(
     return tags
 
 
+def infer_cookie_tags(set_cookie_headers: Optional[Iterable[str]]) -> set[str]:
+    tags: set[str] = set()
+    if not set_cookie_headers:
+        return tags
+    for header in set_cookie_headers:
+        if not header:
+            continue
+        cookie_pair = header.split(";", 1)[0]
+        if "=" not in cookie_pair:
+            continue
+        name = cookie_pair.split("=", 1)[0].strip().lower()
+        if not name:
+            continue
+        for keyword, keyword_tags in COOKIE_TECH_KEYWORDS.items():
+            if keyword in name:
+                tags.update(keyword_tags)
+    return tags
+
+
 def detect_waf_tags(server: Optional[str], cdn: Optional[str] = None) -> set[str]:
     tags: set[str] = set()
-    haystack = " ".join(part for part in [server or "", cdn or ""] if part).lower()
+    parts: list[str] = []
+    for value in (server, cdn):
+        if not value:
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (list, tuple, set)):
+            parts.extend(str(item) for item in value if item)
+        else:
+            parts.append(str(value))
+    if not parts:
+        return tags
+    haystack = " ".join(parts).lower()
     for keyword, tag in WAF_KEYWORDS.items():
         if keyword in haystack:
             tags.add(tag)

@@ -53,6 +53,14 @@ DEFAULT_PROFILES_CONTENT = """{
     "runtime": {
       "timeout_http": 5,
       "httpx_threads": 25,
+      "tool_timeout": 120,
+      "scanner_timeout": 300,
+      "ffuf_maxtime": 60,
+      "nuclei_batch_size": 20,
+      "nuclei_batch_timeout_base": 180,
+      "nuclei_batch_timeout_per_target": 20,
+      "nuclei_batch_timeout_max": 600,
+      "nuclei_single_timeout": 300,
       "runtime_crawl_max_urls": 5,
       "runtime_crawl_timeout": 8,
       "runtime_crawl_concurrency": 1,
@@ -71,6 +79,14 @@ DEFAULT_PROFILES_CONTENT = """{
     "runtime": {
       "timeout_http": 8,
       "httpx_threads": 20,
+      "tool_timeout": 180,
+      "scanner_timeout": 450,
+      "ffuf_maxtime": 120,
+      "nuclei_batch_size": 15,
+      "nuclei_batch_timeout_base": 240,
+      "nuclei_batch_timeout_per_target": 25,
+      "nuclei_batch_timeout_max": 900,
+      "nuclei_single_timeout": 600,
       "httpx_max_hosts": 150,
       "max_probe_hosts": 150,
       "max_global_concurrency": 10,
@@ -90,6 +106,35 @@ DEFAULT_PROFILES_CONTENT = """{
     "runtime": {
       "timeout_http": 20,
       "httpx_threads": 80,
+      "tool_timeout": 240,
+      "scanner_timeout": 600,
+      "ffuf_maxtime": 180,
+      "nuclei_batch_size": 12,
+      "nuclei_batch_timeout_base": 300,
+      "nuclei_batch_timeout_per_target": 35,
+      "nuclei_batch_timeout_max": 1200,
+      "nuclei_single_timeout": 900,
+      "enable_auth_discovery": true,
+      "auth_discovery_max_urls": 50,
+      "enable_js_intel": true,
+      "js_intel_max_files": 60,
+      "js_intel_max_urls": 200,
+      "enable_api_recon": true,
+      "api_recon_max_hosts": 60,
+      "enable_param_mining": true,
+      "param_mining_max_urls": 200,
+      "param_mining_max_params": 80,
+      "enable_waf_probe": true,
+      "waf_probe_max_urls": 20,
+      "enable_dalfox": true,
+      "dalfox_max_urls": 20,
+      "enable_sqlmap": true,
+      "sqlmap_max_urls": 10,
+      "enable_nmap": true,
+      "nmap_top_ports": 1000,
+      "nmap_timeout": 1200,
+      "nmap_batch_size": 20,
+      "nmap_max_hosts": 200,
       "runtime_crawl_max_urls": 40,
       "runtime_crawl_concurrency": 4,
       "runtime_crawl_timeout": 30,
@@ -110,7 +155,31 @@ DEFAULT_PROFILES_CONTENT = """{
       "enable_runtime_crawl": true,
       "enable_screenshots": false,
       "enable_secrets": true,
+      "tool_timeout": 240,
+      "scanner_timeout": 600,
+      "ffuf_maxtime": 180,
+      "nuclei_batch_size": 12,
+      "nuclei_batch_timeout_base": 300,
+      "nuclei_batch_timeout_per_target": 35,
+      "nuclei_batch_timeout_max": 1200,
+      "nuclei_single_timeout": 900,
       "url_path_allow_regex": "(/api|/graphql)",
+      "enable_auth_discovery": true,
+      "auth_discovery_max_urls": 40,
+      "enable_js_intel": true,
+      "js_intel_max_files": 40,
+      "js_intel_max_urls": 150,
+      "enable_api_recon": true,
+      "api_recon_max_hosts": 60,
+      "enable_param_mining": true,
+      "param_mining_max_urls": 150,
+      "param_mining_max_params": 60,
+      "enable_waf_probe": true,
+      "waf_probe_max_urls": 15,
+      "enable_dalfox": true,
+      "dalfox_max_urls": 15,
+      "enable_sqlmap": true,
+      "sqlmap_max_urls": 8,
       "runtime_crawl_max_urls": 25,
       "runtime_crawl_concurrency": 2,
       "max_fuzz_hosts": 6,
@@ -216,15 +285,33 @@ class RuntimeConfig:
     httpx_max_hosts: int = int(os.environ.get("RECON_HTTPX_MAX_HOSTS", 300))
     max_fuzz_hosts: int = int(os.environ.get("RECON_MAX_FUZZ_HOSTS", 5))
     ffuf_threads: int = int(os.environ.get("RECON_FFUF_THREADS", 30))
+    ffuf_maxtime: int = int(os.environ.get("RECON_FFUF_MAXTIME", 180))
+    ffuf_timeout_buffer: int = int(os.environ.get("RECON_FFUF_TIMEOUT_BUFFER", 30))
+    ffuf_retry_on_timeout: bool = field(default_factory=lambda: os.environ.get("RECON_FFUF_RETRY_ON_TIMEOUT", "1") not in {"0", "false", "False"})
+    ffuf_retry_extra_time: int = int(os.environ.get("RECON_FFUF_RETRY_EXTRA_TIME", 120))
     max_screenshots: int = int(os.environ.get("RECON_MAX_SCREENSHOTS", 10))
     max_targets_per_job: int = int(os.environ.get("RECON_MAX_TARGETS_PER_JOB", 200))
     max_probe_hosts: int = int(os.environ.get("RECON_MAX_PROBE_HOSTS", 400))
+    enable_nmap: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_NMAP", "0") not in {"0", "false", "False"})
+    nmap_top_ports: int = int(os.environ.get("RECON_NMAP_TOP_PORTS", 1000))
+    nmap_ports: Optional[str] = os.environ.get("RECON_NMAP_PORTS")
+    nmap_args: Optional[str] = os.environ.get("RECON_NMAP_ARGS")
+    nmap_timeout: int = int(os.environ.get("RECON_NMAP_TIMEOUT", 900))
+    nmap_batch_size: int = int(os.environ.get("RECON_NMAP_BATCH_SIZE", 25))
+    nmap_max_hosts: int = int(os.environ.get("RECON_NMAP_MAX_HOSTS", 200))
     retry_count: int = int(os.environ.get("RECON_RETRY_COUNT", 1))
     retry_backoff_base: float = float(os.environ.get("RECON_RETRY_BACKOFF_BASE", 1.0))
     retry_backoff_factor: float = float(os.environ.get("RECON_RETRY_BACKOFF_FACTOR", 2.0))
     timeout_http: int = int(os.environ.get("RECON_TIMEOUT_HTTP", 10))
     max_scanner_hosts: int = int(os.environ.get("RECON_MAX_SCANNER_HOSTS", 10))
-    scanner_timeout: int = int(os.environ.get("RECON_SCANNER_TIMEOUT", 300))
+    scanner_timeout: int = int(os.environ.get("RECON_SCANNER_TIMEOUT", 900))
+    nuclei_batch_size: int = int(os.environ.get("RECON_NUCLEI_BATCH_SIZE", 10))
+    nuclei_batch_timeout_base: int = int(os.environ.get("RECON_NUCLEI_BATCH_TIMEOUT_BASE", 300))
+    nuclei_batch_timeout_per_target: int = int(os.environ.get("RECON_NUCLEI_BATCH_TIMEOUT_PER_TARGET", 45))
+    nuclei_batch_timeout_max: int = int(os.environ.get("RECON_NUCLEI_BATCH_TIMEOUT_MAX", 1800))
+    nuclei_single_timeout: int = int(os.environ.get("RECON_NUCLEI_SINGLE_TIMEOUT", 1200))
+    nuclei_timeout: int = int(os.environ.get("RECON_NUCLEI_TIMEOUT", 10))
+    nuclei_retries: int = int(os.environ.get("RECON_NUCLEI_RETRIES", 1))
     secrets_max_files: int = int(os.environ.get("RECON_SECRETS_MAX_FILES", 50))
     secrets_timeout: int = int(os.environ.get("RECON_SECRETS_TIMEOUT", 10))
     runtime_crawl_max_urls: int = int(os.environ.get("RECON_RUNTIME_CRAWL_MAX_URLS", 25))
@@ -232,7 +319,11 @@ class RuntimeConfig:
     runtime_crawl_timeout: int = int(os.environ.get("RECON_RUNTIME_CRAWL_TIMEOUT", 15))
     runtime_crawl_concurrency: int = int(os.environ.get("RECON_RUNTIME_CRAWL_CONCURRENCY", 2))
     auto_scanners: bool = field(default_factory=lambda: os.environ.get("RECON_AUTO_SCANNERS", "1") not in {"0", "false", "False"})
-    nuclei_tags: Optional[str] = os.environ.get("RECON_NUCLEI_TAGS", "cves,exposures,misconfiguration,default-logins,auth")
+    auto_active_modules: bool = field(default_factory=lambda: os.environ.get("RECON_AUTO_ACTIVE_MODULES", "1") not in {"0", "false", "False"})
+    nuclei_tags: Optional[str] = os.environ.get(
+        "RECON_NUCLEI_TAGS",
+        "cves,exposures,misconfiguration,default-logins,auth,xss,sqli,ssrf,lfi,rce,redirect,xxe,cmdi,csrf,deserialization",
+    )
     soft_404_probe: bool = field(default_factory=lambda: os.environ.get("RECON_SOFT_404_PROBE", "1") not in {"0", "false", "False"})
     soft_404_max_hosts: int = int(os.environ.get("RECON_SOFT_404_MAX_HOSTS", 25))
     soft_404_paths: int = int(os.environ.get("RECON_SOFT_404_PATHS", 1))
@@ -241,6 +332,13 @@ class RuntimeConfig:
     enable_runtime_crawl: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0") not in {"0", "false", "False"})
     enable_secrets: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"})
     enable_screenshots: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_SCREENSHOTS", "0") not in {"0", "false", "False"})
+    enable_auth_discovery: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_AUTH_DISCOVERY", "0") not in {"0", "false", "False"})
+    enable_js_intel: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_JS_INTEL", "0") not in {"0", "false", "False"})
+    enable_api_recon: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_API_RECON", "0") not in {"0", "false", "False"})
+    enable_param_mining: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_PARAM_MINING", "0") not in {"0", "false", "False"})
+    enable_waf_probe: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_WAF_PROBE", "0") not in {"0", "false", "False"})
+    enable_dalfox: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_DALFOX", "0") not in {"0", "false", "False"})
+    enable_sqlmap: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_SQLMAP", "0") not in {"0", "false", "False"})
     verify_tls: bool = field(default_factory=lambda: os.environ.get("RECON_VERIFY_TLS", "1") not in {"0", "false", "False"})
     url_path_allow_regex: Optional[str] = os.environ.get("RECON_URL_PATH_ALLOW_REGEX")
     trim_url_max_per_host: int = int(os.environ.get("RECON_TRIM_URL_MAX_PER_HOST", 200))
@@ -259,7 +357,28 @@ class RuntimeConfig:
     correlation_max_records: int = int(os.environ.get("RECON_CORRELATION_MAX_RECORDS", 10000))
     correlation_svg_node_limit: int = int(os.environ.get("RECON_CORRELATION_SVG_NODE_LIMIT", 2500))
     resolvers_file: Optional[Path] = field(default_factory=lambda: DEFAULT_RESOLVERS if DEFAULT_RESOLVERS.exists() else None)
-    tool_timeout: int = int(os.environ.get("RECON_TOOL_TIMEOUT", 120))
+    tool_timeout: int = int(os.environ.get("RECON_TOOL_TIMEOUT", 300))
+    auth_discovery_max_urls: int = int(os.environ.get("RECON_AUTH_DISCOVERY_MAX_URLS", 40))
+    auth_discovery_timeout: int = int(os.environ.get("RECON_AUTH_DISCOVERY_TIMEOUT", 10))
+    auth_discovery_max_forms: int = int(os.environ.get("RECON_AUTH_DISCOVERY_MAX_FORMS", 80))
+    js_intel_max_files: int = int(os.environ.get("RECON_JS_INTEL_MAX_FILES", 40))
+    js_intel_timeout: int = int(os.environ.get("RECON_JS_INTEL_TIMEOUT", 12))
+    js_intel_max_urls: int = int(os.environ.get("RECON_JS_INTEL_MAX_URLS", 120))
+    api_recon_max_hosts: int = int(os.environ.get("RECON_API_RECON_MAX_HOSTS", 50))
+    api_recon_timeout: int = int(os.environ.get("RECON_API_RECON_TIMEOUT", 8))
+    param_mining_max_urls: int = int(os.environ.get("RECON_PARAM_MINING_MAX_URLS", 150))
+    param_mining_max_params: int = int(os.environ.get("RECON_PARAM_MINING_MAX_PARAMS", 60))
+    waf_probe_max_urls: int = int(os.environ.get("RECON_WAF_PROBE_MAX_URLS", 25))
+    waf_probe_timeout: int = int(os.environ.get("RECON_WAF_PROBE_TIMEOUT", 8))
+    dalfox_max_urls: int = int(os.environ.get("RECON_DALFOX_MAX_URLS", 20))
+    dalfox_timeout: int = int(os.environ.get("RECON_DALFOX_TIMEOUT", 600))
+    sqlmap_max_urls: int = int(os.environ.get("RECON_SQLMAP_MAX_URLS", 10))
+    sqlmap_timeout: int = int(os.environ.get("RECON_SQLMAP_TIMEOUT", 900))
+    sqlmap_level: int = int(os.environ.get("RECON_SQLMAP_LEVEL", 1))
+    sqlmap_risk: int = int(os.environ.get("RECON_SQLMAP_RISK", 1))
+    nmap_udp: bool = field(default_factory=lambda: os.environ.get("RECON_NMAP_UDP", "0") not in {"0", "false", "False"})
+    nmap_udp_top_ports: int = int(os.environ.get("RECON_NMAP_UDP_TOP_PORTS", 200))
+    nmap_scripts: Optional[str] = os.environ.get("RECON_NMAP_SCRIPTS")
 
     def clone(self, **overrides: Any) -> "RuntimeConfig":
         valid_overrides = {key: value for key, value in overrides.items() if hasattr(self, key)}

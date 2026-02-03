@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from recon_cli.tools.executor import CommandExecutor
+from recon_cli.tools.executor import CommandError, CommandExecutor
 
 SEVERITY_TO_SCORE = {
     "info": 10,
@@ -53,6 +53,8 @@ def run_nuclei(
     timeout: int,
     templates: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
+    request_timeout: Optional[int] = None,
+    retries: Optional[int] = None,
 ) -> ScannerExecution:
     if not shutil.which("nuclei"):
         logger.info("nuclei not available; skipping for %s", host)
@@ -62,6 +64,20 @@ def run_nuclei(
     json_flags = ["-jsonl"]
     run_success = False
     last_message: Optional[str] = None
+    resolved_templates: Optional[List[str]] = None
+    if templates:
+        resolved_templates = list(templates)
+    else:
+        env_dir = subprocess.os.environ.get("NUCLEI_TEMPLATES_DIR")
+        default_dirs = []
+        if env_dir:
+            default_dirs.append(Path(env_dir).expanduser())
+        default_dirs.append(Path.home() / "nuclei-templates")
+        default_dirs.append(Path.home() / ".config" / "nuclei" / "nuclei-templates")
+        for candidate in default_dirs:
+            if candidate.exists():
+                resolved_templates = [str(candidate)]
+                break
 
     for json_flag in json_flags:
         try:
@@ -70,17 +86,25 @@ def run_nuclei(
             pass
 
         cmd: List[str] = ["nuclei", "-u", base_url, json_flag, "-o", str(artifact_path)]
-        if templates:
-            for template in templates:
+        if resolved_templates:
+            for template in resolved_templates:
                 cmd.extend(["-t", template])
         elif tags:
             cmd.extend(["-tags", ",".join(tags)])
         else:
             cmd.extend(["-tags", "api"])
+        if request_timeout:
+            cmd.extend(["-timeout", str(request_timeout)])
+        if retries is not None:
+            cmd.extend(["-retries", str(retries)])
 
         logger.info("Running nuclei against %s with %s", base_url, json_flag)
         try:
             result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+        except CommandError as exc:  # pragma: no cover - runtime safety
+            last_message = str(exc)
+            logger.warning("nuclei execution failed for %s (%s): %s", host, json_flag, exc)
+            return ScannerExecution([], artifact_path if artifact_path.exists() else None, {"timed_out": "timeout" in str(exc).lower()})
         except Exception as exc:  # pragma: no cover - runtime safety
             last_message = str(exc)
             logger.warning("nuclei execution failed for %s (%s): %s", host, json_flag, exc)
@@ -139,6 +163,103 @@ def run_nuclei(
                     )
                 )
     return ScannerExecution(findings, artifact_path if artifact_path.exists() else None, {"targets": 1, "findings": len(findings)})
+
+
+def run_nuclei_batch(
+    executor: CommandExecutor,
+    logger,
+    targets: List[str],
+    artifact_dir: Path,
+    timeout: int,
+    templates: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    request_timeout: Optional[int] = None,
+    retries: Optional[int] = None,
+) -> ScannerExecution:
+    if not targets:
+        return ScannerExecution([], None, {"targets": 0})
+    if not shutil.which("nuclei"):
+        logger.info("nuclei not available; skipping batch")
+        return ScannerExecution([], None, {"targets": len(targets)})
+
+    artifact_path = artifact_dir / f"nuclei_batch_{len(targets)}.json"
+    targets_path = artifact_dir / "nuclei_targets.txt"
+    targets_path.write_text("\n".join(targets) + "\n", encoding="utf-8")
+
+    resolved_templates: Optional[List[str]] = None
+    if templates:
+        resolved_templates = list(templates)
+    else:
+        env_dir = subprocess.os.environ.get("NUCLEI_TEMPLATES_DIR")
+        default_dirs = []
+        if env_dir:
+            default_dirs.append(Path(env_dir).expanduser())
+        default_dirs.append(Path.home() / "nuclei-templates")
+        default_dirs.append(Path.home() / ".config" / "nuclei" / "nuclei-templates")
+        for candidate in default_dirs:
+            if candidate.exists():
+                resolved_templates = [str(candidate)]
+                break
+
+    cmd: List[str] = ["nuclei", "-l", str(targets_path), "-jsonl", "-o", str(artifact_path)]
+    if resolved_templates:
+        for template in resolved_templates:
+            cmd.extend(["-t", template])
+    elif tags:
+        cmd.extend(["-tags", ",".join(tags)])
+    else:
+        cmd.extend(["-tags", "api"])
+    if request_timeout:
+        cmd.extend(["-timeout", str(request_timeout)])
+    if retries is not None:
+        cmd.extend(["-retries", str(retries)])
+
+    try:
+        result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+    except CommandError as exc:
+        logger.warning("nuclei batch execution failed: %s", exc)
+        return ScannerExecution([], artifact_path if artifact_path.exists() else None, {"targets": len(targets), "timed_out": "timeout" in str(exc).lower()})
+
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "non-zero exit") if result else "non-zero exit"
+        logger.warning("nuclei batch returned %s: %s", result.returncode if result else "?", str(message).strip())
+        return ScannerExecution([], artifact_path if artifact_path.exists() else None, {"targets": len(targets), "returncode": result.returncode})
+
+    findings: List[ScannerFinding] = []
+    if artifact_path.exists():
+        with artifact_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                severity = _severity(data.get("info", {}).get("severity"))
+                score = SEVERITY_TO_SCORE.get(severity, 10)
+                priority = SEVERITY_TO_PRIORITY.get(severity, "low")
+                description = data.get("info", {}).get("name") or data.get("templateID") or "nuclei finding"
+                findings.append(
+                    ScannerFinding(
+                        {
+                            "type": "finding",
+                            "source": "scanner-nuclei",
+                            "hostname": data.get("host"),
+                            "description": description,
+                            "details": {
+                                "template_id": data.get("templateID"),
+                                "matched_at": data.get("matched-at"),
+                                "info": data.get("info"),
+                            },
+                            "tags": ["scanner", "nuclei", severity],
+                            "score": score,
+                            "priority": priority,
+                            "url": data.get("matched-at"),
+                        }
+                    )
+                )
+    return ScannerExecution(findings, artifact_path if artifact_path.exists() else None, {"targets": len(targets), "findings": len(findings)})
 
 
 def run_wpscan(

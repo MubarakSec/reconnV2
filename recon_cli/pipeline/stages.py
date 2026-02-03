@@ -3,6 +3,8 @@ import json
 import hashlib
 import heapq
 import math
+import re
+import shlex
 import socket
 import time
 from abc import ABC
@@ -10,7 +12,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, urlparse, urljoin
 
 from recon_cli.crawl.runtime import (
     PLAYWRIGHT_AVAILABLE,
@@ -620,6 +622,258 @@ class EnrichmentStage(Stage):
             context.manager.update_metadata(context.record)
 
 
+class NmapStage(Stage):
+    name = "nmap_scan"
+
+    HIGH_RISK_PORTS = {
+        21,
+        22,
+        23,
+        25,
+        53,
+        110,
+        111,
+        135,
+        139,
+        143,
+        389,
+        445,
+        465,
+        512,
+        513,
+        514,
+        873,
+        1099,
+        1433,
+        1521,
+        2049,
+        2181,
+        2375,
+        2376,
+        2483,
+        2484,
+        3306,
+        3389,
+        3632,
+        4444,
+        5432,
+        5672,
+        5900,
+        5985,
+        5986,
+        6379,
+        7001,
+        7002,
+        8080,
+        8081,
+        8443,
+        9200,
+        9300,
+        11211,
+        15672,
+        27017,
+    }
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_nmap", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        executor = context.executor
+        if not executor.available("nmap"):
+            context.logger.warning("nmap not available; skipping nmap stage")
+            _note_missing_tool(context, "nmap")
+            return
+        hosts_path = context.record.paths.artifact("dedupe_hosts.txt")
+        if not hosts_path.exists():
+            context.logger.info("No hosts for nmap scan")
+            return
+        with hosts_path.open("r", encoding="utf-8") as handle:
+            hosts = [line.strip() for line in handle if line.strip()]
+        if not hosts:
+            context.logger.info("No hosts for nmap scan")
+            return
+        runtime = context.runtime_config
+        max_hosts = max(0, int(getattr(runtime, "nmap_max_hosts", 0)))
+        if max_hosts:
+            hosts = hosts[:max_hosts]
+        if not hosts:
+            context.logger.info("No hosts after nmap cap")
+            return
+        batch_size = max(1, int(getattr(runtime, "nmap_batch_size", 25)))
+        top_ports = int(getattr(runtime, "nmap_top_ports", 0))
+        ports = getattr(runtime, "nmap_ports", None)
+        nmap_args = getattr(runtime, "nmap_args", None)
+        nmap_scripts = getattr(runtime, "nmap_scripts", None)
+        timeout = int(getattr(runtime, "nmap_timeout", runtime.tool_timeout))
+        nmap_dir = context.record.paths.ensure_subdir("nmap")
+        total_ports = 0
+        total_services = 0
+        findings_added = 0
+
+        for idx in range(0, len(hosts), batch_size):
+            batch = hosts[idx: idx + batch_size]
+            if not batch:
+                continue
+            batch_file = nmap_dir / f"targets_{idx // batch_size + 1}.txt"
+            xml_path = nmap_dir / f"scan_{idx // batch_size + 1}.xml"
+            batch_file.write_text("\n".join(batch) + "\n", encoding="utf-8")
+            cmd = ["nmap", "-sV", "-Pn", "-oX", str(xml_path), "-iL", str(batch_file)]
+            if ports:
+                cmd.extend(["-p", str(ports)])
+            elif top_ports:
+                cmd.extend(["--top-ports", str(top_ports)])
+            if nmap_scripts:
+                cmd.extend(["--script", str(nmap_scripts)])
+            if nmap_args:
+                try:
+                    cmd.extend(shlex.split(str(nmap_args)))
+                except ValueError:
+                    context.logger.warning("Invalid nmap_args; ignoring: %s", nmap_args)
+            try:
+                executor.run(cmd, check=False, timeout=timeout)
+            except CommandError:
+                context.logger.warning("nmap failed for batch %s", idx // batch_size + 1)
+                continue
+            if not xml_path.exists():
+                continue
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(xml_path)
+            except Exception:
+                continue
+            root = tree.getroot()
+            for host_node in root.findall("host"):
+                status = host_node.find("status")
+                if status is not None and status.get("state") != "up":
+                    continue
+                addr = None
+                for address in host_node.findall("address"):
+                    if address.get("addrtype") == "ipv4":
+                        addr = address.get("addr")
+                        break
+                hostnames = [hn.get("name") for hn in host_node.findall("hostnames/hostname") if hn.get("name")]
+                hostname = hostnames[0] if hostnames else addr
+                for port_node in host_node.findall("ports/port"):
+                    state = port_node.find("state")
+                    if state is None or state.get("state") not in {"open", "open|filtered"}:
+                        continue
+                    port_id = int(port_node.get("portid", "0"))
+                    protocol = port_node.get("protocol") or "tcp"
+                    service_node = port_node.find("service")
+                    service_name = service_node.get("name") if service_node is not None else None
+                    product = service_node.get("product") if service_node is not None else None
+                    version = service_node.get("version") if service_node is not None else None
+                    tags = {f"port:{port_id}", f"proto:{protocol}"}
+                    if service_name:
+                        tags.add(f"service:{service_name}")
+                    if port_id in self.HIGH_RISK_PORTS:
+                        tags.add("risk:exposed")
+                    payload = {
+                        "type": "service",
+                        "source": "nmap",
+                        "hostname": hostname,
+                        "ip": addr,
+                        "port": port_id,
+                        "protocol": protocol,
+                        "service": service_name,
+                        "product": product,
+                        "version": version,
+                        "tags": sorted(tags),
+                        "score": 35 if port_id in self.HIGH_RISK_PORTS else 10,
+                    }
+                    if context.results.append(payload):
+                        total_services += 1
+                        total_ports += 1
+                    if port_id in self.HIGH_RISK_PORTS:
+                        finding = {
+                            "type": "finding",
+                            "source": "nmap",
+                            "hostname": hostname,
+                            "description": f"Potentially risky service exposed on port {port_id}",
+                            "details": {
+                                "port": port_id,
+                                "protocol": protocol,
+                                "service": service_name,
+                                "product": product,
+                                "version": version,
+                                "ip": addr,
+                            },
+                            "tags": ["nmap", "exposure", f"port:{port_id}"],
+                            "score": 55,
+                            "priority": "medium",
+                        }
+                        if context.results.append(finding):
+                            findings_added += 1
+
+        stats = context.record.metadata.stats.setdefault("nmap", {})
+        stats["hosts"] = len(hosts)
+        stats["services"] = total_services
+        stats["findings"] = findings_added
+        context.manager.update_metadata(context.record)
+
+        if getattr(runtime, "nmap_udp", False):
+            udp_ports = int(getattr(runtime, "nmap_udp_top_ports", 200))
+            udp_xml = nmap_dir / "scan_udp.xml"
+            udp_targets = nmap_dir / "targets_udp.txt"
+            udp_targets.write_text("\n".join(hosts) + "\n", encoding="utf-8")
+            udp_cmd = ["nmap", "-sU", "-Pn", "-oX", str(udp_xml), "-iL", str(udp_targets), "--top-ports", str(udp_ports)]
+            if nmap_scripts:
+                udp_cmd.extend(["--script", str(nmap_scripts)])
+            if nmap_args:
+                try:
+                    udp_cmd.extend(shlex.split(str(nmap_args)))
+                except ValueError:
+                    pass
+            try:
+                executor.run(udp_cmd, check=False, timeout=timeout)
+            except CommandError:
+                context.logger.warning("nmap UDP scan failed")
+                return
+            if udp_xml.exists():
+                try:
+                    import xml.etree.ElementTree as ET
+                    tree = ET.parse(udp_xml)
+                except Exception:
+                    return
+                root = tree.getroot()
+                udp_services = 0
+                for host_node in root.findall("host"):
+                    status = host_node.find("status")
+                    if status is not None and status.get("state") != "up":
+                        continue
+                    addr = None
+                    for address in host_node.findall("address"):
+                        if address.get("addrtype") == "ipv4":
+                            addr = address.get("addr")
+                            break
+                    hostnames = [hn.get("name") for hn in host_node.findall("hostnames/hostname") if hn.get("name")]
+                    hostname = hostnames[0] if hostnames else addr
+                    for port_node in host_node.findall("ports/port"):
+                        state = port_node.find("state")
+                        if state is None or state.get("state") not in {"open", "open|filtered"}:
+                            continue
+                        port_id = int(port_node.get("portid", "0"))
+                        service_node = port_node.find("service")
+                        service_name = service_node.get("name") if service_node is not None else None
+                        payload = {
+                            "type": "service",
+                            "source": "nmap-udp",
+                            "hostname": hostname,
+                            "ip": addr,
+                            "port": port_id,
+                            "protocol": "udp",
+                            "service": service_name,
+                            "tags": ["udp", f"port:{port_id}"],
+                            "score": 25,
+                        }
+                        if context.results.append(payload):
+                            udp_services += 1
+                if udp_services:
+                    stats = context.record.metadata.stats.setdefault("nmap", {})
+                    stats["udp_services"] = udp_services
+                    context.manager.update_metadata(context.record)
+
+
 class HttpProbeStage(Stage):
     name = "http_probe"
 
@@ -822,13 +1076,16 @@ class HttpProbeStage(Stage):
                         if resp.status == 304 and not context.force:
                             break
                         body = resp.read(2048) or b""
-                        headers_lower = {k.lower(): v for k, v in resp.getheaders()}
+                        raw_headers = resp.getheaders()
+                        headers_lower = {k.lower(): v for k, v in raw_headers}
                         etag = headers_lower.get("etag")
                         last_modified = headers_lower.get("last-modified")
                         body_md5 = hashlib.md5(body).hexdigest()
                         if context.should_skip_due_to_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5):
                             context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
                             break
+                        set_cookie_headers = [value for key, value in raw_headers if key.lower() == "set-cookie" and value]
+                        header_values = [value for value in (headers_lower.get("x-powered-by"), headers_lower.get("server")) if value]
                         payload = {
                             "type": "url",
                             "source": "probe",
@@ -844,6 +1101,9 @@ class HttpProbeStage(Stage):
                             "last_modified": last_modified,
                         }
                         tags = set(enrich_utils.infer_service_tags(url))
+                        if header_values:
+                            tags.update(enrich_utils.infer_tech_tags(header_values))
+                        tags.update(enrich_utils.infer_cookie_tags(set_cookie_headers))
                         tags.update(enrich_utils.detect_waf_tags(payload.get("server")))
                         if tags:
                             payload["tags"] = sorted(tags)
@@ -961,14 +1221,22 @@ class HttpProbeStage(Stage):
                         break
                     body = resp.read(2048) or b""
                     duration_ms = int((time.perf_counter() - start) * 1000)
-                    headers_lower = {k.lower(): v for k, v in resp.getheaders()}
+                    raw_headers = resp.getheaders()
+                    headers_lower = {k.lower(): v for k, v in raw_headers}
                     etag = headers_lower.get("etag")
                     last_modified = headers_lower.get("last-modified")
                     body_md5 = hashlib.md5(body).hexdigest()
                     if context.should_skip_due_to_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5):
                         context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
                         continue
+                    set_cookie_headers = [value for key, value in raw_headers if key.lower() == "set-cookie" and value]
+                    header_values = [value for value in (headers_lower.get("x-powered-by"), headers_lower.get("server")) if value]
                     tags = list(base_tags)
+                    tags.extend(enrich_utils.infer_service_tags(url))
+                    if header_values:
+                        tags.extend(enrich_utils.infer_tech_tags(header_values))
+                    tags.extend(enrich_utils.infer_cookie_tags(set_cookie_headers))
+                    tags.extend(enrich_utils.detect_waf_tags(headers_lower.get("server")))
                     for header_name in self.HEADER_TAG_KEYS:
                         value = headers_lower.get(header_name)
                         if value:
@@ -1161,6 +1429,219 @@ class ScoringStage(Stage):
                 json.dump(entry, handle, separators=(",", ":"), ensure_ascii=True)
                 handle.write("\n")
         tmp.replace(results_path)
+        surface_stats = context.record.metadata.stats.setdefault("auth_surface", {})
+        surface_stats["login"] = sum(1 for entry in updated if "surface:login" in entry.get("tags", []))
+        surface_stats["password_reset"] = sum(1 for entry in updated if "surface:password-reset" in entry.get("tags", []))
+        surface_stats["register"] = sum(1 for entry in updated if "surface:register" in entry.get("tags", []))
+        context.manager.update_metadata(context.record)
+
+
+class AuthDiscoveryStage(Stage):
+    name = "auth_discovery"
+
+    AUTH_HINTS = ("login", "signin", "signup", "register", "forgot", "reset", "password", "auth")
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_auth_discovery", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        try:
+            import requests
+            from html.parser import HTMLParser
+        except Exception:
+            context.logger.warning("auth discovery requires requests; skipping")
+            return
+
+        class FormParser(HTMLParser):
+            def __init__(self) -> None:
+                super().__init__()
+                self.forms: List[Dict[str, object]] = []
+                self._current: Optional[Dict[str, object]] = None
+
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = {key.lower(): value for key, value in attrs if key}
+                if tag == "form":
+                    self._current = {
+                        "action": attrs_dict.get("action") or "",
+                        "method": (attrs_dict.get("method") or "get").lower(),
+                        "inputs": [],
+                    }
+                elif tag in {"input", "textarea", "select"} and self._current is not None:
+                    name = attrs_dict.get("name") or attrs_dict.get("id") or ""
+                    input_type = attrs_dict.get("type") or tag
+                    if name:
+                        self._current["inputs"].append({"name": name, "type": input_type})
+
+            def handle_endtag(self, tag):
+                if tag == "form" and self._current is not None:
+                    self.forms.append(self._current)
+                    self._current = None
+
+        candidates: List[Dict[str, object]] = []
+        for entry in read_jsonl(context.record.paths.results_jsonl):
+            if entry.get("type") != "url":
+                continue
+            status = entry.get("status_code")
+            if status not in {200, 302}:
+                continue
+            url = entry.get("url")
+            if not url:
+                continue
+            tags = set(entry.get("tags", []))
+            path = urlparse(url).path.lower()
+            has_hint = any(hint in path for hint in self.AUTH_HINTS)
+            if tags.intersection({"surface:login", "surface:register", "surface:password-reset", "surface:admin"}) or has_hint:
+                candidates.append(
+                    {
+                        "url": url,
+                        "score": int(entry.get("score", 0)),
+                        "tags": list(tags),
+                    }
+                )
+        if not candidates:
+            context.logger.info("No auth candidates discovered")
+            return
+        candidates.sort(key=lambda item: item.get("score", 0), reverse=True)
+        max_urls = int(getattr(context.runtime_config, "auth_discovery_max_urls", 40))
+        timeout = int(getattr(context.runtime_config, "auth_discovery_timeout", 10))
+        max_forms = int(getattr(context.runtime_config, "auth_discovery_max_forms", 80))
+        forms_found = 0
+        artifacts: List[Dict[str, object]] = []
+        for candidate in candidates[:max_urls]:
+            if forms_found >= max_forms:
+                break
+            url = candidate["url"]
+            try:
+                resp = requests.get(
+                    url,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    headers={"User-Agent": "recon-cli auth-discovery"},
+                    verify=context.runtime_config.verify_tls,
+                )
+            except Exception:
+                continue
+            content_type = resp.headers.get("Content-Type", "")
+            if "text/html" not in content_type and "<form" not in (resp.text or "").lower():
+                continue
+            parser = FormParser()
+            parser.feed(resp.text or "")
+            for form in parser.forms:
+                if forms_found >= max_forms:
+                    break
+                action = form.get("action") or ""
+                action_url = urljoin(url, action) if action else url
+                inputs = form.get("inputs") or []
+                tags = set(candidate.get("tags", []))
+                input_names = [item.get("name") for item in inputs if isinstance(item, dict)]
+                lower_action = str(action_url).lower()
+                if any(item.get("type") == "password" for item in inputs if isinstance(item, dict)):
+                    tags.add("surface:login")
+                if "reset" in lower_action or "forgot" in lower_action:
+                    tags.add("surface:password-reset")
+                if "register" in lower_action or "signup" in lower_action:
+                    tags.add("surface:register")
+                if any(name for name in input_names if name and "csrf" in name.lower()):
+                    tags.add("indicator:csrf")
+                payload = {
+                    "type": "auth_form",
+                    "source": "form-discovery",
+                    "hostname": urlparse(url).hostname,
+                    "url": url,
+                    "action": action_url,
+                    "method": form.get("method"),
+                    "inputs": inputs,
+                    "tags": sorted(tags),
+                    "score": 40 if "surface:login" in tags else 20,
+                }
+                if context.results.append(payload):
+                    forms_found += 1
+                    artifacts.append(payload)
+        if artifacts:
+            artifact_path = context.record.paths.artifact("auth_forms.json")
+            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            stats = context.record.metadata.stats.setdefault("auth_discovery", {})
+            stats["forms"] = forms_found
+            context.manager.update_metadata(context.record)
+
+
+class WafProbeStage(Stage):
+    name = "waf_probe"
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_waf_probe", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        try:
+            import requests
+        except Exception:
+            context.logger.warning("waf probe requires requests; skipping")
+            return
+        candidates: List[str] = []
+        for entry in read_jsonl(context.record.paths.results_jsonl):
+            if entry.get("type") != "url":
+                continue
+            url = entry.get("url")
+            if not url:
+                continue
+            status = entry.get("status_code") or 0
+            tags = entry.get("tags", [])
+            if status in {403, 429} or any(tag.startswith("waf:") or tag == "service:waf" for tag in tags):
+                candidates.append(url)
+        if not candidates:
+            return
+        max_urls = int(getattr(context.runtime_config, "waf_probe_max_urls", 25))
+        timeout = int(getattr(context.runtime_config, "waf_probe_timeout", 8))
+        findings = 0
+        for url in candidates[:max_urls]:
+            try:
+                resp_default = requests.get(
+                    url,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=context.runtime_config.verify_tls,
+                    headers={"User-Agent": "recon-cli waf-probe"},
+                )
+            except Exception:
+                continue
+            try:
+                resp_alt = requests.get(
+                    url,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=context.runtime_config.verify_tls,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+                        "X-Forwarded-For": "127.0.0.1",
+                        "X-Originating-IP": "127.0.0.1",
+                        "X-Real-IP": "127.0.0.1",
+                    },
+                )
+            except Exception:
+                continue
+            if resp_default.status_code in {403, 429} and resp_alt.status_code not in {403, 429}:
+                finding = {
+                    "type": "finding",
+                    "source": "waf-probe",
+                    "hostname": urlparse(url).hostname,
+                    "description": "Potential WAF bypass via alternate headers",
+                    "details": {
+                        "url": url,
+                        "baseline_status": resp_default.status_code,
+                        "alternate_status": resp_alt.status_code,
+                        "baseline_length": len(resp_default.text or ""),
+                        "alternate_length": len(resp_alt.text or ""),
+                    },
+                    "tags": ["waf", "bypass-possible"],
+                    "score": 60,
+                    "priority": "medium",
+                }
+                if context.results.append(finding):
+                    findings += 1
+        if findings:
+            stats = context.record.metadata.stats.setdefault("waf_probe", {})
+            stats["findings"] = findings
+            context.manager.update_metadata(context.record)
 class FuzzStage(Stage):
     name = "fuzzing"
 
@@ -1182,18 +1663,20 @@ class FuzzStage(Stage):
             _note_missing_tool(context, "ffuf")
             return
         spec = context.record.spec
-        if spec.wordlist:
-            wordlist_path = Path(spec.wordlist)
-        else:
-            wordlist_path = context.runtime_config.seclists_root / "Discovery" / "Web-Content" / "common.txt"
-        if not wordlist_path.exists():
-            context.logger.warning("Wordlist not found: %s", wordlist_path)
+        wordlist_override = Path(spec.wordlist) if spec.wordlist else None
+        if wordlist_override and not wordlist_override.exists():
+            context.logger.warning("Wordlist not found: %s", wordlist_override)
             return
         targets = self._select_hosts_for_fuzz(context)
         if not targets:
             context.logger.info("No hosts qualified for fuzzing")
             return
+        host_tags = self._tags_for_hosts(context)
         for host in targets[: context.runtime_config.max_fuzz_hosts]:
+            wordlist_path = wordlist_override or self._select_wordlist_for_host(runtime, host, host_tags.get(host, set()))
+            if not wordlist_path.exists():
+                context.logger.warning("Wordlist not found: %s", wordlist_path)
+                continue
             artifact = context.record.paths.artifact(f"ffuf_{host}.json")
             cmd = [
                 "ffuf",
@@ -1212,9 +1695,34 @@ class FuzzStage(Stage):
                 str(artifact),
             ]
             try:
-                executor.run(cmd, check=False, timeout=tool_timeout)
-            except CommandError:
-                context.logger.warning("ffuf failed for %s", host)
+                ffuf_maxtime = max(0, int(getattr(runtime, "ffuf_maxtime", 0)))
+                if ffuf_maxtime:
+                    cmd.extend(["-maxtime", str(ffuf_maxtime)])
+                timeout = tool_timeout
+                if ffuf_maxtime:
+                    timeout = ffuf_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
+                executor.run(cmd, check=False, timeout=timeout)
+            except CommandError as exc:
+                retried = False
+                if getattr(runtime, "ffuf_retry_on_timeout", True) and "timeout" in str(exc).lower():
+                    retry_maxtime = max(ffuf_maxtime + int(getattr(runtime, "ffuf_retry_extra_time", 120)), ffuf_maxtime)
+                    retry_threads = max(10, int(context.runtime_config.ffuf_threads // 2) or 10)
+                    retry_cmd = [part for part in cmd if part not in {"-maxtime", str(ffuf_maxtime)}]
+                    retry_cmd = list(retry_cmd)
+                    if "-t" in retry_cmd:
+                        t_idx = retry_cmd.index("-t") + 1
+                        if t_idx < len(retry_cmd):
+                            retry_cmd[t_idx] = str(retry_threads)
+                    if retry_maxtime:
+                        retry_cmd.extend(["-maxtime", str(retry_maxtime)])
+                    retry_timeout = retry_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
+                    try:
+                        executor.run(retry_cmd, check=False, timeout=retry_timeout)
+                        retried = True
+                    except CommandError:
+                        pass
+                if not retried:
+                    context.logger.warning("ffuf failed for %s", host)
                 continue
             if artifact.exists():
                 try:
@@ -1265,6 +1773,44 @@ class FuzzStage(Stage):
         sorted_hosts = sorted(hosts.items(), key=lambda item: item[1], reverse=True)
         return [host for host, _ in sorted_hosts]
 
+    def _tags_for_hosts(self, context: PipelineContext) -> Dict[str, set[str]]:
+        tags_by_host: Dict[str, set[str]] = defaultdict(set)
+        results_path = context.record.paths.results_jsonl
+        if not results_path.exists():
+            return tags_by_host
+        for entry in read_jsonl(results_path):
+            if entry.get("type") != "url":
+                continue
+            url_value = entry.get("url")
+            host = entry.get("hostname") or (urlparse(url_value).hostname if url_value else None)
+            if not host:
+                continue
+            for tag in entry.get("tags", []):
+                tags_by_host[host].add(tag)
+            if url_value:
+                path = urlparse(url_value).path.lower()
+                if "/api" in path:
+                    tags_by_host[host].add("service:api")
+                if any(token in path for token in ("/wp-", "/wp-admin", "/wp-content", "/wp-json", "/xmlrpc.php")):
+                    tags_by_host[host].add("cms:wordpress")
+        return tags_by_host
+
+    def _select_wordlist_for_host(self, runtime, host: str, tags: set[str]) -> Path:
+        base = runtime.seclists_root
+        candidates: List[Path] = []
+        if "cms:wordpress" in tags or "tech:wordpress" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "wordpress.fuzz.txt")
+        if "service:api" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "api" / "common-api-endpoints.txt")
+        if tags.intersection({"surface:login", "surface:password-reset", "surface:register"}):
+            candidates.append(base / "Discovery" / "Web-Content" / "Logins.fuzz.txt")
+        if "surface:admin" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "admin.txt")
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return base / "Discovery" / "Web-Content" / "common.txt"
+
 
 
 class ActiveIntelligenceStage(Stage):
@@ -1272,10 +1818,17 @@ class ActiveIntelligenceStage(Stage):
 
     def is_enabled(self, context: PipelineContext) -> bool:
         modules = [m.lower() for m in context.record.spec.active_modules]
-        return bool(modules)
+        if modules:
+            return True
+        return bool(getattr(context.runtime_config, "auto_active_modules", True))
 
     def execute(self, context: PipelineContext) -> None:
         modules = list(dict.fromkeys(m.lower() for m in context.record.spec.active_modules))
+        if not modules and getattr(context.runtime_config, "auto_active_modules", True):
+            modules = active_modules.available_modules()
+        if not modules:
+            context.logger.info("No active modules requested")
+            return
         available = set(active_modules.available_modules())
         selected: List[str] = []
         for module in modules:
@@ -1711,6 +2264,385 @@ class RuntimeCrawlStage(Stage):
             javascript_total,
             appended,
         )
+
+
+class JSIntelligenceStage(Stage):
+    name = "js_intelligence"
+
+    ENDPOINT_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
+    RELATIVE_PATTERN = re.compile(r"/(?:api|graphql|v1|v2|v3|v4|auth|oauth|login|logout|register)[^\s\"'<>]*")
+    SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_js_intel", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        try:
+            import requests
+        except Exception:
+            context.logger.warning("js intelligence requires requests; skipping")
+            return
+        items = read_jsonl(context.record.paths.results_jsonl)
+        js_urls = []
+        for entry in items:
+            if entry.get("type") != "url":
+                continue
+            url = entry.get("url")
+            if not url or not isinstance(url, str):
+                continue
+            if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
+                if entry.get("status_code") in {200, 302}:
+                    js_urls.append(url)
+        if not js_urls:
+            context.logger.info("No JS URLs for intelligence stage")
+            return
+        max_files = int(getattr(context.runtime_config, "js_intel_max_files", 40))
+        timeout = int(getattr(context.runtime_config, "js_intel_timeout", 12))
+        max_urls = int(getattr(context.runtime_config, "js_intel_max_urls", 120))
+        js_urls = list(dict.fromkeys(js_urls))[:max_files]
+        artifacts: List[Dict[str, object]] = []
+        discovered_urls: List[str] = []
+        for js_url in js_urls:
+            try:
+                resp = requests.get(
+                    js_url,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    headers={"User-Agent": "recon-cli js-intel"},
+                    verify=context.runtime_config.verify_tls,
+                )
+            except Exception:
+                continue
+            if resp.status_code >= 400:
+                continue
+            content = resp.text or ""
+            endpoints = set(self.ENDPOINT_PATTERN.findall(content))
+            rels = set(self.RELATIVE_PATTERN.findall(content))
+            for rel in rels:
+                endpoints.add(urljoin(js_url, rel))
+            source_map = None
+            map_match = self.SOURCEMAP_PATTERN.search(content)
+            if map_match:
+                source_map = urljoin(js_url, map_match.group(1))
+                try:
+                    map_resp = requests.get(
+                        source_map,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers={"User-Agent": "recon-cli js-intel"},
+                        verify=context.runtime_config.verify_tls,
+                    )
+                    if map_resp.status_code < 400 and map_resp.text:
+                        try:
+                            map_data = json.loads(map_resp.text)
+                        except json.JSONDecodeError:
+                            map_data = {}
+                        sources_content = map_data.get("sourcesContent") or []
+                        for source_blob in sources_content[:5]:
+                            if not source_blob or not isinstance(source_blob, str):
+                                continue
+                            endpoints.update(self.ENDPOINT_PATTERN.findall(source_blob))
+                            for rel in self.RELATIVE_PATTERN.findall(source_blob):
+                                endpoints.add(urljoin(js_url, rel))
+                except Exception:
+                    pass
+            endpoints = list(endpoints)[:max_urls]
+            artifacts.append(
+                {
+                    "js_url": js_url,
+                    "endpoints": endpoints,
+                    "source_map": source_map,
+                }
+            )
+            for endpoint in endpoints:
+                if not context.url_allowed(endpoint):
+                    continue
+                payload = {
+                    "type": "url",
+                    "source": "js-intel",
+                    "url": endpoint,
+                    "hostname": urlparse(endpoint).hostname,
+                    "tags": ["js:discovered", "source:js"],
+                    "score": 30,
+                }
+                if context.results.append(payload):
+                    discovered_urls.append(endpoint)
+        if artifacts:
+            artifact_path = context.record.paths.artifact("js_intel.json")
+            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            context.set_data("js_endpoints", discovered_urls)
+            stats = context.record.metadata.stats.setdefault("js_intel", {})
+            stats["files"] = len(artifacts)
+            stats["endpoints"] = len(discovered_urls)
+            context.manager.update_metadata(context.record)
+
+
+class APIReconStage(Stage):
+    name = "api_recon"
+
+    PROBE_PATHS = [
+        "/swagger.json",
+        "/openapi.json",
+        "/openapi.yaml",
+        "/v2/api-docs",
+        "/v3/api-docs",
+        "/swagger/v1/swagger.json",
+        "/swagger/v1/swagger.yaml",
+        "/api-docs",
+        "/graphql",
+        "/graphiql",
+        "/graphql/console",
+    ]
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_api_recon", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        try:
+            import requests
+        except Exception:
+            context.logger.warning("api recon requires requests; skipping")
+            return
+        hosts: List[str] = []
+        for entry in read_jsonl(context.record.paths.results_jsonl):
+            if entry.get("type") != "url":
+                continue
+            host = entry.get("hostname") or (entry.get("url") and urlparse(entry["url"]).hostname)
+            if host:
+                hosts.append(host)
+        if not hosts:
+            return
+        hosts = list(dict.fromkeys(hosts))
+        max_hosts = int(getattr(context.runtime_config, "api_recon_max_hosts", 50))
+        timeout = int(getattr(context.runtime_config, "api_recon_timeout", 8))
+        specs_found = 0
+        urls_added = 0
+        for host in hosts[:max_hosts]:
+            base = f"https://{host}"
+            for path in self.PROBE_PATHS:
+                url = urljoin(base, path)
+                if not context.url_allowed(url):
+                    continue
+                try:
+                    resp = requests.get(
+                        url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers={"User-Agent": "recon-cli api-recon"},
+                        verify=context.runtime_config.verify_tls,
+                    )
+                except Exception:
+                    continue
+                if resp.status_code >= 400:
+                    continue
+                text = resp.text or ""
+                content_type = resp.headers.get("Content-Type", "").lower()
+                if "graphql" in path:
+                    if "graphql" in text.lower() or resp.status_code in {200, 400}:
+                        payload = {
+                            "type": "api",
+                            "source": "api-recon",
+                            "hostname": host,
+                            "url": url,
+                            "tags": ["api:graphql"],
+                            "score": 40,
+                        }
+                        if context.results.append(payload):
+                            urls_added += 1
+                    continue
+                if "json" in content_type or text.strip().startswith("{"):
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        data = {}
+                    if isinstance(data, dict) and ("openapi" in data or "swagger" in data):
+                        specs_found += 1
+                        paths = data.get("paths") or {}
+                        if isinstance(paths, dict):
+                            for api_path in list(paths.keys())[:200]:
+                                full_url = urljoin(base, api_path)
+                                if not context.url_allowed(full_url):
+                                    continue
+                                payload = {
+                                    "type": "url",
+                                    "source": "api-spec",
+                                    "url": full_url,
+                                    "hostname": host,
+                                    "tags": ["api:spec"],
+                                    "score": 35,
+                                }
+                                if context.results.append(payload):
+                                    urls_added += 1
+                        spec_payload = {
+                            "type": "api_spec",
+                            "source": "api-recon",
+                            "hostname": host,
+                            "url": url,
+                            "tags": ["api:openapi"],
+                            "score": 40,
+                        }
+                        context.results.append(spec_payload)
+        if specs_found or urls_added:
+            stats = context.record.metadata.stats.setdefault("api_recon", {})
+            stats["specs"] = specs_found
+            stats["urls_added"] = urls_added
+            context.manager.update_metadata(context.record)
+
+
+class ParamMiningStage(Stage):
+    name = "param_mining"
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_param_mining", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        candidates: List[str] = []
+        for entry in read_jsonl(context.record.paths.results_jsonl):
+            if entry.get("type") != "url":
+                continue
+            url = entry.get("url")
+            if url and "?" in url:
+                candidates.append(url)
+        js_endpoints = context.get_data("js_endpoints", []) or []
+        for url in js_endpoints:
+            if url and "?" in url:
+                candidates.append(url)
+        if not candidates:
+            context.logger.info("No parameterized URLs found")
+            return
+        candidates = list(dict.fromkeys(candidates))
+        max_urls = int(getattr(context.runtime_config, "param_mining_max_urls", 150))
+        candidates = candidates[:max_urls]
+        params = Counter()
+        examples: Dict[str, List[str]] = defaultdict(list)
+        for url in candidates:
+            parsed = urlparse(url)
+            for name, _ in parse_qsl(parsed.query, keep_blank_values=True):
+                params[name] += 1
+                if len(examples[name]) < 3:
+                    examples[name].append(url)
+        max_params = int(getattr(context.runtime_config, "param_mining_max_params", 60))
+        for name, count in params.most_common(max_params):
+            payload = {
+                "type": "parameter",
+                "source": "param-mining",
+                "name": name,
+                "count": count,
+                "examples": examples.get(name, []),
+                "score": min(50, 10 + count),
+                "tags": ["param"],
+            }
+            context.results.append(payload)
+        artifact_path = context.record.paths.artifact("param_mining.json")
+        artifact_path.write_text(
+            json.dumps(
+                {
+                    "params": params.most_common(max_params),
+                    "examples": examples,
+                    "candidates": candidates,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        context.set_data("param_urls", candidates)
+        stats = context.record.metadata.stats.setdefault("param_mining", {})
+        stats["params"] = min(len(params), max_params)
+        stats["urls"] = len(candidates)
+        context.manager.update_metadata(context.record)
+
+
+class VulnScanStage(Stage):
+    name = "vuln_scan"
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_dalfox", False) or getattr(context.runtime_config, "enable_sqlmap", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        executor = context.executor
+        candidates = context.get_data("param_urls", []) or []
+        if not candidates:
+            context.logger.info("No parameterized URLs for vuln scan")
+            return
+        artifacts_dir = context.record.paths.ensure_subdir("vuln_scans")
+        findings = 0
+        if getattr(context.runtime_config, "enable_dalfox", False) and executor.available("dalfox"):
+            max_urls = int(getattr(context.runtime_config, "dalfox_max_urls", 20))
+            timeout = int(getattr(context.runtime_config, "dalfox_timeout", 600))
+            for url in candidates[:max_urls]:
+                artifact = artifacts_dir / f"dalfox_{hashlib.md5(url.encode()).hexdigest()[:8]}.txt"
+                cmd = ["dalfox", "url", url]
+                try:
+                    result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+                except CommandError:
+                    context.logger.warning("dalfox failed for %s", url)
+                    continue
+                output = (result.stdout or "") + "\n" + (result.stderr or "")
+                artifact.write_text(output, encoding="utf-8")
+                if re.search(r"\bVULN\b|\bPOC\b|reflected", output, re.IGNORECASE):
+                    payload = {
+                        "type": "finding",
+                        "source": "dalfox",
+                        "hostname": urlparse(url).hostname,
+                        "url": url,
+                        "description": "Potential XSS detected by dalfox",
+                        "details": {"output_snippet": output[:1000]},
+                        "tags": ["xss", "dalfox"],
+                        "score": 80,
+                        "priority": "high",
+                    }
+                    if context.results.append(payload):
+                        findings += 1
+        if getattr(context.runtime_config, "enable_sqlmap", False) and executor.available("sqlmap"):
+            max_urls = int(getattr(context.runtime_config, "sqlmap_max_urls", 10))
+            timeout = int(getattr(context.runtime_config, "sqlmap_timeout", 900))
+            level = int(getattr(context.runtime_config, "sqlmap_level", 1))
+            risk = int(getattr(context.runtime_config, "sqlmap_risk", 1))
+            for url in candidates[:max_urls]:
+                artifact = artifacts_dir / f"sqlmap_{hashlib.md5(url.encode()).hexdigest()[:8]}.txt"
+                cmd = [
+                    "sqlmap",
+                    "-u",
+                    url,
+                    "--batch",
+                    "--level",
+                    str(level),
+                    "--risk",
+                    str(risk),
+                    "--random-agent",
+                    "--threads",
+                    "2",
+                    "--timeout",
+                    "10",
+                    "--retries",
+                    "1",
+                ]
+                try:
+                    result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+                except CommandError:
+                    context.logger.warning("sqlmap failed for %s", url)
+                    continue
+                output = (result.stdout or "") + "\n" + (result.stderr or "")
+                artifact.write_text(output, encoding="utf-8")
+                if re.search(r"parameter .* is vulnerable|sqlmap identified", output, re.IGNORECASE):
+                    payload = {
+                        "type": "finding",
+                        "source": "sqlmap",
+                        "hostname": urlparse(url).hostname,
+                        "url": url,
+                        "description": "Potential SQL injection detected by sqlmap",
+                        "details": {"output_snippet": output[:1200]},
+                        "tags": ["sqli", "sqlmap"],
+                        "score": 85,
+                        "priority": "high",
+                    }
+                    if context.results.append(payload):
+                        findings += 1
+        if findings:
+            stats = context.record.metadata.stats.setdefault("vuln_scan", {})
+            stats["findings"] = findings
+            context.manager.update_metadata(context.record)
 
 
 
@@ -2335,7 +3267,7 @@ class ScannerStage(Stage):
             return
         scanners = [s.lower() for s in context.record.spec.scanners]
         if not scanners and getattr(context.runtime_config, "auto_scanners", True):
-            scanners = scanner_integrations.available_scanners()
+            scanners = ["nuclei", "wpscan"]
         if not scanners:
             return
         available = []
@@ -2391,28 +3323,75 @@ class ScannerStage(Stage):
             if not api_hosts:
                 api_hosts = list(host_info.keys())
             api_hosts = api_hosts[: runtime.max_scanner_hosts]
-            findings = []
-            nuclei_tags = []
+            findings: List[scanner_integrations.ScannerFinding] = []
+            nuclei_tags: List[str] = []
             if getattr(runtime, "nuclei_tags", None):
                 nuclei_tags = [tag.strip() for tag in str(runtime.nuclei_tags).split(",") if tag.strip()]
+            targets: List[str] = []
             for host in api_hosts:
                 urls = host_info[host]["urls"]
                 base_url = urls[0] if urls else f"https://{host}"
-                result = scanner_integrations.run_nuclei(
+                targets.append(base_url)
+            batch_size = max(1, int(getattr(runtime, "nuclei_batch_size", 1)))
+            pending_batches = [targets[i:i + batch_size] for i in range(0, len(targets), batch_size)]
+            timed_out_batches = 0
+            batches_run = 0
+            retried_singles: Set[str] = set()
+            while pending_batches:
+                batch = pending_batches.pop(0)
+                if not batch:
+                    continue
+                computed_timeout = int(getattr(runtime, "nuclei_batch_timeout_base", 300)) + int(
+                    getattr(runtime, "nuclei_batch_timeout_per_target", 45)
+                ) * len(batch)
+                max_timeout = int(getattr(runtime, "nuclei_batch_timeout_max", runtime.scanner_timeout))
+                if max_timeout < runtime.scanner_timeout:
+                    max_timeout = runtime.scanner_timeout
+                batch_timeout = min(max_timeout, max(computed_timeout, runtime.scanner_timeout))
+                result = scanner_integrations.run_nuclei_batch(
                     context.executor,
                     context.logger,
-                    host,
-                    base_url,
+                    batch,
                     scanner_dir,
-                    runtime.scanner_timeout,
+                    batch_timeout,
                     tags=nuclei_tags or None,
+                    request_timeout=int(getattr(runtime, "nuclei_timeout", 10)),
+                    retries=int(getattr(runtime, "nuclei_retries", 1)),
                 )
+                batches_run += 1
                 for finding in result.findings:
                     context.results.append(finding.payload)
                 findings.extend(result.findings)
+                if result.stats.get("timed_out"):
+                    timed_out_batches += 1
+                    if len(batch) > 1:
+                        mid = len(batch) // 2
+                        pending_batches.insert(0, batch[mid:])
+                        pending_batches.insert(0, batch[:mid])
+                    else:
+                        single_target = batch[0]
+                        if single_target not in retried_singles:
+                            retried_singles.add(single_target)
+                            single_timeout = int(getattr(runtime, "nuclei_single_timeout", batch_timeout))
+                            retry_result = scanner_integrations.run_nuclei_batch(
+                                context.executor,
+                                context.logger,
+                                batch,
+                                scanner_dir,
+                                max(single_timeout, batch_timeout),
+                                tags=nuclei_tags or None,
+                                request_timeout=int(getattr(runtime, "nuclei_timeout", 10)),
+                                retries=int(getattr(runtime, "nuclei_retries", 1)),
+                            )
+                            batches_run += 1
+                            for finding in retry_result.findings:
+                                context.results.append(finding.payload)
+                            findings.extend(retry_result.findings)
             summary["nuclei"] = {
                 "targets": len(api_hosts),
                 "findings": len(findings),
+                "batches": batches_run,
+                "timeouts": timed_out_batches,
             }
 
         if "wpscan" in available:
@@ -2484,18 +3463,21 @@ class ScreenshotStage(Stage):
             _note_missing_tool(context, "playwright")
             return
         max_shots = context.record.spec.max_screenshots or context.runtime_config.max_screenshots
-        urls = self._select_urls(context, max_shots)
-        if not urls:
+        candidates = self._select_urls(context, max_shots)
+        if not candidates:
             context.logger.info("No URLs eligible for screenshots")
             return
         screenshots_dir = context.record.paths.ensure_subdir("screenshots")
         hars_dir = context.record.paths.ensure_subdir("hars")
+        manifest: List[Dict[str, object]] = []
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            context.logger.info("Capturing screenshots for %s URLs", len(urls))
-            for idx, url in enumerate(urls, start=1):
+            context.logger.info("Capturing screenshots for %s URLs", len(candidates))
+            for idx, entry in enumerate(candidates, start=1):
+                url = entry["url"]
                 screenshot_path = screenshots_dir / f"shot_{idx}.png"
+                html_path = screenshots_dir / f"shot_{idx}.html"
                 har_path = hars_dir / f"shot_{idx}.har"
                 payload = None
                 browser_context = None
@@ -2505,11 +3487,18 @@ class ScreenshotStage(Stage):
                     page = browser_context.new_page()
                     page.goto(url, timeout=15000, wait_until="networkidle")
                     page.screenshot(path=str(screenshot_path), full_page=True)
+                    html_path.write_text(page.content(), encoding="utf-8")
                     hostname = urlparse(page.url).hostname or ""
                     payload = {
                         "type": "screenshot",
                         "source": "playwright",
                         "hostname": hostname,
+                        "url": url,
+                        "final_url": page.url,
+                        "score": entry.get("score"),
+                        "selection_source": entry.get("source"),
+                        "selection_tags": entry.get("tags"),
+                        "selection_reason": entry.get("reason"),
                         "screenshot_path": str(screenshot_path.relative_to(context.record.paths.root)),
                     }
                 except Exception as exc:
@@ -2531,11 +3520,21 @@ class ScreenshotStage(Stage):
                 if payload:
                     if har_path.exists():
                         payload["har_path"] = str(har_path.relative_to(context.record.paths.root))
+                    if html_path.exists():
+                        payload["html_path"] = str(html_path.relative_to(context.record.paths.root))
                     context.results.append(payload)
+                    manifest.append(payload)
             browser.close()
+        if manifest:
+            manifest_path = screenshots_dir / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            stats = context.record.metadata.stats.setdefault("screenshots", {})
+            stats["count"] = len(manifest)
+            stats["manifest"] = str(manifest_path.relative_to(context.record.paths.root))
+            context.manager.update_metadata(context.record)
 
-    def _select_urls(self, context: PipelineContext, limit: int) -> List[str]:
-        urls: List[tuple[str, int]] = []
+    def _select_urls(self, context: PipelineContext, limit: int) -> List[Dict[str, object]]:
+        urls: List[Dict[str, object]] = []
         for entry in read_jsonl(context.record.paths.results_jsonl):
             if entry.get("type") != "url":
                 continue
@@ -2546,9 +3545,17 @@ class ScreenshotStage(Stage):
             if not url:
                 continue
             score = int(entry.get("score", 0))
-            urls.append((url, score))
-        urls.sort(key=lambda item: item[1], reverse=True)
-        return [url for url, _ in urls[:limit]]
+            urls.append(
+                {
+                    "url": url,
+                    "score": score,
+                    "source": entry.get("source"),
+                    "tags": entry.get("tags", []),
+                    "reason": f"score={score} source={entry.get('source')}",
+                }
+            )
+        urls.sort(key=lambda item: item.get("score", 0), reverse=True)
+        return urls[:limit]
 
 
 class FinalizeStage(Stage):
@@ -2569,14 +3576,21 @@ PIPELINE_STAGES: List[Stage] = [
     DedupeStage(),
     ResolveStage(),
     EnrichmentStage(),
+    NmapStage(),
     HttpProbeStage(),
     ScoringStage(),
+    AuthDiscoveryStage(),
+    WafProbeStage(),
     IDORStage(),
     AuthMatrixStage(),
     FuzzStage(),
     ActiveIntelligenceStage(),
     SecretsDetectionStage(),
     RuntimeCrawlStage(),
+    JSIntelligenceStage(),
+    APIReconStage(),
+    ParamMiningStage(),
+    VulnScanStage(),
     TrimResultsStage(),
     CorrelationStage(),
     LearningStage(),

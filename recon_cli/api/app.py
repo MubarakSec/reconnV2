@@ -27,6 +27,7 @@ from recon_cli.jobs.lifecycle import JobLifecycle
 from recon_cli.jobs.results import JobResults
 from recon_cli.jobs.summary import JobSummary
 from recon_cli.utils.metrics import metrics as metrics_registry
+from recon_cli.utils import validation
 from recon_cli.utils.jsonl import read_jsonl
 
 
@@ -460,6 +461,12 @@ def create_app() -> "FastAPI":
 
         if not request.target:
             raise HTTPException(status_code=400, detail="target is required")
+        allow_ip = request.allow_ip
+        try:
+            if validation.is_ip(validation._coerce_hostname(request.target)):
+                allow_ip = True
+        except Exception:
+            allow_ip = request.allow_ip
         
         try:
             record = manager.create_job(
@@ -467,7 +474,7 @@ def create_app() -> "FastAPI":
                 profile=request.profile,
                 inline=request.inline,
                 force=request.force,
-                allow_ip=request.allow_ip,
+                allow_ip=allow_ip,
                 scanners=request.scanners if request.scanners else None,
                 active_modules=request.active_modules if request.active_modules else None,
             )
