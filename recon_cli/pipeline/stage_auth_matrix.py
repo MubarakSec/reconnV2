@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
     requests = None  # type: ignore
 
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stages import Stage
+from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.jsonl import read_jsonl
 
 SENSITIVE_KEYS = {"email", "role", "roles", "balance", "owner_id", "user_id", "account_id"}

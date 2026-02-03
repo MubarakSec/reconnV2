@@ -119,6 +119,55 @@ def generate_summary(context) -> None:
                 lines.append(f"{name}: targets={data.get('targets', 0)}, findings={data.get('findings', 0)}")
             else:
                 lines.append(f"{name}: {data}")
+    nmap_stats = getattr(metadata, 'stats', {}).get('nmap') if hasattr(metadata, 'stats') else None
+    if nmap_stats:
+        lines.append('')
+        lines.append('== Nmap Summary ==')
+        lines.append(f"Hosts scanned: {nmap_stats.get('hosts', 0)}")
+        lines.append(f"Services: {nmap_stats.get('services', 0)}")
+        if nmap_stats.get('udp_services'):
+            lines.append(f"UDP services: {nmap_stats.get('udp_services', 0)}")
+        lines.append(f"Findings: {nmap_stats.get('findings', 0)}")
+    auth_stats = getattr(metadata, 'stats', {}).get('auth_discovery') if hasattr(metadata, 'stats') else None
+    if auth_stats:
+        lines.append('')
+        lines.append('== Auth Discovery ==')
+        lines.append(f"Forms discovered: {auth_stats.get('forms', 0)}")
+    js_stats = getattr(metadata, 'stats', {}).get('js_intel') if hasattr(metadata, 'stats') else None
+    if js_stats:
+        lines.append('')
+        lines.append('== JS Intelligence ==')
+        lines.append(f"JS files: {js_stats.get('files', 0)}")
+        lines.append(f"Endpoints: {js_stats.get('endpoints', 0)}")
+    api_stats = getattr(metadata, 'stats', {}).get('api_recon') if hasattr(metadata, 'stats') else None
+    if api_stats:
+        lines.append('')
+        lines.append('== API Recon ==')
+        lines.append(f"Specs: {api_stats.get('specs', 0)}")
+        lines.append(f"URLs added: {api_stats.get('urls_added', 0)}")
+    param_stats = getattr(metadata, 'stats', {}).get('param_mining') if hasattr(metadata, 'stats') else None
+    if param_stats:
+        lines.append('')
+        lines.append('== Parameter Mining ==')
+        lines.append(f"Parameters: {param_stats.get('params', 0)}")
+        lines.append(f"URLs analyzed: {param_stats.get('urls', 0)}")
+    waf_stats = getattr(metadata, 'stats', {}).get('waf_probe') if hasattr(metadata, 'stats') else None
+    if waf_stats:
+        lines.append('')
+        lines.append('== WAF Probe ==')
+        lines.append(f"Findings: {waf_stats.get('findings', 0)}")
+    vuln_stats = getattr(metadata, 'stats', {}).get('vuln_scan') if hasattr(metadata, 'stats') else None
+    if vuln_stats:
+        lines.append('')
+        lines.append('== Vuln Scanners ==')
+        lines.append(f"Findings: {vuln_stats.get('findings', 0)}")
+    shots_stats = getattr(metadata, 'stats', {}).get('screenshots') if hasattr(metadata, 'stats') else None
+    if shots_stats:
+        lines.append('')
+        lines.append('== Screenshots ==')
+        lines.append(f"Count: {shots_stats.get('count', 0)}")
+        if shots_stats.get('manifest'):
+            lines.append(f"Manifest: {shots_stats.get('manifest')}")
     learning_stats = getattr(metadata, 'stats', {}).get('learning') if hasattr(metadata, 'stats') else None
     if learning_stats and learning_stats.get('predictions'):
         lines.append('')

@@ -129,6 +129,14 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         "urls_list": [],
         "secrets": [],
         "findings": [],
+        "screenshots": [],
+        "services": [],
+        "auth_forms": [],
+        "api_specs": [],
+        "parameters": [],
+        "js_endpoints": [],
+        "waf_findings": [],
+        "vuln_findings": [],
     }
     
     for result in results:
@@ -150,9 +158,26 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         
         if result_type == "secret":
             stats["secrets"].append(result)
-        
+
         if result_type in {"finding", "vulnerability", "vuln"}:
             stats["findings"].append(result)
+
+        if result_type == "screenshot":
+            stats["screenshots"].append(result)
+        if result_type == "service":
+            stats["services"].append(result)
+        if result_type == "auth_form":
+            stats["auth_forms"].append(result)
+        if result_type in {"api_spec", "api"}:
+            stats["api_specs"].append(result)
+        if result_type == "parameter":
+            stats["parameters"].append(result)
+        if result_type == "url" and result.get("source") == "js-intel":
+            stats["js_endpoints"].append(result)
+        if result_type == "finding" and result.get("source") == "waf-probe":
+            stats["waf_findings"].append(result)
+        if result_type == "finding" and result.get("source") in {"dalfox", "sqlmap"}:
+            stats["vuln_findings"].append(result)
     
     stats["hostnames_list"] = sorted(stats["hostnames"])[:50]
     stats["urls_list"] = sorted(stats["urls"])[:50]
@@ -419,6 +444,31 @@ def _generate_html(
             min-height: 20px;
             transition: height 0.3s;
         }}
+
+        .shots-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }}
+
+        .shot-card {{
+            background: {colors["accent"]};
+            border-radius: 8px;
+            overflow: hidden;
+            padding: 6px;
+        }}
+
+        .shot-card img {{
+            width: 100%;
+            border-radius: 6px;
+            display: block;
+        }}
+
+        .shot-caption {{
+            font-size: 0.8rem;
+            margin-top: 6px;
+            word-break: break-all;
+        }}
     </style>
 </head>
 <body>
@@ -494,6 +544,30 @@ def _generate_html(
         
         <!-- الاكتشافات -->
         {_generate_findings_section(stats["findings"], t, colors) if stats["findings"] else ""}
+
+        <!-- فحوصات الثغرات -->
+        {_generate_vuln_section(stats["vuln_findings"], t, colors) if stats["vuln_findings"] else ""}
+
+        <!-- نتائج WAF -->
+        {_generate_waf_section(stats["waf_findings"], t, colors) if stats["waf_findings"] else ""}
+
+        <!-- خدمات Nmap -->
+        {_generate_services_section(stats["services"], t, colors) if stats["services"] else ""}
+
+        <!-- نماذج الدخول -->
+        {_generate_auth_section(stats["auth_forms"], t, colors) if stats["auth_forms"] else ""}
+
+        <!-- API Specs -->
+        {_generate_api_section(stats["api_specs"], t, colors) if stats["api_specs"] else ""}
+
+        <!-- Parameters -->
+        {_generate_param_section(stats["parameters"], t, colors) if stats["parameters"] else ""}
+
+        <!-- JS Endpoints -->
+        {_generate_js_section(stats["js_endpoints"], t, colors) if stats["js_endpoints"] else ""}
+
+        <!-- Screenshots -->
+        {_generate_screenshots_section(stats["screenshots"], t, colors) if config.include_screenshots and stats["screenshots"] else ""}
         
         <div class="footer">
             <p>🛡️ ReconnV2 - Advanced Reconnaissance Pipeline</p>
@@ -573,6 +647,199 @@ def _generate_findings_section(findings: List[Dict], t: Dict, colors: Dict) -> s
             <h3>🎯 {t["findings"]} ({len(findings)})</h3>
             <div class="findings-list">
                 {"".join(items)}
+            </div>
+        </div>
+    '''
+
+
+def _generate_vuln_section(findings: List[Dict], t: Dict, colors: Dict) -> str:
+    if not findings:
+        return ""
+    items = []
+    for finding in findings[:20]:
+        severity = finding.get("priority", "medium")
+        items.append(f'''
+            <div class="finding-item">
+                <div class="finding-title">
+                    <span class="severity-badge severity-{severity}">{severity.upper()}</span>
+                    {finding.get("description", "Vulnerability")}
+                </div>
+                <div>{finding.get("url", "")}</div>
+            </div>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧪 Vuln Scans ({len(findings)})</h3>
+            <div class="findings-list">
+                {"".join(items)}
+            </div>
+        </div>
+    '''
+
+
+def _generate_waf_section(findings: List[Dict], t: Dict, colors: Dict) -> str:
+    if not findings:
+        return ""
+    rows = []
+    for finding in findings[:15]:
+        rows.append(f'''
+            <tr>
+                <td>{finding.get("hostname", "N/A")}</td>
+                <td>{finding.get("details", {}).get("baseline_status", "")}</td>
+                <td>{finding.get("details", {}).get("alternate_status", "")}</td>
+                <td>{finding.get("details", {}).get("url", "")}</td>
+            </tr>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧱 WAF Findings ({len(findings)})</h3>
+            <table>
+                <tr><th>Host</th><th>Baseline</th><th>Alternate</th><th>URL</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_services_section(services: List[Dict], t: Dict, colors: Dict) -> str:
+    if not services:
+        return ""
+    rows = []
+    for svc in services[:20]:
+        rows.append(f'''
+            <tr>
+                <td>{svc.get("hostname", "N/A")}</td>
+                <td>{svc.get("port", "")}</td>
+                <td>{svc.get("protocol", "")}</td>
+                <td>{svc.get("service", "")}</td>
+                <td>{svc.get("product", "")}</td>
+                <td>{svc.get("version", "")}</td>
+            </tr>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧭 Nmap Services ({len(services)})</h3>
+            <table>
+                <tr><th>Host</th><th>Port</th><th>Proto</th><th>Service</th><th>Product</th><th>Version</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_auth_section(forms: List[Dict], t: Dict, colors: Dict) -> str:
+    if not forms:
+        return ""
+    rows = []
+    for form in forms[:20]:
+        inputs = ", ".join(item.get("name") for item in form.get("inputs", []) if isinstance(item, dict) and item.get("name"))
+        rows.append(f'''
+            <tr>
+                <td>{form.get("url", "")}</td>
+                <td>{form.get("action", "")}</td>
+                <td>{form.get("method", "")}</td>
+                <td>{inputs}</td>
+            </tr>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🔐 Auth Forms ({len(forms)})</h3>
+            <table>
+                <tr><th>Page</th><th>Action</th><th>Method</th><th>Inputs</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_api_section(apis: List[Dict], t: Dict, colors: Dict) -> str:
+    if not apis:
+        return ""
+    rows = []
+    for api in apis[:20]:
+        rows.append(f'''
+            <tr>
+                <td>{api.get("hostname", "")}</td>
+                <td>{api.get("url", "")}</td>
+                <td>{",".join(api.get("tags", []))}</td>
+            </tr>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>📡 API Specs ({len(apis)})</h3>
+            <table>
+                <tr><th>Host</th><th>URL</th><th>Tags</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_param_section(params: List[Dict], t: Dict, colors: Dict) -> str:
+    if not params:
+        return ""
+    rows = []
+    for param in params[:20]:
+        example = ""
+        if isinstance(param.get("examples"), list) and param.get("examples"):
+            example = param["examples"][0]
+        rows.append(f'''
+            <tr>
+                <td>{param.get("name", "")}</td>
+                <td>{param.get("count", "")}</td>
+                <td>{example}</td>
+            </tr>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧩 Parameters ({len(params)})</h3>
+            <table>
+                <tr><th>Name</th><th>Count</th><th>Example</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_js_section(urls: List[Dict], t: Dict, colors: Dict) -> str:
+    if not urls:
+        return ""
+    rows = []
+    for entry in urls[:20]:
+        rows.append(f'''
+            <tr>
+                <td>{entry.get("url", "")}</td>
+            </tr>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧠 JS Endpoints ({len(urls)})</h3>
+            <table>
+                <tr><th>URL</th></tr>
+                {"".join(rows)}
+            </table>
+        </div>
+    '''
+
+
+def _generate_screenshots_section(shots: List[Dict], t: Dict, colors: Dict) -> str:
+    if not shots:
+        return ""
+    cards = []
+    for shot in shots[:12]:
+        path = shot.get("screenshot_path", "")
+        url = shot.get("final_url") or shot.get("url") or ""
+        cards.append(f'''
+            <div class="shot-card">
+                <a href="{path}" target="_blank"><img src="{path}" alt="screenshot" /></a>
+                <div class="shot-caption">{url}</div>
+            </div>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>📸 Screenshots ({len(shots)})</h3>
+            <div class="shots-grid">
+                {"".join(cards)}
             </div>
         </div>
     '''
