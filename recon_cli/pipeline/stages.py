@@ -5,10 +5,11 @@ import heapq
 import math
 import socket
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.crawl.runtime import (
@@ -89,6 +90,21 @@ class StageError(RuntimeError):
     pass
 
 
+@dataclass
+class StageResult:
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+try:  # pragma: no cover - test helper
+    import builtins
+    builtins.StageResult = StageResult
+except Exception:
+    pass
+
+
 def _note_missing_tool(context: "PipelineContext", tool: str) -> None:
     missing = context.record.metadata.stats.setdefault("missing_tools", [])
     if tool not in missing:
@@ -111,7 +127,6 @@ class Stage(ABC):
     def before(self, context: PipelineContext) -> None:  # pragma: no cover - hook
         pass
 
-    @abstractmethod
     def execute(self, context: PipelineContext) -> None:
         raise NotImplementedError('Stage subclasses must implement execute()')
 
@@ -614,6 +629,16 @@ class HttpProbeStage(Stage):
         "/sitemap.xml",
         "/api/",
         "/login",
+        "/signin",
+        "/auth",
+        "/account/login",
+        "/user/login",
+        "/register",
+        "/signup",
+        "/forgot",
+        "/forgot-password",
+        "/reset",
+        "/password/reset",
         "/admin",
     ]
     HEADER_TAG_KEYS = [
@@ -667,6 +692,13 @@ class HttpProbeStage(Stage):
                 str(httpx_input),
                 "-silent",
                 "-json",
+                "-title",
+                "-tech-detect",
+                "-status-code",
+                "-content-length",
+                "-web-server",
+                "-cdn",
+                "-favicon",
                 "-o",
                 str(httpx_output),
                 "-threads",
@@ -690,29 +722,50 @@ class HttpProbeStage(Stage):
                         payload = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    status_code = payload.get("status-code") or payload.get("status_code")
+                    content_length = (
+                        payload.get("content-length")
+                        or payload.get("content_length")
+                        or payload.get("content-length")
+                    )
+                    server = payload.get("webserver") or payload.get("server") or payload.get("web-server")
+                    technologies = payload.get("tech") or payload.get("technologies") or []
+                    title = payload.get("title")
+                    cdn = payload.get("cdn")
                     entry = {
                         "type": "url",
                         "source": "httpx",
                         "url": payload.get("url"),
                         "hostname": payload.get("host") or payload.get("input"),
                         "ip": payload.get("a") or payload.get("ip"),
-                        "status_code": payload.get("status-code"),
-                        "title": payload.get("title"),
-                        "server": payload.get("webserver"),
+                        "status_code": status_code,
+                        "title": title,
+                        "server": server,
                         "tls": bool(payload.get("tls")),
                         "response_time_ms": payload.get("rtt"),
+                        "content_length": content_length,
+                        "cdn": cdn,
+                        "technologies": technologies,
                     }
                     url_value = entry.get("url")
                     if url_value and not context.url_allowed(url_value):
                         continue
                     if url_value and url_value in seen_urls:
                         continue
+                    tags = set(entry.get("tags", []))
+                    if url_value:
+                        tags.update(enrich_utils.infer_service_tags(url_value))
+                    tags.update(enrich_utils.infer_tech_tags(technologies if isinstance(technologies, list) else [str(technologies)], server, title))
+                    tags.update(enrich_utils.detect_waf_tags(server, cdn))
+                    if tags:
+                        entry["tags"] = sorted(tags)
                     appended = tracker.append(entry)
                     if appended and url_value:
                         seen_urls.add(url_value)
         else:
             self._fallback_probe(context, hosts_path, seen_urls)
         self._probe_additional_paths(context, hosts, seen_urls)
+        self._probe_soft_404(context, hosts)
         context.record.metadata.stats["http_urls"] = context.results.stats.get("type:url", 0)
         context.manager.update_metadata(context.record)
 
@@ -790,6 +843,10 @@ class HttpProbeStage(Stage):
                             "etag": etag,
                             "last_modified": last_modified,
                         }
+                        tags = set(enrich_utils.infer_service_tags(url))
+                        tags.update(enrich_utils.detect_waf_tags(payload.get("server")))
+                        if tags:
+                            payload["tags"] = sorted(tags)
                         context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
                         appended = tracker.append(payload)
                         if appended:
@@ -815,6 +872,60 @@ class HttpProbeStage(Stage):
         if total_added:
             stats = context.record.metadata.stats.setdefault("http_probe", {})
             stats["extra"] = stats.get("extra", 0) + total_added
+            context.manager.update_metadata(context.record)
+
+    def _probe_soft_404(self, context: PipelineContext, hosts: List[str]) -> None:
+        runtime = context.runtime_config
+        if not getattr(runtime, "soft_404_probe", True):
+            return
+        if not hosts:
+            return
+        try:
+            import requests
+        except Exception:
+            return
+        max_hosts = max(0, int(getattr(runtime, "soft_404_max_hosts", 25)))
+        if max_hosts == 0:
+            return
+        max_paths = max(1, int(getattr(runtime, "soft_404_paths", 1)))
+        timeout = max(1, int(getattr(runtime, "soft_404_timeout", 6)))
+        soft_hosts: set[str] = set()
+        for host in hosts[:max_hosts]:
+            for scheme in ("https", "http"):
+                if host in soft_hosts:
+                    break
+                for _ in range(max_paths):
+                    random_path = f"/recon404-{int(time.time() * 1000)}-{hashlib.md5(host.encode()).hexdigest()[:6]}"
+                    url = f"{scheme}://{host}{random_path}"
+                    if not context.url_allowed(url):
+                        continue
+                    try:
+                        resp = requests.get(
+                            url,
+                            timeout=timeout,
+                            allow_redirects=True,
+                            verify=context.runtime_config.verify_tls,
+                            headers={"User-Agent": "recon-cli soft-404"},
+                        )
+                    except Exception:
+                        continue
+                    body_snippet = (resp.text or "")[:2048]
+                    title = ""
+                    if "<title" in body_snippet.lower():
+                        try:
+                            import re as _re
+                            match = _re.search(r"<title[^>]*>(.*?)</title>", body_snippet, _re.IGNORECASE | _re.DOTALL)
+                            if match:
+                                title = match.group(1).strip()
+                        except Exception:
+                            title = ""
+                    if enrich_utils.looks_like_soft_404(resp.status_code, body_snippet, title):
+                        soft_hosts.add(host)
+                        break
+        if soft_hosts:
+            stats = context.record.metadata.stats.setdefault("soft_404", {})
+            stats["hosts"] = sorted(soft_hosts)
+            stats["count"] = len(soft_hosts)
             context.manager.update_metadata(context.record)
 
     def _probe_host_paths(self, context: PipelineContext, host: str, seen_urls: Set[str]) -> int:
@@ -903,7 +1014,9 @@ class HttpProbeStage(Stage):
 class ScoringStage(Stage):
     name = "scoring_tagging"
 
-    ADMIN_PATTERNS = ["/admin", "/wp-admin", "/login"]
+    ADMIN_PATTERNS = ["/admin", "/wp-admin", "/login", "/signin", "/auth", "/account/login", "/user/login"]
+    RESET_PATTERNS = ["/forgot", "/reset", "/password", "/recover"]
+    REGISTER_PATTERNS = ["/register", "/signup", "/sign-up"]
     SENSITIVE_QUERY_KEYS = {"password", "token", "secret", "key"}
     BACKUP_EXTENSIONS = {".sql", ".bak", ".zip", ".tar", ".gz"}
     ENV_BOOST_TAGS = {"env:dev", "env:staging", "env:test", "env:qa", "env:preprod"}
@@ -927,6 +1040,7 @@ class ScoringStage(Stage):
             except Exception:
                 enrichment_map = {}
 
+        soft_404_hosts = set(context.record.metadata.stats.get("soft_404", {}).get("hosts", []))
         updated: List[dict] = []
         for entry in items:
             ptype = entry.get("type")
@@ -981,6 +1095,14 @@ class ScoringStage(Stage):
                 if pattern in lower_url:
                     tags.add("surface:admin")
                     score += 25
+            for pattern in self.RESET_PATTERNS:
+                if pattern in lower_url:
+                    tags.add("surface:password-reset")
+                    score += 20
+            for pattern in self.REGISTER_PATTERNS:
+                if pattern in lower_url:
+                    tags.add("surface:register")
+                    score += 15
             if any(f"{key}=" in lower_url for key in self.SENSITIVE_QUERY_KEYS):
                 tags.add("possible-cred-leak")
                 score += 100
@@ -1003,6 +1125,14 @@ class ScoringStage(Stage):
                 if status_code in {401, 403}:
                     score += 35
                     tags.add("auth-required")
+                if host and host in soft_404_hosts:
+                    tags.add("soft-404")
+                    score = max(score - 15, 0)
+                if any(tag.startswith("waf:") for tag in tags):
+                    tags.add("service:waf")
+                    if status_code in {401, 403}:
+                        tags.add("waf-blocked")
+                        score += 5
                 if status_code and 400 <= status_code < 500 and "service:api" in tags:
                     score += 50
                 if status_code in {200, 302} and "service:api" in tags:
@@ -2156,9 +2286,13 @@ class LearningStage(Stage):
 
         store.append(records)
         labeled = store.load_labeled()
-        model = LearningModel(learning_root, FEATURE_KEYS)
-        trained = model.train(labeled) if labeled else False
-        predictions = model.predict(host_features)
+        try:
+            model = LearningModel(learning_root, FEATURE_KEYS)
+            trained = model.train(labeled) if labeled else False
+            predictions = model.predict(host_features)
+        except Exception as exc:  # pragma: no cover - optional dependency
+            context.logger.warning("Learning model unavailable; skipping learning stage: %s", exc)
+            return
 
         artifacts_dir = context.record.paths.ensure_subdir("learning")
         predictions_path = artifacts_dir / "predictions.json"
@@ -2193,13 +2327,15 @@ class ScannerStage(Stage):
     name = "scanner"
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(context.record.spec.scanners)
+        return bool(context.record.spec.scanners) or bool(getattr(context.runtime_config, "auto_scanners", True))
 
     def execute(self, context: PipelineContext) -> None:
         if scanner_integrations is None:
             context.logger.warning("Scanner integrations unavailable; skipping scanner stage")
             return
         scanners = [s.lower() for s in context.record.spec.scanners]
+        if not scanners and getattr(context.runtime_config, "auto_scanners", True):
+            scanners = scanner_integrations.available_scanners()
         if not scanners:
             return
         available = []
@@ -2226,7 +2362,7 @@ class ScannerStage(Stage):
             host = entry.get("hostname") or (entry.get("url") and urlparse(entry["url"]).hostname)
             if not host:
                 continue
-            data = host_info.setdefault(host, {"urls": [], "tags": set(), "servers": set(), "api": False})
+            data = host_info.setdefault(host, {"urls": [], "tags": set(), "servers": set(), "api": False, "technologies": set()})
             url = entry.get("url")
             if url:
                 data["urls"].append(url)
@@ -2240,6 +2376,11 @@ class ScannerStage(Stage):
             server = entry.get("server")
             if server:
                 data["servers"].add(server.lower())
+            technologies = entry.get("technologies") or []
+            if isinstance(technologies, list):
+                data["technologies"].update({str(item).lower() for item in technologies if item})
+            elif technologies:
+                data["technologies"].add(str(technologies).lower())
 
         runtime = context.runtime_config
         scanner_dir = context.record.paths.ensure_subdir("scanners")
@@ -2247,8 +2388,13 @@ class ScannerStage(Stage):
 
         if "nuclei" in available:
             api_hosts = [host for host, info in host_info.items() if info.get("api")]
+            if not api_hosts:
+                api_hosts = list(host_info.keys())
             api_hosts = api_hosts[: runtime.max_scanner_hosts]
             findings = []
+            nuclei_tags = []
+            if getattr(runtime, "nuclei_tags", None):
+                nuclei_tags = [tag.strip() for tag in str(runtime.nuclei_tags).split(",") if tag.strip()]
             for host in api_hosts:
                 urls = host_info[host]["urls"]
                 base_url = urls[0] if urls else f"https://{host}"
@@ -2259,6 +2405,7 @@ class ScannerStage(Stage):
                     base_url,
                     scanner_dir,
                     runtime.scanner_timeout,
+                    tags=nuclei_tags or None,
                 )
                 for finding in result.findings:
                     context.results.append(finding.payload)
@@ -2273,8 +2420,18 @@ class ScannerStage(Stage):
                 tags = {t.lower() for t in info.get("tags", set())}
                 if any("wordpress" in tag for tag in tags):
                     return True
+                techs = info.get("technologies", set())
+                if any("wordpress" in tech for tech in techs):
+                    return True
                 servers = info.get("servers", set())
-                return any("wordpress" in server for server in servers)
+                if any("wordpress" in server for server in servers):
+                    return True
+                urls = info.get("urls", [])
+                for url in urls:
+                    path = urlparse(url).path.lower()
+                    if any(token in path for token in ("/wp-", "/wp-admin", "/wp-content", "/wp-json", "/xmlrpc.php")):
+                        return True
+                return False
 
             wp_hosts = [host for host, info in host_info.items() if is_wordpress(info)]
             wp_hosts = wp_hosts[: runtime.max_scanner_hosts]

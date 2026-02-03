@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 
 from collections import Counter
-from typing import List
+from typing import Any, Dict, List, Optional
+
+from recon_cli.jobs.manager import JobManager
 
 from recon_cli.utils.jsonl import read_jsonl
 
@@ -158,3 +160,25 @@ def generate_summary(context) -> None:
     for priority, count in priority_counter.items():
         metadata.stats[f"priority_{priority}"] = count
     context.manager.update_metadata(record)
+
+
+class JobSummary:
+    def __init__(self, manager: Optional[JobManager] = None) -> None:
+        self.manager = manager or JobManager()
+
+    def get_summary(self, job_id: str) -> Optional[Dict[str, Any]]:
+        record = self.manager.load_job(job_id)
+        if not record:
+            return None
+        items = read_jsonl(record.paths.results_jsonl)
+        counts = Counter()
+        for entry in items:
+            etype = entry.get("type", "unknown")
+            counts[etype] += 1
+        return {
+            "job_id": job_id,
+            "target": record.spec.target,
+            "profile": record.spec.profile,
+            "status": record.metadata.status,
+            "counts": dict(counts),
+        }

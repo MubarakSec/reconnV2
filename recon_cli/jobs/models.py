@@ -55,9 +55,12 @@ class JobPaths:
 
 @dataclass
 class JobSpec:
-    job_id: str
-    target: str
-    profile: str
+    job_id: str = ""
+    target: str = ""
+    profile: str = "passive"
+    targets: List[str] = field(default_factory=list)
+    stages: List[str] = field(default_factory=list)
+    options: Dict[str, Any] = field(default_factory=dict)
     project: Optional[str] = None
     inline: bool = False
     wordlist: Optional[str] = None
@@ -74,11 +77,22 @@ class JobSpec:
     runtime_overrides: Dict[str, Any] = field(default_factory=dict)
     incremental_from: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        if self.targets and not self.target:
+            self.target = self.targets[0]
+        elif self.target and not self.targets:
+            self.targets = [self.target]
+        if not self.profile:
+            self.profile = "passive"
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.job_id,
             "target": self.target,
             "profile": self.profile,
+            "targets": self.targets,
+            "stages": self.stages,
+            "options": self.options,
             "project": self.project,
             "inline": self.inline,
             "wordlist": self.wordlist,
@@ -99,9 +113,12 @@ class JobSpec:
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "JobSpec":
         return cls(
-            job_id=payload["job_id"],
-            target=payload["target"],
+            job_id=payload.get("job_id", ""),
+            target=payload.get("target", ""),
             profile=payload.get("profile", "passive"),
+            targets=list(payload.get("targets", [])),
+            stages=list(payload.get("stages", [])),
+            options=dict(payload.get("options", {})),
             project=payload.get("project"),
             inline=payload.get("inline", False),
             wordlist=payload.get("wordlist"),

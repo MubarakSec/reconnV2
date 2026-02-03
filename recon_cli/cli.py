@@ -17,6 +17,7 @@ from recon_cli.jobs.lifecycle import JobLifecycle
 from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.pipeline.runner import run_pipeline
 from recon_cli.utils import fs
+from recon_cli.utils import validation
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.sanitizer import redact
 from recon_cli.active import modules as active_modules
@@ -70,6 +71,14 @@ def _load_job_or_exit(manager: JobManager, job_id: str) -> JobRecord:
         typer.echo(f"Job {job_id} not found", err=True)
         raise typer.Exit(code=3)
     return record
+
+
+def _auto_allow_ip(target_value: str) -> bool:
+    try:
+        candidate = validation._coerce_hostname(target_value)
+    except Exception:
+        candidate = target_value
+    return validation.is_ip(candidate)
 
 
 @app.command()
@@ -135,6 +144,20 @@ def scan(
         typer.echo("Provide either a target or --targets-file", err=True)
         raise typer.Exit(code=1)
 
+    auto_allow = allow_ip
+    if not allow_ip:
+        if target and _auto_allow_ip(target):
+            auto_allow = True
+        elif targets_file:
+            try:
+                for line in Path(targets_file).read_text(encoding="utf-8").splitlines():
+                    if line.strip() and _auto_allow_ip(line.strip()):
+                        auto_allow = True
+                        break
+            except Exception:
+                auto_allow = allow_ip
+    allow_ip = auto_allow
+
     modules = [module.strip().lower() for module in active_module if module]
     env_active = os.environ.get("RECON_ACTIVE_MODULES")
     if not modules and env_active:
@@ -162,6 +185,7 @@ def scan(
             typer.echo("No targets found in file", err=True)
             raise typer.Exit(code=1)
         for tgt in targets_list:
+            target_allow_ip = allow_ip or _auto_allow_ip(tgt)
             record = manager.create_job(
                 target=tgt,
                 profile=selected_profile,
@@ -171,7 +195,7 @@ def scan(
                 targets_file=None,
                 max_screenshots=max_screenshots,
                 force=force,
-                allow_ip=allow_ip,
+                allow_ip=target_allow_ip,
                 active_modules=modules,
                 scanners=scanners,
                 execution_profile=execution_profile,

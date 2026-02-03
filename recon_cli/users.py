@@ -706,6 +706,20 @@ class UserManager:
             )
             
             return user, token
+
+    def validate_api_key(self, raw_token: str) -> Optional[Dict[str, Any]]:
+        """التحقق من API key (واجهة توافقية)."""
+        result = self.validate_api_token(raw_token)
+        if not result:
+            return None
+        user, token = result
+        permissions = [perm.value for perm in ROLE_PERMISSIONS.get(user.role, set())]
+        permissions.extend(list(user.extra_permissions or []))
+        return {
+            "user_id": user.id,
+            "permissions": permissions,
+            "scopes": token.scopes,
+        }
     
     def revoke_api_token(self, token_id: int) -> bool:
         """إلغاء رمز API"""

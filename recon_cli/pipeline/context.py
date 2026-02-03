@@ -16,19 +16,38 @@ from recon_cli.utils.logging import build_file_logger, silence_logger
 
 @dataclass
 class PipelineContext:
-    record: JobRecord
-    manager: JobManager
+    record: Optional[JobRecord] = None
+    manager: Optional[JobManager] = None
     force: bool = False
     runtime_config: Optional[config.RuntimeConfig] = None
     max_retries: Optional[int] = None
     logger_name: str = "recon.pipeline"
+    job_id: Optional[str] = None
+    targets: List[str] = field(default_factory=list)
+    work_dir: Optional[Path] = None
+    results_file: Optional[Path] = None
+    concurrency: Optional[int] = None
+    rate_limit: Optional[float] = None
     execution_profile: Optional[str] = field(init=False, default=None)
     _url_allow_pattern: Optional[Pattern[str]] = field(init=False, default=None)
     _delta_cache: Dict[str, Dict[str, str]] = field(init=False, default_factory=dict)
     _cache_path: Path = field(init=False)
     _cache_dirty: bool = field(init=False, default=False)
+    _simple_mode: bool = field(init=False, default=False)
+    _data_store: Dict[str, object] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.record is None:
+            self._simple_mode = True
+            if self.job_id is None:
+                self.job_id = "job"
+            if self.work_dir is not None and self.results_file is None:
+                self.results_file = self.work_dir / "results.jsonl"
+            base_dir = self.work_dir or Path.cwd()
+            self._cache_path = base_dir / "cache.json"
+            return
+        if self.manager is None:
+            self.manager = JobManager()
         spec = self.record.spec
         overrides = getattr(spec, 'runtime_overrides', {}) or {}
         base_config = config.RuntimeConfig()
@@ -82,6 +101,12 @@ class PipelineContext:
             profile_stats.setdefault('execution', base_profile)
         profile_stats.setdefault('base', base_profile)
         self.manager.update_metadata(self.record)
+
+    def set_data(self, key: str, value: object) -> None:
+        self._data_store[key] = value
+
+    def get_data(self, key: str, default: object = None) -> object:
+        return self._data_store.get(key, default)
 
     def url_allowed(self, url: str) -> bool:
         if not url:

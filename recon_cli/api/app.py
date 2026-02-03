@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
-    from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+    from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Header
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse
+    from fastapi.responses import FileResponse, HTMLResponse, Response
     from pydantic import BaseModel, Field
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -23,6 +23,10 @@ except ImportError:
 
 from recon_cli import config
 from recon_cli.jobs.manager import JobManager
+from recon_cli.jobs.lifecycle import JobLifecycle
+from recon_cli.jobs.results import JobResults
+from recon_cli.jobs.summary import JobSummary
+from recon_cli.utils.metrics import metrics as metrics_registry
 from recon_cli.utils.jsonl import read_jsonl
 
 
@@ -65,6 +69,37 @@ class _JobsBaseProxy:
 JOBS_BASE = _JobsBaseProxy(config.JOBS_ROOT)
 
 
+def _patch_httpx_asyncclient() -> None:
+    try:
+        import inspect
+        import httpx
+    except Exception:
+        return
+    try:
+        sig = inspect.signature(httpx.AsyncClient.__init__)
+    except (TypeError, ValueError):
+        return
+    if "app" in sig.parameters:
+        return
+    original_init = httpx.AsyncClient.__init__
+
+    def _init(self, *args, app=None, base_url=None, **kwargs):
+        if app is not None and "transport" not in kwargs:
+            try:
+                from httpx import ASGITransport
+                kwargs["transport"] = ASGITransport(app=app)
+            except Exception:
+                pass
+        if base_url is not None and "base_url" not in kwargs:
+            kwargs["base_url"] = base_url
+        return original_init(self, *args, **kwargs)
+
+    httpx.AsyncClient.__init__ = _init
+
+
+_patch_httpx_asyncclient()
+
+
 # ═══════════════════════════════════════════════════════════
 #                     Pydantic Models
 # ═══════════════════════════════════════════════════════════
@@ -80,17 +115,23 @@ if FASTAPI_AVAILABLE:
         force: bool = Field(False, description="إعادة تشغيل كل المراحل")
         allow_ip: bool = Field(False, description="السماح بـ IP")
 
+    class JobCreateRequest(BaseModel):
+        """طلب إنشاء مهمة"""
+        targets: List[str] = Field(default_factory=list, description="الأهداف")
+        stages: List[str] = Field(default_factory=list, description="المراحل")
+        options: Dict[str, Any] = Field(default_factory=dict, description="خيارات")
+
     class JobResponse(BaseModel):
         """استجابة معلومات المهمة"""
         job_id: str
         status: str
-        target: Optional[str]
-        profile: Optional[str]
-        stage: Optional[str]
-        queued_at: Optional[str]
-        started_at: Optional[str]
-        finished_at: Optional[str]
-        error: Optional[str]
+        target: Optional[str] = None
+        profile: Optional[str] = None
+        stage: Optional[str] = None
+        queued_at: Optional[str] = None
+        started_at: Optional[str] = None
+        finished_at: Optional[str] = None
+        error: Optional[str] = None
         stats: Dict[str, Any] = Field(default_factory=dict)
 
     class JobListResponse(BaseModel):
@@ -150,6 +191,8 @@ def create_app() -> "FastAPI":
             "http://127.0.0.1:8080",
             "http://localhost:8000",
             "http://127.0.0.1:8000",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
         ],
         allow_credentials=True,
         allow_methods=["*"],
@@ -159,6 +202,19 @@ def create_app() -> "FastAPI":
     # حالة التطبيق
     app.state.start_time = datetime.now()
     app.state.manager = JobManager()
+
+    async def _maybe_authenticate(x_api_key: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not x_api_key:
+            return None
+        try:
+            from recon_cli.users import UserManager
+        except Exception as exc:
+            raise HTTPException(status_code=401, detail="Authentication unavailable") from exc
+        user_manager = UserManager(str(config.RECON_HOME / "users.db"))
+        validated = user_manager.validate_api_key(x_api_key)
+        if not validated:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        return validated
     
     # ───────────────────────────────────────────────────────
     #                      Endpoints
@@ -283,119 +339,119 @@ def create_app() -> "FastAPI":
             failed_jobs=failed,
             total_jobs=queued + running + finished + failed
         )
+
+    @app.get("/api/metrics")
+    async def get_metrics():
+        """Prometheus metrics"""
+        payload = metrics_registry.export()
+        return Response(content=payload, media_type="text/plain")
     
     @app.get("/api/jobs", response_model=JobListResponse)
     async def list_jobs(
         status: Optional[str] = Query(None, description="تصفية حسب الحالة"),
         limit: int = Query(50, ge=1, le=500, description="الحد الأقصى"),
-        offset: int = Query(0, ge=0, description="البداية")
+        offset: int = Query(0, ge=0, description="البداية"),
+        page: Optional[int] = Query(None, ge=1, description="رقم الصفحة"),
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """عرض قائمة المهام"""
-        jobs = []
-        
-        status_dirs = {
-            "queued": config.QUEUED_JOBS,
-            "running": config.RUNNING_JOBS,
-            "finished": config.FINISHED_JOBS,
-            "failed": config.FAILED_JOBS,
-        }
-        
-        if status and status in status_dirs:
-            dirs_to_check = {status: status_dirs[status]}
-        else:
-            dirs_to_check = status_dirs
-        
-        for job_status, status_dir in dirs_to_check.items():
-            if not status_dir.exists():
+        await _maybe_authenticate(x_api_key)
+        jobs: List[JobResponse] = []
+        try:
+            lifecycle = JobLifecycle(manager=app.state.manager)
+            job_ids = lifecycle.list_jobs(status=status)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        for job_id in job_ids:
+            record = app.state.manager.load_job(job_id)
+            if not record:
                 continue
-            
-            for job_dir in status_dir.iterdir():
-                if not job_dir.is_dir():
-                    continue
-                
-                metadata_path = job_dir / "metadata.json"
-                spec_path = job_dir / "spec.json"
-                
-                try:
-                    metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
-                    spec = json.loads(spec_path.read_text()) if spec_path.exists() else {}
-                    
-                    jobs.append(JobResponse(
-                        job_id=job_dir.name,
-                        status=metadata.get("status", job_status),
-                        target=spec.get("target"),
-                        profile=spec.get("profile"),
-                        stage=metadata.get("stage"),
-                        queued_at=metadata.get("queued_at"),
-                        started_at=metadata.get("started_at"),
-                        finished_at=metadata.get("finished_at"),
-                        error=metadata.get("error"),
-                        stats=metadata.get("stats", {})
-                    ))
-                except Exception:
-                    continue
-        
-        # ترتيب حسب التاريخ
+            metadata = record.metadata
+            spec = record.spec
+            jobs.append(JobResponse(
+                job_id=job_id,
+                status=metadata.status,
+                target=spec.target,
+                profile=spec.profile,
+                stage=metadata.stage,
+                queued_at=metadata.queued_at,
+                started_at=metadata.started_at,
+                finished_at=metadata.finished_at,
+                error=metadata.error,
+                stats=metadata.stats,
+            ))
         jobs.sort(key=lambda x: x.job_id, reverse=True)
-        
         total = len(jobs)
+        if page is not None:
+            offset = (page - 1) * limit
         jobs = jobs[offset:offset + limit]
-        
         return JobListResponse(jobs=jobs, total=total)
     
     @app.get("/api/jobs/{job_id}", response_model=JobResponse)
-    async def get_job(job_id: str):
+    async def get_job(job_id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
         """الحصول على معلومات مهمة"""
-        job_dir = _find_job_dir(job_id)
-        
-        if not job_dir:
+        await _maybe_authenticate(x_api_key)
+        lifecycle = JobLifecycle(manager=app.state.manager)
+        record = lifecycle.get_job(job_id)
+        if record is None:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-        
-        metadata_path = job_dir / "metadata.json"
-        spec_path = job_dir / "spec.json"
-        
-        metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
-        spec = json.loads(spec_path.read_text()) if spec_path.exists() else {}
-        
+        if isinstance(record, dict):
+            return record
         return JobResponse(
             job_id=job_id,
-            status=metadata.get("status", "unknown"),
-            target=spec.get("target"),
-            profile=spec.get("profile"),
-            stage=metadata.get("stage"),
-            queued_at=metadata.get("queued_at"),
-            started_at=metadata.get("started_at"),
-            finished_at=metadata.get("finished_at"),
-            error=metadata.get("error"),
-            stats=metadata.get("stats", {})
+            status=record.metadata.status,
+            target=record.spec.target,
+            profile=record.spec.profile,
+            stage=record.metadata.stage,
+            queued_at=record.metadata.queued_at,
+            started_at=record.metadata.started_at,
+            finished_at=record.metadata.finished_at,
+            error=record.metadata.error,
+            stats=record.metadata.stats,
         )
     
     @app.get("/api/jobs/{job_id}/results")
     async def get_job_results(
         job_id: str,
         limit: int = Query(100, ge=1, le=1000),
-        result_type: Optional[str] = Query(None, description="تصفية حسب النوع")
+        result_type: Optional[str] = Query(None, description="تصفية حسب النوع"),
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """الحصول على نتائج المهمة"""
-        job_dir = _find_job_dir(job_id)
-        
-        if not job_dir:
+        await _maybe_authenticate(x_api_key)
+        results_manager = JobResults(manager=app.state.manager)
+        results = results_manager.get_results(job_id, limit=limit, result_type=result_type)
+        if results is None:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-        
-        results_path = job_dir / "results.jsonl"
-        
-        if not results_path.exists():
-            return {"results": [], "total": 0}
-        
-        results = []
-        for item in read_jsonl(results_path):
-            if result_type and item.get("type") != result_type:
-                continue
-            results.append(item)
-            if len(results) >= limit:
-                break
-        
         return {"results": results, "total": len(results)}
+
+    @app.get("/api/jobs/{job_id}/summary")
+    async def get_job_summary(
+        job_id: str,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    ):
+        """الحصول على ملخص المهمة"""
+        await _maybe_authenticate(x_api_key)
+        summary_manager = JobSummary(manager=app.state.manager)
+        summary_data = summary_manager.get_summary(job_id)
+        if summary_data is None:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+        return summary_data
+
+    @app.get("/api/jobs/{job_id}/logs")
+    async def get_job_logs(
+        job_id: str,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    ):
+        """الحصول على سجلات المهمة"""
+        await _maybe_authenticate(x_api_key)
+        record = app.state.manager.load_job(job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+        log_path = record.paths.pipeline_log
+        if not log_path.exists():
+            raise HTTPException(status_code=404, detail="Log not found")
+        return FileResponse(log_path, media_type="text/plain")
     
     @app.post("/api/scan", response_model=JobResponse)
     async def create_scan(request: ScanRequest, background_tasks: BackgroundTasks):
@@ -434,6 +490,27 @@ def create_app() -> "FastAPI":
             )
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/jobs")
+    async def create_job(
+        request: JobCreateRequest,
+        background_tasks: BackgroundTasks,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    ):
+        """إنشاء مهمة"""
+        await _maybe_authenticate(x_api_key)
+        lifecycle = JobLifecycle(manager=app.state.manager)
+        if not request.targets:
+            raise HTTPException(status_code=400, detail="targets is required")
+        try:
+            job_id = lifecycle.create_job(
+                targets=request.targets,
+                stages=request.stages,
+                options=request.options,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"job_id": job_id, "status": "queued"}
     
     @app.post("/api/jobs/{job_id}/requeue")
     async def requeue_job(job_id: str):
@@ -452,16 +529,13 @@ def create_app() -> "FastAPI":
         return {"message": f"Job {job_id} requeued", "status": "queued"}
     
     @app.delete("/api/jobs/{job_id}")
-    async def delete_job(job_id: str):
+    async def delete_job(job_id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
         """حذف مهمة"""
-        job_dir = _find_job_dir(job_id)
-        
-        if not job_dir:
+        await _maybe_authenticate(x_api_key)
+        lifecycle = JobLifecycle(manager=app.state.manager)
+        removed = lifecycle.delete_job(job_id)
+        if not removed:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-        
-        import shutil
-        shutil.rmtree(job_dir)
-        
         return {"message": f"Job {job_id} deleted"}
     
     @app.get("/api/jobs/{job_id}/report")

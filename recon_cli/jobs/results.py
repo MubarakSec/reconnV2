@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional
 
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import JsonlWriter
+from recon_cli.utils.jsonl import JsonlWriter, read_jsonl
+from recon_cli.jobs.manager import JobManager
 
 
 def dedupe_key(payload: Dict[str, object]) -> tuple:
@@ -184,3 +185,26 @@ class ResultsTracker:
                     continue
                 json.dump(payload, handle, separators=(",", ":"), ensure_ascii=True)
                 handle.write("\n")
+
+
+class JobResults:
+    def __init__(self, manager: Optional[JobManager] = None) -> None:
+        self.manager = manager or JobManager()
+
+    def get_results(
+        self,
+        job_id: str,
+        limit: int = 100,
+        result_type: Optional[str] = None,
+    ) -> Optional[list[Dict[str, object]]]:
+        record = self.manager.load_job(job_id)
+        if not record:
+            return None
+        results: list[Dict[str, object]] = []
+        for item in read_jsonl(record.paths.results_jsonl):
+            if result_type and item.get("type") != result_type:
+                continue
+            results.append(item)
+            if limit and len(results) >= limit:
+                break
+        return results

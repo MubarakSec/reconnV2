@@ -25,7 +25,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +278,7 @@ class Histogram:
         self,
         name: str,
         description: str = "",
-        buckets: Optional[Tuple[float, ...]] = None,
+        buckets: Optional[Sequence[float]] = None,
         labels: Optional[List[str]] = None,
     ):
         self.name = name
@@ -490,7 +490,7 @@ class MetricsRegistry:
         self,
         name: str,
         description: str = "",
-        buckets: Optional[Tuple[float, ...]] = None,
+        buckets: Optional[Sequence[float]] = None,
         labels: Optional[List[str]] = None,
     ) -> Histogram:
         """إنشاء Histogram"""

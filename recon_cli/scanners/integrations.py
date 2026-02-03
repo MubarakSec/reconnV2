@@ -52,6 +52,7 @@ def run_nuclei(
     artifact_dir: Path,
     timeout: int,
     templates: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
 ) -> ScannerExecution:
     if not shutil.which("nuclei"):
         logger.info("nuclei not available; skipping for %s", host)
@@ -72,6 +73,8 @@ def run_nuclei(
         if templates:
             for template in templates:
                 cmd.extend(["-t", template])
+        elif tags:
+            cmd.extend(["-tags", ",".join(tags)])
         else:
             cmd.extend(["-tags", "api"])
 

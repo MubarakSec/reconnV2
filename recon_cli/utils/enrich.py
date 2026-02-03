@@ -30,6 +30,18 @@ SERVICE_KEYWORDS = {
     "api": "service:api",
     "auth": "service:auth",
     "login": "surface:login",
+    "signin": "surface:login",
+    "sign-in": "surface:login",
+    "sign_in": "surface:login",
+    "logout": "surface:logout",
+    "register": "surface:register",
+    "signup": "surface:register",
+    "sign-up": "surface:register",
+    "sign_up": "surface:register",
+    "forgot": "surface:password-reset",
+    "reset": "surface:password-reset",
+    "recover": "surface:password-reset",
+    "password": "surface:password-reset",
     "admin": "surface:admin",
     "sso": "service:sso",
     "vpn": "service:vpn",
@@ -84,6 +96,29 @@ LEGACY_TECH = {
     "tomcat/6": 25,
     "jboss": 30,
 }
+
+WAF_KEYWORDS = {
+    "cloudflare": "waf:cloudflare",
+    "akamai": "waf:akamai",
+    "imperva": "waf:imperva",
+    "incapsula": "waf:incapsula",
+    "sucuri": "waf:sucuri",
+    "fastly": "waf:fastly",
+    "barracuda": "waf:barracuda",
+    "modsecurity": "waf:modsecurity",
+    "f5": "waf:f5",
+    "wallarm": "waf:wallarm",
+    "radware": "waf:radware",
+}
+
+SOFT_404_PATTERNS = [
+    "page not found",
+    "not found",
+    "404",
+    "the page you requested",
+    "no longer exists",
+    "does not exist",
+]
 
 
 @dataclass
@@ -206,6 +241,52 @@ def infer_service_tags(url: str) -> set[str]:
         if "password" in lower_query:
             tags.add("indicator:password")
     return tags
+
+
+def infer_tech_tags(
+    technologies: Optional[list[str]],
+    server: Optional[str] = None,
+    title: Optional[str] = None,
+) -> set[str]:
+    tags: set[str] = set()
+    tech_values: set[str] = set()
+    if technologies:
+        tech_values.update({str(item).lower() for item in technologies if item})
+    if server:
+        tech_values.add(server.lower())
+    if title:
+        tech_values.add(title.lower())
+    if any("wordpress" in tech for tech in tech_values):
+        tags.add("tech:wordpress")
+        tags.add("cms:wordpress")
+    if any("drupal" in tech for tech in tech_values):
+        tags.add("cms:drupal")
+    if any("joomla" in tech for tech in tech_values):
+        tags.add("cms:joomla")
+    if any("nginx" in tech for tech in tech_values):
+        tags.add("tech:nginx")
+    if any("apache" in tech for tech in tech_values):
+        tags.add("tech:apache")
+    if any("iis" in tech for tech in tech_values):
+        tags.add("tech:iis")
+    return tags
+
+
+def detect_waf_tags(server: Optional[str], cdn: Optional[str] = None) -> set[str]:
+    tags: set[str] = set()
+    haystack = " ".join(part for part in [server or "", cdn or ""] if part).lower()
+    for keyword, tag in WAF_KEYWORDS.items():
+        if keyword in haystack:
+            tags.add(tag)
+            tags.add("service:waf")
+    return tags
+
+
+def looks_like_soft_404(status_code: Optional[int], body_snippet: str, title: str = "") -> bool:
+    if status_code not in {200, 301, 302}:
+        return False
+    combined = f"{title} {body_snippet}".lower()
+    return any(pattern in combined for pattern in SOFT_404_PATTERNS)
 
 
 def detect_noise(url: str, status_code: Optional[int], source: str, length: Optional[int]) -> bool:

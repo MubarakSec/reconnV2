@@ -9,6 +9,7 @@ import hashlib
 import json
 import pickle
 import sqlite3
+from contextlib import contextmanager
 import threading
 import time
 from dataclasses import dataclass, field
@@ -83,7 +84,8 @@ class MemoryCache(Generic[T]):
     def _cleanup(self) -> None:
         """تنظيف العناصر المنتهية"""
         now = time.time()
-        if now - self._last_cleanup < self.config.cleanup_interval:
+        enforce_size = len(self._cache) > self.config.max_size
+        if not enforce_size and now - self._last_cleanup < self.config.cleanup_interval:
             return
         
         expired_keys = [
@@ -210,9 +212,15 @@ class DiskCache:
                 ON cache(expires_at)
             """)
     
+    @contextmanager
     def _get_connection(self) -> sqlite3.Connection:
         """الحصول على اتصال بقاعدة البيانات"""
-        return sqlite3.connect(str(self.db_path), timeout=10)
+        conn = sqlite3.connect(str(self.db_path), timeout=10)
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
     
     def _serialize(self, value: Any) -> bytes:
         """تحويل القيمة إلى bytes"""
