@@ -176,9 +176,14 @@ run_scan() {
         fi
     fi
 
+    prompt_auth
+
     echo ""
     echo -e "${BLUE}[*] جاري بدء الفحص...${NC}"
     echo -e "${YELLOW}[*] الملف الشخصي: $profile${NC}"
+    if [ "$AUTH_ENABLED" = "1" ]; then
+        echo -e "${YELLOW}[*] المصادقة: مفعلة (مخفية)${NC}"
+    fi
     echo ""
 
     CMD=(python -m recon_cli scan "${target_args[@]}" --profile "$profile" --inline)
@@ -190,12 +195,115 @@ run_scan() {
     echo -e "${CYAN}> ${CMD[*]}${NC}"
     echo ""
 
-    "${CMD[@]}"
+    if [ ${#AUTH_ENV[@]} -gt 0 ]; then
+        env "${AUTH_ENV[@]}" "${CMD[@]}"
+    else
+        "${CMD[@]}"
+    fi
 
     echo ""
     echo -e "${GREEN}[✓] انتهى الفحص${NC}"
     echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
     read
+}
+
+# Prompt for auth settings
+prompt_auth() {
+    AUTH_ENV=()
+    AUTH_ENABLED="0"
+
+    echo ""
+    echo -ne "${CYAN}تفعيل المصادقة لهذا الفحص؟ [y/N]: ${NC}"
+    read -r USE_AUTH
+    if [[ ! "$USE_AUTH" =~ ^[Yy]$ ]]; then
+        return
+    fi
+
+    echo ""
+    echo -e "${WHITE}اختر نوع المصادقة:${NC}"
+    echo -e "${WHITE}[1]${NC} Bearer Token"
+    echo -e "${WHITE}[2]${NC} Headers (key: value; ...)"
+    echo -e "${WHITE}[3]${NC} Cookies (key=value; ...)"
+    echo -e "${WHITE}[4]${NC} Login Flow (URL + payload)"
+    echo -ne "${MAGENTA}اختيارك: ${NC}"
+    read -r AUTH_CHOICE
+
+    AUTH_ENV+=("RECON_ENABLE_AUTH_SCAN=1")
+    AUTH_ENABLED="1"
+
+    case "$AUTH_CHOICE" in
+        1)
+            echo -ne "${CYAN}أدخل Bearer Token: ${NC}"
+            read -r AUTH_TOKEN
+            if [ -n "$AUTH_TOKEN" ]; then
+                AUTH_ENV+=("RECON_AUTH_BEARER=$AUTH_TOKEN")
+            fi
+            ;;
+        2)
+            echo -ne "${CYAN}أدخل Headers (مثال: Authorization: Bearer X; X-API-Key: Y): ${NC}"
+            read -r AUTH_HEADERS
+            if [ -n "$AUTH_HEADERS" ]; then
+                AUTH_ENV+=("RECON_AUTH_HEADERS=$AUTH_HEADERS")
+            fi
+            ;;
+        3)
+            echo -ne "${CYAN}أدخل Cookies (مثال: session=abc; csrftoken=xyz): ${NC}"
+            read -r AUTH_COOKIES
+            if [ -n "$AUTH_COOKIES" ]; then
+                AUTH_ENV+=("RECON_AUTH_COOKIES=$AUTH_COOKIES")
+            fi
+            ;;
+        4)
+            echo -ne "${CYAN}أدخل Login URL (مثال: https://target.com/login): ${NC}"
+            read -r AUTH_LOGIN_URL
+            if [ -n "$AUTH_LOGIN_URL" ]; then
+                AUTH_ENV+=("RECON_AUTH_LOGIN_URL=$AUTH_LOGIN_URL")
+            fi
+            echo -ne "${CYAN}HTTP Method [POST]: ${NC}"
+            read -r AUTH_LOGIN_METHOD
+            AUTH_LOGIN_METHOD=${AUTH_LOGIN_METHOD:-POST}
+            AUTH_ENV+=("RECON_AUTH_LOGIN_METHOD=$AUTH_LOGIN_METHOD")
+
+            echo -ne "${CYAN}Payload (form أو JSON): ${NC}"
+            read -r AUTH_LOGIN_PAYLOAD
+            if [ -n "$AUTH_LOGIN_PAYLOAD" ]; then
+                AUTH_ENV+=("RECON_AUTH_LOGIN_PAYLOAD=$AUTH_LOGIN_PAYLOAD")
+            fi
+
+            echo -ne "${CYAN}Content-Type [application/x-www-form-urlencoded]: ${NC}"
+            read -r AUTH_CONTENT_TYPE
+            AUTH_CONTENT_TYPE=${AUTH_CONTENT_TYPE:-application/x-www-form-urlencoded}
+            AUTH_ENV+=("RECON_AUTH_LOGIN_CONTENT_TYPE=$AUTH_CONTENT_TYPE")
+
+            echo -ne "${CYAN}Success Regex (اختياري): ${NC}"
+            read -r AUTH_SUCCESS_RE
+            if [ -n "$AUTH_SUCCESS_RE" ]; then
+                AUTH_ENV+=("RECON_AUTH_LOGIN_SUCCESS_REGEX=$AUTH_SUCCESS_RE")
+            fi
+
+            echo -ne "${CYAN}Fail Regex (اختياري): ${NC}"
+            read -r AUTH_FAIL_RE
+            if [ -n "$AUTH_FAIL_RE" ]; then
+                AUTH_ENV+=("RECON_AUTH_LOGIN_FAIL_REGEX=$AUTH_FAIL_RE")
+            fi
+
+            echo -ne "${CYAN}Cookie Names (اختياري, مفصولة بفواصل): ${NC}"
+            read -r AUTH_COOKIE_NAMES
+            if [ -n "$AUTH_COOKIE_NAMES" ]; then
+                AUTH_ENV+=("RECON_AUTH_LOGIN_COOKIE_NAMES=$AUTH_COOKIE_NAMES")
+            fi
+
+            echo -ne "${CYAN}Login Headers (اختياري): ${NC}"
+            read -r AUTH_LOGIN_HEADERS
+            if [ -n "$AUTH_LOGIN_HEADERS" ]; then
+                AUTH_ENV+=("RECON_AUTH_LOGIN_HEADERS=$AUTH_LOGIN_HEADERS")
+            fi
+            ;;
+        *)
+            AUTH_ENV=()
+            AUTH_ENABLED="0"
+            ;;
+    esac
 }
 
 # List jobs
