@@ -304,4 +304,6 @@ class IDORStage(Stage):
             "variant_sensitive": variant["sensitive"],
             "details": meta,
             "poc": poc_command,
+            "score": 75,
+            "priority": "high",
         }

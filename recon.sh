@@ -70,59 +70,128 @@ main_menu() {
     echo -ne "${MAGENTA}اختر: ${NC}"
 }
 
-# Get target from user
-get_target() {
-    echo ""
-    echo -ne "${CYAN}أدخل الهدف (domain/IP): ${NC}"
-    read TARGET
-    
-    if [ -z "$TARGET" ]; then
-        echo -e "${RED}[!] الهدف مطلوب${NC}"
+# Extract host from input (URL, host:port, or host/path)
+extract_host() {
+    local value="$1"
+    local host="$value"
+    if [[ "$host" == *"://"* ]]; then
+        host="${host#*://}"
+    fi
+    host="${host%%/*}"
+    host="${host%%\?*}"
+    host="${host%%#*}"
+    host="${host##*@}"
+    if [[ "$host" == \[*\] ]]; then
+        host="${host#[}"
+        host="${host%]}"
+    else
+        host="${host%%:*}"
+    fi
+    echo "$host"
+}
+
+# Check IPv4
+is_ipv4() {
+    local ip="$1"
+    if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         return 1
     fi
-    
-    echo -e "${GREEN}[✓] الهدف: $TARGET${NC}"
+    IFS='.' read -r o1 o2 o3 o4 <<< "$ip"
+    for o in "$o1" "$o2" "$o3" "$o4"; do
+        if [ "$o" -gt 255 ] 2>/dev/null || [ "$o" -lt 0 ] 2>/dev/null; then
+            return 1
+        fi
+    done
     return 0
 }
 
-# Get targets file
-get_targets_file() {
+# Get target or targets file
+get_targets() {
+    TARGET=""
+    TARGETS_FILE=""
     echo ""
-    echo -ne "${CYAN}أدخل مسار ملف الأهداف (أو اضغط Enter للهدف الواحد): ${NC}"
-    read TARGETS_FILE
-    
-    if [ -n "$TARGETS_FILE" ] && [ -f "$TARGETS_FILE" ]; then
-        echo -e "${GREEN}[✓] ملف الأهداف: $TARGETS_FILE${NC}"
-        return 0
-    elif [ -n "$TARGETS_FILE" ]; then
-        echo -e "${RED}[!] الملف غير موجود${NC}"
+    echo -ne "${CYAN}أدخل الهدف (domain/IP/URL) أو ملف الأهداف: ${NC}"
+    read INPUT
+
+    if [ -z "$INPUT" ]; then
+        echo -e "${RED}[!] الهدف مطلوب${NC}"
         return 1
     fi
-    
+
+    if [ -f "$INPUT" ]; then
+        TARGETS_FILE="$INPUT"
+        echo -e "${GREEN}[✓] ملف الأهداف: $TARGETS_FILE${NC}"
+    else
+        TARGET="$INPUT"
+        echo -e "${GREEN}[✓] الهدف: $TARGET${NC}"
+    fi
     return 0
+}
+
+# Detect if targets file contains any IPs
+file_has_ip() {
+    local file="$1"
+    local line host
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        line="${line%%[[:space:]]*}"
+        [ -z "$line" ] && continue
+        host="$(extract_host "$line")"
+        if is_ipv4 "$host"; then
+            return 0
+        fi
+    done < "$file"
+    return 1
 }
 
 # Run scan with options
 run_scan() {
-    local profile=$1
-    local extra_opts=$2
-    
-    get_target
+    local profile="$1"
+    shift
+    local extra_args=("$@")
+
+    get_targets
     if [ $? -ne 0 ]; then
         return
     fi
-    
+
+    local allow_ip_flag=""
+    local split_flag=()
+    local target_args=()
+    if [ -n "$TARGETS_FILE" ]; then
+        target_args+=(--targets-file "$TARGETS_FILE")
+        if file_has_ip "$TARGETS_FILE"; then
+            allow_ip_flag="--allow-ip"
+        fi
+        echo -ne "${CYAN}تقسيم الأهداف إلى مهام منفصلة؟ [y/N]: ${NC}"
+        read SPLIT_TARGETS
+        if [[ "$SPLIT_TARGETS" =~ ^[Yy]$ ]]; then
+            split_flag+=(--split-targets)
+        fi
+    else
+        target_args+=("$TARGET")
+        host="$(extract_host "$TARGET")"
+        if is_ipv4 "$host"; then
+            allow_ip_flag="--allow-ip"
+        fi
+    fi
+
     echo ""
     echo -e "${BLUE}[*] جاري بدء الفحص...${NC}"
     echo -e "${YELLOW}[*] الملف الشخصي: $profile${NC}"
     echo ""
-    
-    CMD="python -m recon_cli scan $TARGET --profile $profile --inline $extra_opts"
-    echo -e "${CYAN}> $CMD${NC}"
+
+    CMD=(python -m recon_cli scan "${target_args[@]}" --profile "$profile" --inline)
+    if [ -n "$allow_ip_flag" ]; then
+        CMD+=("$allow_ip_flag")
+    fi
+    CMD+=("${split_flag[@]}" "${extra_args[@]}")
+
+    echo -e "${CYAN}> ${CMD[*]}${NC}"
     echo ""
-    
-    eval $CMD
-    
+
+    "${CMD[@]}"
+
     echo ""
     echo -e "${GREEN}[✓] انتهى الفحص${NC}"
     echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
@@ -208,14 +277,14 @@ main() {
         read choice
         
         case $choice in
-            1) run_scan "quick" "" ;;
-            2) run_scan "passive" "" ;;
-            3) run_scan "full" "" ;;
-            4) run_scan "deep" "--scanner nuclei" ;;
-            5) run_scan "bugbounty" "--scanner nuclei --active-module js-secrets --active-module backup" ;;
-            6) run_scan "stealth" "" ;;
-            7) run_scan "api-only" "" ;;
-            8) run_scan "wordpress" "--scanner wpscan" ;;
+            1) run_scan "quick" ;;
+            2) run_scan "passive" ;;
+            3) run_scan "full" ;;
+            4) run_scan "deep" --scanner nuclei ;;
+            5) run_scan "bugbounty" --scanner nuclei --active-module js-secrets --active-module backup ;;
+            6) run_scan "stealth" ;;
+            7) run_scan "api-only" ;;
+            8) run_scan "wordpress" --scanner wpscan ;;
             9) list_jobs ;;
             10) job_status ;;
             11) export_results ;;

@@ -23,6 +23,8 @@ def generate_summary(context) -> None:
     priority_counter = Counter()
     noise_count = 0
     top_candidates: List[dict] = []
+    top_urls: List[dict] = []
+    top_findings: List[dict] = []
 
     for entry in items:
         etype = entry.get("type", "unknown")
@@ -38,19 +40,24 @@ def generate_summary(context) -> None:
                 continue
             priority = entry.get("priority") or "unknown"
             priority_counter[priority] += 1
-            top_candidates.append(entry | {"score": score, "priority": priority})
+            payload = entry | {"score": score, "priority": priority}
+            top_candidates.append(payload)
+            top_urls.append(payload)
         elif etype == "asset_enrichment":
             tags = entry.get("tags", [])
             if tags:
                 priority_counter["enriched_hosts"] += 1
-        elif etype == "finding":
+        elif etype in {"finding", "idor_suspect"}:
             score = int(entry.get("score", 0))
             priority = entry.get("priority") or "unknown"
             priority_counter[priority] += 1
-            top_candidates.append(entry | {"score": score, "priority": priority})
+            payload = entry | {"score": score, "priority": priority}
+            top_candidates.append(payload)
+            top_findings.append(payload)
 
     top_candidates.sort(key=lambda item: item.get("score", 0), reverse=True)
-    top_urls = top_candidates[:SUMMARY_TOP]
+    top_urls.sort(key=lambda item: item.get("score", 0), reverse=True)
+    top_findings.sort(key=lambda item: item.get("score", 0), reverse=True)
 
     lines = []
     lines.append(f"Job ID       : {metadata.job_id}")
@@ -133,6 +140,13 @@ def generate_summary(context) -> None:
         lines.append('')
         lines.append('== Auth Discovery ==')
         lines.append(f"Forms discovered: {auth_stats.get('forms', 0)}")
+    surface_stats = getattr(metadata, 'stats', {}).get('auth_surface') if hasattr(metadata, 'stats') else None
+    if surface_stats:
+        lines.append('')
+        lines.append('== Auth Surfaces ==')
+        lines.append(f"Login: {surface_stats.get('login', 0)}")
+        lines.append(f"Password reset: {surface_stats.get('password_reset', 0)}")
+        lines.append(f"Register: {surface_stats.get('register', 0)}")
     js_stats = getattr(metadata, 'stats', {}).get('js_intel') if hasattr(metadata, 'stats') else None
     if js_stats:
         lines.append('')
@@ -161,6 +175,11 @@ def generate_summary(context) -> None:
         lines.append('')
         lines.append('== Vuln Scanners ==')
         lines.append(f"Findings: {vuln_stats.get('findings', 0)}")
+    idor_stats = getattr(metadata, 'stats', {}).get('idor') if hasattr(metadata, 'stats') else None
+    if idor_stats and idor_stats.get('suspects'):
+        lines.append('')
+        lines.append('== IDOR Suspects ==')
+        lines.append(f"Suspects: {idor_stats.get('suspects', 0)}")
     shots_stats = getattr(metadata, 'stats', {}).get('screenshots') if hasattr(metadata, 'stats') else None
     if shots_stats:
         lines.append('')
@@ -175,11 +194,20 @@ def generate_summary(context) -> None:
         lines.append(f"Model trained: {learning_stats.get('trained', False)}")
         for host, prob in learning_stats.get('top_hosts', []):
             lines.append(f"{host}: {prob:.2f}")
+    if top_findings:
+        lines.append("")
+        lines.append(f"== Top Findings (top {min(len(top_findings), SUMMARY_TOP)}) ==")
+        for entry in top_findings[:SUMMARY_TOP]:
+            label = entry.get("description") or entry.get("url") or entry.get("hostname") or "(unknown)"
+            score = entry.get("score", 0)
+            priority = entry.get("priority", "unknown")
+            tags = ",".join(entry.get("tags", []))
+            lines.append(f"[{score:4}] ({priority}) {label} {tags}")
     if top_urls:
         lines.append("")
-        lines.append(f"== Top Findings (top {len(top_urls)}) ==")
-        for entry in top_urls:
-            label = entry.get("url") or entry.get("description") or entry.get("hostname") or "(unknown)"
+        lines.append(f"== Top URLs (top {min(len(top_urls), SUMMARY_TOP)}) ==")
+        for entry in top_urls[:SUMMARY_TOP]:
+            label = entry.get("url") or "(unknown)"
             score = entry.get("score", 0)
             priority = entry.get("priority", "unknown")
             tags = ",".join(entry.get("tags", []))

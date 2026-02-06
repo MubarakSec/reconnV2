@@ -24,6 +24,7 @@ from recon_cli.pipeline.stage_api_recon import APIReconStage
 from recon_cli.pipeline.stage_param_mining import ParamMiningStage
 from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
 from recon_cli.pipeline.stage_trim_results import TrimResultsStage
+from recon_cli.pipeline.stage_rescore import RescoreStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
 from recon_cli.pipeline.stage_learning import LearningStage
 from recon_cli.pipeline.stage_scanner import ScannerStage
@@ -53,6 +54,7 @@ PIPELINE_STAGES: List[Stage] = [
     APIReconStage(),
     ParamMiningStage(),
     VulnScanStage(),
+    RescoreStage(),
     TrimResultsStage(),
     CorrelationStage(),
     LearningStage(),
