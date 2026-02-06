@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 from collections import Counter
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from recon_cli.jobs.manager import JobManager
 
-from recon_cli.utils.jsonl import read_jsonl
+from recon_cli.utils.jsonl import iter_jsonl
 
 
 SUMMARY_TOP = int(os.environ.get("RECON_SUMMARY_TOP", 50))
@@ -17,7 +19,14 @@ def generate_summary(context) -> None:
     record = context.record
     metadata = record.metadata
     spec = record.spec
-    items = read_jsonl(record.paths.results_jsonl)
+    results_path = record.paths.results_jsonl
+    trimmed_path = record.paths.trimmed_results_jsonl
+    summary_source = "full"
+    summary_path = results_path
+    if trimmed_path.exists() and trimmed_path.stat().st_size > 0:
+        summary_source = "trimmed"
+        summary_path = trimmed_path
+
     counts = Counter()
     status_counter = Counter()
     priority_counter = Counter()
@@ -26,7 +35,60 @@ def generate_summary(context) -> None:
     top_urls: List[dict] = []
     top_findings: List[dict] = []
 
-    for entry in items:
+    def _extract_context(entry: dict) -> str:
+        host = entry.get("hostname") or entry.get("host")
+        if not host:
+            url_value = entry.get("url")
+            if isinstance(url_value, str):
+                try:
+                    host = urlparse(url_value).hostname
+                except ValueError:
+                    host = None
+        details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+        port = entry.get("port") or details.get("port")
+        ip = entry.get("ip") or details.get("ip")
+        if host and port:
+            return f"{host}:{port}"
+        if host:
+            return str(host)
+        if ip and port:
+            return f"{ip}:{port}"
+        if ip:
+            return str(ip)
+        return ""
+
+    def _format_finding_label(entry: dict) -> str:
+        label = (
+            entry.get("description")
+            or entry.get("title")
+            or entry.get("name")
+            or entry.get("url")
+            or entry.get("hostname")
+            or "(unknown)"
+        )
+        context_value = _extract_context(entry)
+        if context_value:
+            return f"{label} [{context_value}]"
+        return label
+
+    def _format_url_label(entry: dict) -> str:
+        label = entry.get("url") or "(unknown)"
+        status = entry.get("status_code") or entry.get("status")
+        if status:
+            return f"{label} (status:{status})"
+        return label
+
+    def _parse_iso(value: object) -> Optional[datetime]:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            if value.endswith("Z"):
+                value = value.replace("Z", "+00:00")
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    for entry in iter_jsonl(results_path):
         etype = entry.get("type", "unknown")
         counts[etype] += 1
         if etype == "url":
@@ -40,17 +102,28 @@ def generate_summary(context) -> None:
                 continue
             priority = entry.get("priority") or "unknown"
             priority_counter[priority] += 1
-            payload = entry | {"score": score, "priority": priority}
-            top_candidates.append(payload)
-            top_urls.append(payload)
         elif etype == "asset_enrichment":
             tags = entry.get("tags", [])
             if tags:
                 priority_counter["enriched_hosts"] += 1
         elif etype in {"finding", "idor_suspect"}:
-            score = int(entry.get("score", 0))
             priority = entry.get("priority") or "unknown"
             priority_counter[priority] += 1
+
+    for entry in iter_jsonl(summary_path):
+        etype = entry.get("type", "unknown")
+        if etype == "url":
+            score = int(entry.get("score", 0))
+            tags = set(entry.get("tags", []))
+            if "noise" in tags:
+                continue
+            priority = entry.get("priority") or "unknown"
+            payload = entry | {"score": score, "priority": priority}
+            top_candidates.append(payload)
+            top_urls.append(payload)
+        elif etype in {"finding", "idor_suspect"}:
+            score = int(entry.get("score", 0))
+            priority = entry.get("priority") or "unknown"
             payload = entry | {"score": score, "priority": priority}
             top_candidates.append(payload)
             top_findings.append(payload)
@@ -66,6 +139,7 @@ def generate_summary(context) -> None:
     lines.append(f"Queued       : {metadata.queued_at}")
     lines.append(f"Started      : {metadata.started_at}")
     lines.append(f"Finished     : {metadata.finished_at}")
+    lines.append(f"Summary Src  : {summary_source}")
     lines.append("")
     lines.append("== Totals ==")
     for key in sorted(counts):
@@ -85,6 +159,26 @@ def generate_summary(context) -> None:
         lines.append("")
         lines.append("== Missing Tools ==")
         lines.append(", ".join(sorted(missing_tools)))
+    stage_progress = metadata.stats.get("stage_progress") if hasattr(metadata, "stats") else None
+    if stage_progress:
+        durations: List[tuple[str, float, str]] = []
+        total_duration = 0.0
+        for entry in stage_progress:
+            if not isinstance(entry, dict):
+                continue
+            start = _parse_iso(entry.get("started_at"))
+            end = _parse_iso(entry.get("finished_at"))
+            if not start or not end:
+                continue
+            duration = (end - start).total_seconds()
+            total_duration += duration
+            durations.append((str(entry.get("stage", "unknown")), duration, str(entry.get("status", "unknown"))))
+        if durations:
+            lines.append("")
+            lines.append("== Stage Timings ==")
+            lines.append(f"Total: {total_duration:.1f}s")
+            for stage, duration, status in sorted(durations, key=lambda item: item[1], reverse=True)[:10]:
+                lines.append(f"{stage:20} {duration:6.1f}s ({status})")
     if noise_count:
         metadata.stats["noise_suppressed"] = noise_count
     correlation_stats = getattr(metadata, 'stats', {}).get('correlation') if hasattr(metadata, 'stats') else None
@@ -140,6 +234,15 @@ def generate_summary(context) -> None:
         lines.append('')
         lines.append('== Auth Discovery ==')
         lines.append(f"Forms discovered: {auth_stats.get('forms', 0)}")
+    auth_session = getattr(metadata, 'stats', {}).get('auth') if hasattr(metadata, 'stats') else None
+    if auth_session:
+        lines.append('')
+        lines.append('== Auth Session ==')
+        lines.append(f"Enabled: {auth_session.get('enabled', False)}")
+        lines.append(f"Profile: {auth_session.get('profile', 'default')}")
+        if auth_session.get('login_success') or auth_session.get('login_failed'):
+            lines.append(f"Login success: {auth_session.get('login_success', 0)}")
+            lines.append(f"Login failed: {auth_session.get('login_failed', 0)}")
     surface_stats = getattr(metadata, 'stats', {}).get('auth_surface') if hasattr(metadata, 'stats') else None
     if surface_stats:
         lines.append('')
@@ -170,6 +273,12 @@ def generate_summary(context) -> None:
         lines.append('')
         lines.append('== WAF Probe ==')
         lines.append(f"Findings: {waf_stats.get('findings', 0)}")
+    takeover_stats = getattr(metadata, 'stats', {}).get('takeover') if hasattr(metadata, 'stats') else None
+    if takeover_stats:
+        lines.append('')
+        lines.append('== Takeover Checks ==')
+        lines.append(f"Hosts checked: {takeover_stats.get('checked', 0)}")
+        lines.append(f"Findings: {takeover_stats.get('findings', 0)}")
     vuln_stats = getattr(metadata, 'stats', {}).get('vuln_scan') if hasattr(metadata, 'stats') else None
     if vuln_stats:
         lines.append('')
@@ -198,7 +307,7 @@ def generate_summary(context) -> None:
         lines.append("")
         lines.append(f"== Top Findings (top {min(len(top_findings), SUMMARY_TOP)}) ==")
         for entry in top_findings[:SUMMARY_TOP]:
-            label = entry.get("description") or entry.get("url") or entry.get("hostname") or "(unknown)"
+            label = _format_finding_label(entry)
             score = entry.get("score", 0)
             priority = entry.get("priority", "unknown")
             tags = ",".join(entry.get("tags", []))
@@ -207,7 +316,7 @@ def generate_summary(context) -> None:
         lines.append("")
         lines.append(f"== Top URLs (top {min(len(top_urls), SUMMARY_TOP)}) ==")
         for entry in top_urls[:SUMMARY_TOP]:
-            label = entry.get("url") or "(unknown)"
+            label = _format_url_label(entry)
             score = entry.get("score", 0)
             priority = entry.get("priority", "unknown")
             tags = ",".join(entry.get("tags", []))
@@ -223,7 +332,7 @@ def generate_summary(context) -> None:
         next_actions.append("Validate IDOR suspects and add authorization checks.")
     if missing_tools:
         next_actions.append("Install missing external tools for fuller coverage.")
-    if not next_actions and priority_counter.get("high", 0) or priority_counter.get("critical", 0):
+    if not next_actions and (priority_counter.get("high", 0) > 0 or priority_counter.get("critical", 0) > 0):
         next_actions.append("Investigate high/critical items first; rerun with full profile if needed.")
     if next_actions:
         lines.append("")
@@ -247,9 +356,8 @@ class JobSummary:
         record = self.manager.load_job(job_id)
         if not record:
             return None
-        items = read_jsonl(record.paths.results_jsonl)
         counts = Counter()
-        for entry in items:
+        for entry in iter_jsonl(record.paths.results_jsonl):
             etype = entry.get("type", "unknown")
             counts[etype] += 1
         return {

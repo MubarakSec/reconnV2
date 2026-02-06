@@ -898,6 +898,7 @@ def generate_report(
         
         # Load job data
         job_data = {
+            "id": job_id,
             "job_id": job_id,
             "targets": [record.spec.target] if hasattr(record.spec, 'target') else [],
             "findings": [],
@@ -909,12 +910,10 @@ def generate_report(
         # Load results
         if record.paths.results_jsonl.exists():
             from recon_cli.utils.jsonl import read_jsonl
-            for item in read_jsonl(record.paths.results_jsonl):
-                item_type = item.get("type", "other")
-                if item_type == "host":
-                    job_data["hosts"].append(item)
-                else:
-                    job_data["findings"].append(item)
+            from recon_cli.utils.reporting import categorize_results
+            categorized = categorize_results(read_jsonl(record.paths.results_jsonl), include_secret_in_findings=True)
+            job_data["hosts"].extend(categorized["hosts"])
+            job_data["findings"].extend(categorized["findings"])
         
         if executive:
             # Executive summary only
@@ -937,18 +936,14 @@ def generate_report(
             # Full report
             report_format = ReportFormat(format.lower())
             config = ReportConfig(
-                format=report_format,
                 title=title or f"Reconnaissance Report - {job_id}",
-                include_executive_summary=True,
             )
-            
             generator = ReportGenerator(config)
-            
+            import asyncio
+            content = asyncio.run(generator.generate(job_data, format=report_format, output_path=output))
             if output:
-                generator.generate_to_file(job_data, output)
                 typer.secho(f"✅ Report saved to {output}", fg=typer.colors.GREEN)
             else:
-                content = generator.generate(job_data)
                 print(content)
                 
     except ImportError as e:

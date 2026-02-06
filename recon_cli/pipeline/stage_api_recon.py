@@ -47,6 +47,12 @@ class APIReconStage(Stage):
         hosts = list(dict.fromkeys(hosts))
         max_hosts = int(getattr(context.runtime_config, "api_recon_max_hosts", 50))
         timeout = int(getattr(context.runtime_config, "api_recon_timeout", 8))
+        runtime = context.runtime_config
+        limiter = context.get_rate_limiter(
+            "api_recon",
+            rps=float(getattr(runtime, "api_recon_rps", 0)),
+            per_host=float(getattr(runtime, "api_recon_per_host_rps", 0)),
+        )
         specs_found = 0
         urls_added = 0
         for host in hosts[:max_hosts]:
@@ -55,16 +61,33 @@ class APIReconStage(Stage):
                 url = urljoin(base, path)
                 if not context.url_allowed(url):
                     continue
-                try:
-                    resp = requests.get(
-                        url,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        headers={"User-Agent": "recon-cli api-recon"},
-                        verify=context.runtime_config.verify_tls,
-                    )
-                except Exception:
+                session = context.auth_session(url)
+                headers = context.auth_headers({"User-Agent": "recon-cli api-recon"})
+                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                     continue
+                try:
+                    if session:
+                        resp = session.get(
+                            url,
+                            timeout=timeout,
+                            allow_redirects=True,
+                            headers=headers,
+                            verify=context.runtime_config.verify_tls,
+                        )
+                    else:
+                        resp = requests.get(
+                            url,
+                            timeout=timeout,
+                            allow_redirects=True,
+                            headers=headers,
+                            verify=context.runtime_config.verify_tls,
+                        )
+                except Exception:
+                    if limiter:
+                        limiter.on_error(url)
+                    continue
+                if limiter:
+                    limiter.on_response(url, resp.status_code)
                 if resp.status_code >= 400:
                     continue
                 text = resp.text or ""

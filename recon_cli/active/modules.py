@@ -5,7 +5,7 @@ import random
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -40,9 +40,19 @@ class ActiveResult:
     artifact_name: str
 
 
-def create_session(timeout: float = 6.0) -> requests.Session:
+def create_session(
+    timeout: float = 6.0,
+    headers: Optional[Dict[str, str]] = None,
+    cookies: Optional[Dict[str, str]] = None,
+    verify_tls: bool = True,
+) -> requests.Session:
     session = requests.Session()
+    session.verify = verify_tls
     session.headers.update({"User-Agent": USER_AGENT})
+    if headers:
+        session.headers.update(headers)
+    if cookies:
+        session.cookies.update(cookies)
     return session
 
 

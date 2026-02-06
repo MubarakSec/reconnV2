@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import secrets
 import shutil
 import json
@@ -22,6 +23,20 @@ class JobRecord:
 
 
 class JobManager:
+    _record_locks: Dict[str, threading.Lock] = {}
+    _record_locks_guard = threading.Lock()
+
+    @classmethod
+    def _lock_for(cls, job_id: str) -> threading.Lock:
+        if not job_id:
+            job_id = "unknown"
+        with cls._record_locks_guard:
+            lock = cls._record_locks.get(job_id)
+            if lock is None:
+                lock = threading.Lock()
+                cls._record_locks[job_id] = lock
+            return lock
+
     def __init__(self, home: Path | None = None) -> None:
         self.home = home or config.RECON_HOME
         config.ensure_base_directories()
@@ -233,10 +248,15 @@ class JobManager:
         return True
 
     def update_spec(self, record: JobRecord) -> None:
-        fs.write_json(record.paths.spec_path, record.spec.to_dict())
+        lock = self._lock_for(record.spec.job_id)
+        with lock:
+            fs.write_json(record.paths.spec_path, record.spec.to_dict())
 
     def update_metadata(self, record: JobRecord) -> None:
-        fs.write_json(record.paths.metadata_path, record.metadata.to_dict())
+        job_id = record.metadata.job_id or record.spec.job_id
+        lock = self._lock_for(job_id)
+        with lock:
+            fs.write_json(record.paths.metadata_path, record.metadata.to_dict())
 
     def _apply_permissions(self, paths: JobPaths) -> None:
         try:

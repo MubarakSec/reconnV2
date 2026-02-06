@@ -43,20 +43,43 @@ class JSIntelligenceStage(Stage):
         max_files = int(getattr(context.runtime_config, "js_intel_max_files", 40))
         timeout = int(getattr(context.runtime_config, "js_intel_timeout", 12))
         max_urls = int(getattr(context.runtime_config, "js_intel_max_urls", 120))
+        runtime = context.runtime_config
+        limiter = context.get_rate_limiter(
+            "js_intel",
+            rps=float(getattr(runtime, "js_intel_rps", 0)),
+            per_host=float(getattr(runtime, "js_intel_per_host_rps", 0)),
+        )
         js_urls = list(dict.fromkeys(js_urls))[:max_files]
         artifacts: List[Dict[str, object]] = []
         discovered_urls: List[str] = []
         for js_url in js_urls:
-            try:
-                resp = requests.get(
-                    js_url,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    headers={"User-Agent": "recon-cli js-intel"},
-                    verify=context.runtime_config.verify_tls,
-                )
-            except Exception:
+            session = context.auth_session(js_url)
+            headers = context.auth_headers({"User-Agent": "recon-cli js-intel"})
+            if limiter and not limiter.wait_for_slot(js_url, timeout=timeout):
                 continue
+            try:
+                if session:
+                    resp = session.get(
+                        js_url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers=headers,
+                        verify=context.runtime_config.verify_tls,
+                    )
+                else:
+                    resp = requests.get(
+                        js_url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers=headers,
+                        verify=context.runtime_config.verify_tls,
+                    )
+            except Exception:
+                if limiter:
+                    limiter.on_error(js_url)
+                continue
+            if limiter:
+                limiter.on_response(js_url, resp.status_code)
             if resp.status_code >= 400:
                 continue
             content = resp.text or ""
@@ -68,28 +91,44 @@ class JSIntelligenceStage(Stage):
             map_match = self.SOURCEMAP_PATTERN.search(content)
             if map_match:
                 source_map = urljoin(js_url, map_match.group(1))
-                try:
-                    map_resp = requests.get(
-                        source_map,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        headers={"User-Agent": "recon-cli js-intel"},
-                        verify=context.runtime_config.verify_tls,
-                    )
-                    if map_resp.status_code < 400 and map_resp.text:
-                        try:
-                            map_data = json.loads(map_resp.text)
-                        except json.JSONDecodeError:
-                            map_data = {}
-                        sources_content = map_data.get("sourcesContent") or []
-                        for source_blob in sources_content[:5]:
-                            if not source_blob or not isinstance(source_blob, str):
-                                continue
-                            endpoints.update(self.ENDPOINT_PATTERN.findall(source_blob))
-                            for rel in self.RELATIVE_PATTERN.findall(source_blob):
-                                endpoints.add(urljoin(js_url, rel))
-                except Exception:
+                if limiter and not limiter.wait_for_slot(source_map, timeout=timeout):
                     pass
+                else:
+                    try:
+                        if session:
+                            map_resp = session.get(
+                                source_map,
+                                timeout=timeout,
+                                allow_redirects=True,
+                                headers=headers,
+                                verify=context.runtime_config.verify_tls,
+                            )
+                        else:
+                            map_resp = requests.get(
+                                source_map,
+                                timeout=timeout,
+                                allow_redirects=True,
+                                headers=headers,
+                                verify=context.runtime_config.verify_tls,
+                            )
+                        if map_resp.status_code < 400 and map_resp.text:
+                            if limiter:
+                                limiter.on_response(source_map, map_resp.status_code)
+                            try:
+                                map_data = json.loads(map_resp.text)
+                            except json.JSONDecodeError:
+                                map_data = {}
+                            sources_content = map_data.get("sourcesContent") or []
+                            for source_blob in sources_content[:5]:
+                                if not source_blob or not isinstance(source_blob, str):
+                                    continue
+                                endpoints.update(self.ENDPOINT_PATTERN.findall(source_blob))
+                                for rel in self.RELATIVE_PATTERN.findall(source_blob):
+                                    endpoints.add(urljoin(js_url, rel))
+                    except Exception:
+                        if limiter:
+                            limiter.on_error(source_map)
+                        pass
             endpoints = list(endpoints)[:max_urls]
             artifacts.append(
                 {

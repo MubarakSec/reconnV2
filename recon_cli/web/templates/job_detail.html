@@ -344,8 +344,8 @@
                     <div class="result-item vulnerability">
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
-                                <strong class="severity-{{ vuln.severity or 'info' }}">
-                                    {{ vuln.name or vuln.template_id or 'Unknown' }}
+                                <strong class="severity-{{ vuln.severity or vuln.priority or 'info' }}">
+                                    {{ vuln.title or vuln.description or vuln.finding_type or vuln.name or vuln.template_id or 'Unknown' }}
                                 </strong>
                                 <div class="text-secondary small mt-1">
                                     {{ vuln.host or vuln.url or 'N/A' }}
@@ -354,8 +354,8 @@
                                 <p class="mt-2 mb-0 small">{{ vuln.description }}</p>
                                 {% endif %}
                             </div>
-                            <span class="badge bg-{{ 'danger' if vuln.severity == 'critical' else 'warning' if vuln.severity == 'high' else 'info' }}">
-                                {{ vuln.severity or 'info' }}
+                            <span class="badge bg-{{ 'danger' if (vuln.severity or vuln.priority) == 'critical' else 'warning' if (vuln.severity or vuln.priority) == 'high' else 'info' }}">
+                                {{ vuln.severity or vuln.priority or 'info' }}
                             </span>
                         </div>
                     </div>
@@ -372,11 +372,11 @@
                     <div class="result-item secret">
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
-                                <strong>{{ secret.type or 'Secret' }}</strong>
+                                <strong>{{ secret.finding_type or secret.type or 'Secret' }}</strong>
                                 <div class="text-secondary small mt-1">
                                     {{ secret.file or secret.url or 'N/A' }}
                                 </div>
-                                <code class="d-block mt-2">{{ secret.match or secret.value or '***REDACTED***' }}</code>
+                                <code class="d-block mt-2">{{ secret.description or secret.match or secret.value or (secret.details.pattern if secret.details) or '***REDACTED***' }}</code>
                             </div>
                             <span class="badge badge-type badge-secret">Secret</span>
                         </div>

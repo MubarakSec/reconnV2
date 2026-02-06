@@ -167,15 +167,21 @@ class SecretMatch:
 
 
 class SecretsDetector:
-    def __init__(self, timeout: int = 10, verify_tls: bool = True) -> None:
-        self.session = requests.Session()
+    def __init__(
+        self,
+        timeout: int = 10,
+        verify_tls: bool = True,
+        session: Optional[requests.Session] = None,
+    ) -> None:
+        self.session = session or requests.Session()
         self.session.verify = verify_tls
         if not verify_tls:
             try:
                 requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
             except Exception:
                 pass
-        self.session.headers.update({"User-Agent": USER_AGENT})
+        if "User-Agent" not in self.session.headers:
+            self.session.headers.update({"User-Agent": USER_AGENT})
         self.timeout = timeout
 
     def fetch(self, url: str) -> Optional[str]:

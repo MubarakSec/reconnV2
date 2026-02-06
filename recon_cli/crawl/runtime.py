@@ -43,8 +43,8 @@ def dom_artifact_name(url: str) -> str:
     return f"dom_{digest}.html"
 
 
-async def _crawl_single(browser, url: str, timeout_ms: int) -> CrawlResult:
-    page = await browser.new_page()
+async def _crawl_single(context, url: str, timeout_ms: int) -> CrawlResult:
+    page = await context.new_page()
     network_entries: List[NetworkEntry] = []
     request_lookup: Dict[int, NetworkEntry] = {}
     javascript_urls: set[str] = set()
@@ -126,7 +126,14 @@ async def _crawl_single(browser, url: str, timeout_ms: int) -> CrawlResult:
     )
 
 
-def crawl_urls(urls: List[str], timeout_seconds: int, max_concurrency: int = 1) -> Dict[str, CrawlResult]:
+def crawl_urls(
+    urls: List[str],
+    timeout_seconds: int,
+    max_concurrency: int = 1,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    cookies: Optional[List[Dict[str, object]]] = None,
+) -> Dict[str, CrawlResult]:
     results: Dict[str, CrawlResult] = {}
     if async_playwright is None or not urls:  # pragma: no cover
         return results
@@ -137,12 +144,21 @@ def crawl_urls(urls: List[str], timeout_seconds: int, max_concurrency: int = 1) 
     async def runner() -> None:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
+            context_kwargs: Dict[str, object] = {}
+            if headers:
+                context_kwargs["extra_http_headers"] = headers
+            browser_ctx = await browser.new_context(**context_kwargs)
+            if cookies:
+                try:
+                    await browser_ctx.add_cookies(cookies)
+                except Exception:
+                    pass
             semaphore = asyncio.Semaphore(concurrency)
 
             async def run_single(target: str) -> None:
                 async with semaphore:
                     try:
-                        results[target] = await _crawl_single(browser, target, timeout_ms)
+                        results[target] = await _crawl_single(browser_ctx, target, timeout_ms)
                     except Exception as exc:  # pragma: no cover - defensive
                         results[target] = CrawlResult(
                             url=target,
@@ -155,6 +171,7 @@ def crawl_urls(urls: List[str], timeout_seconds: int, max_concurrency: int = 1) 
                         )
 
             await asyncio.gather(*(run_single(url) for url in urls))
+            await browser_ctx.close()
             await browser.close()
 
     asyncio.run(runner())

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Dict, List
 
 from recon_cli.pipeline.context import PipelineContext
@@ -150,12 +149,7 @@ class ScoringStage(Stage):
             entry["priority"] = enrich_utils.classify_priority(entry["score"])
             updated.append(entry)
 
-        tmp = results_path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as handle:
-            for entry in updated:
-                json.dump(entry, handle, separators=(",", ":"), ensure_ascii=True)
-                handle.write("\n")
-        tmp.replace(results_path)
+        context.results.replace_all(updated)
         surface_stats = context.record.metadata.stats.setdefault("auth_surface", {})
         surface_stats["login"] = sum(1 for entry in updated if "surface:login" in entry.get("tags", []))
         surface_stats["password_reset"] = sum(

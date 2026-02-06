@@ -47,7 +47,15 @@ class ActiveIntelligenceStage(Stage):
             host_scores[host] = max(host_scores.get(host, 0), score)
         ranked_hosts = [host for host, _ in sorted(host_scores.items(), key=lambda item: item[1], reverse=True)]
 
-        session = active_modules.create_session()
+        apply_auth = bool(getattr(context.runtime_config, "auth_apply_active_modules", False)) and context.auth_enabled()
+        headers = context.auth_headers({"User-Agent": active_modules.USER_AGENT}) if apply_auth else {"User-Agent": active_modules.USER_AGENT}
+        auth_session = context.auth_session() if apply_auth else None
+        cookies = auth_session.cookies.get_dict() if auth_session else None
+        session = active_modules.create_session(
+            headers=headers,
+            cookies=cookies,
+            verify_tls=bool(context.runtime_config.verify_tls),
+        )
         artifact_dir = context.record.paths.ensure_subdir("active")
         stats: Dict[str, int] = {}
         for module in selected:

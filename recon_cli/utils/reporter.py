@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 from recon_cli.utils.jsonl import read_jsonl
+from recon_cli.utils.reporting import is_finding, is_secret, resolve_severity
 
 
 @dataclass
@@ -152,14 +153,14 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         if "url" in result:
             stats["urls"].add(result["url"])
         
-        severity = result.get("severity", result.get("priority", "info"))
+        severity = resolve_severity(result)
         if severity in stats["by_severity"]:
             stats["by_severity"][severity] += 1
         
-        if result_type == "secret":
+        if is_secret(result):
             stats["secrets"].append(result)
 
-        if result_type in {"finding", "vulnerability", "vuln"}:
+        if is_finding(result):
             stats["findings"].append(result)
 
         if result_type == "screenshot":

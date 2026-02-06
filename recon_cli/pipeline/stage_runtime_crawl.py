@@ -167,8 +167,21 @@ class RuntimeCrawlStage(Stage):
             concurrency,
         )
 
+        auth_headers = None
+        auth_cookies = None
+        if context.auth_enabled():
+            context.auth_session(selected_urls[0] if selected_urls else None)
+            auth_headers = context.auth_headers({"User-Agent": "recon-cli runtime-crawl"})
+            default_domain = urlparse(selected_urls[0]).hostname if selected_urls else None
+            auth_cookies = context.auth_cookies(default_domain)
         try:
-            results = crawl_urls(selected_urls, timeout, concurrency)
+            results = crawl_urls(
+                selected_urls,
+                timeout,
+                concurrency,
+                headers=auth_headers,
+                cookies=auth_cookies,
+            )
         except Exception as exc:
             message = str(exc)
             missing_browsers = "playwright install" in message.lower() or "executable doesn't exist" in message.lower()

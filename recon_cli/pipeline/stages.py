@@ -10,7 +10,10 @@ from recon_cli.pipeline.stage_resolve import ResolveStage
 from recon_cli.pipeline.stage_enrichment import EnrichmentStage
 from recon_cli.pipeline.stage_nmap import NmapStage
 from recon_cli.pipeline.stage_http_probe import HttpProbeStage
+from recon_cli.pipeline.stage_takeover import TakeoverStage
 from recon_cli.pipeline.stage_scoring import ScoringStage
+from recon_cli.pipeline.stage_security_headers import SecurityHeadersStage
+from recon_cli.pipeline.stage_tls_hygiene import TLSHygieneStage
 from recon_cli.pipeline.stage_auth_discovery import AuthDiscoveryStage
 from recon_cli.pipeline.stage_waf import WafProbeStage
 from recon_cli.pipeline.stage_idor import IDORStage
@@ -41,7 +44,10 @@ PIPELINE_STAGES: List[Stage] = [
     EnrichmentStage(),
     NmapStage(),
     HttpProbeStage(),
+    TakeoverStage(),
     ScoringStage(),
+    SecurityHeadersStage(),
+    TLSHygieneStage(),
     AuthDiscoveryStage(),
     WafProbeStage(),
     IDORStage(),

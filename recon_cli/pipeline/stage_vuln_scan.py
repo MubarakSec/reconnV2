@@ -42,6 +42,7 @@ class VulnScanStage(Stage):
                 if re.search(r"\bVULN\b|\bPOC\b|reflected", output, re.IGNORECASE):
                     payload = {
                         "type": "finding",
+                        "finding_type": "xss",
                         "source": "dalfox",
                         "hostname": urlparse(url).hostname,
                         "url": url,
@@ -50,6 +51,7 @@ class VulnScanStage(Stage):
                         "tags": ["xss", "dalfox"],
                         "score": 80,
                         "priority": "high",
+                        "severity": "high",
                     }
                     if context.results.append(payload):
                         findings += 1
@@ -87,6 +89,7 @@ class VulnScanStage(Stage):
                 if re.search(r"parameter .* is vulnerable|sqlmap identified", output, re.IGNORECASE):
                     payload = {
                         "type": "finding",
+                        "finding_type": "sql_injection",
                         "source": "sqlmap",
                         "hostname": urlparse(url).hostname,
                         "url": url,
@@ -95,6 +98,7 @@ class VulnScanStage(Stage):
                         "tags": ["sqli", "sqlmap"],
                         "score": 85,
                         "priority": "high",
+                        "severity": "critical",
                     }
                     if context.results.append(payload):
                         findings += 1

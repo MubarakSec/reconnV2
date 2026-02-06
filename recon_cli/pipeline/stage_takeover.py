@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from typing import List, Optional, Set
+from urllib.parse import urlparse
+
+from recon_cli.pipeline.context import PipelineContext
+from recon_cli.pipeline.stage_base import Stage, note_missing_tool
+from recon_cli.takeover import TakeoverDetector
+from recon_cli.takeover.detector import TAKEOVER_FINGERPRINTS
+from recon_cli.utils import validation
+from recon_cli.utils.jsonl import iter_jsonl
+
+try:
+    import dns.resolver
+except Exception:  # pragma: no cover - optional dependency
+    dns = None
+
+
+class TakeoverStage(Stage):
+    name = "takeover_check"
+    MAX_CNAME_DEPTH = 5
+
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_takeover", False))
+
+    def execute(self, context: PipelineContext) -> None:
+        results_path = context.record.paths.results_jsonl
+        if not results_path.exists():
+            return
+
+        max_hosts = int(getattr(context.runtime_config, "takeover_max_hosts", 50))
+        if max_hosts <= 0:
+            return
+
+        timeout = int(getattr(context.runtime_config, "takeover_timeout", 6))
+        require_cname = bool(getattr(context.runtime_config, "takeover_require_cname", False))
+        dns_timeout = max(1, int(getattr(context.runtime_config, "takeover_dns_timeout", timeout)))
+        verify_tls = bool(getattr(context.runtime_config, "verify_tls", True))
+        detector = TakeoverDetector(timeout=timeout, verify_tls=verify_tls)
+
+        hosts: List[str] = []
+        seen = set()
+        for entry in iter_jsonl(results_path):
+            hostname = entry.get("hostname") or entry.get("host")
+            if not hostname:
+                url_value = entry.get("url")
+                if isinstance(url_value, str):
+                    try:
+                        hostname = urlparse(url_value).hostname
+                    except ValueError:
+                        hostname = None
+            if not hostname:
+                continue
+            try:
+                normalized = validation.normalize_hostname(str(hostname))
+            except ValueError:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            hosts.append(normalized)
+
+        if not hosts:
+            return
+
+        checked = 0
+        findings = 0
+        skipped_no_cname = 0
+        cname_matches = 0
+        if require_cname and dns is None:
+            context.logger.warning("dnspython not available; skipping takeover checks (require_cname enabled)")
+            note_missing_tool(context, "dnspython")
+            stats = context.record.metadata.stats.setdefault("takeover", {})
+            stats["checked"] = 0
+            stats["findings"] = 0
+            stats["max_hosts"] = max_hosts
+            stats["skipped_no_dns"] = min(len(hosts), max_hosts)
+            context.manager.update_metadata(context.record)
+            return
+
+        for host in hosts[:max_hosts]:
+            checked += 1
+            cname_chain = self._resolve_cname_chain(host, dns_timeout) if dns is not None else []
+            if require_cname and not cname_chain:
+                skipped_no_cname += 1
+                continue
+            providers = self._match_providers(cname_chain)
+            if providers:
+                cname_matches += 1
+            finding = detector.check_host(host, providers=providers if providers else None)
+            if not finding:
+                continue
+            payload = {
+                "type": "finding",
+                "finding_type": "subdomain_takeover",
+                "source": "takeover-check",
+                "hostname": finding.hostname,
+                "description": "Potential subdomain takeover detected",
+                "details": {
+                    "provider": finding.provider,
+                    "evidence": finding.evidence,
+                    "cname_chain": cname_chain,
+                },
+                "tags": ["takeover", "subdomain", f"provider:{finding.provider}"],
+                "score": 90,
+                "priority": "critical",
+                "severity": "critical",
+            }
+            if context.results.append(payload):
+                findings += 1
+
+        stats = context.record.metadata.stats.setdefault("takeover", {})
+        stats["checked"] = checked
+        stats["findings"] = findings
+        stats["max_hosts"] = max_hosts
+        if require_cname:
+            stats["skipped_no_cname"] = skipped_no_cname
+        if cname_matches:
+            stats["cname_matches"] = cname_matches
+        context.manager.update_metadata(context.record)
+
+    def _resolve_cname_chain(self, hostname: str, timeout: int) -> List[str]:
+        if dns is None:
+            return []
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = timeout
+        resolver.lifetime = timeout
+        chain: List[str] = []
+        current = hostname
+        seen = set()
+        for _ in range(self.MAX_CNAME_DEPTH):
+            try:
+                answers = resolver.resolve(current, "CNAME")
+            except Exception:
+                break
+            next_name: Optional[str] = None
+            for rdata in answers:
+                cname = str(rdata).rstrip(".").lower()
+                if cname in seen:
+                    continue
+                next_name = cname
+                chain.append(cname)
+                seen.add(cname)
+                break
+            if not next_name:
+                break
+            current = next_name
+        return chain
+
+    @staticmethod
+    def _match_providers(cname_chain: List[str]) -> Set[str]:
+        providers: Set[str] = set()
+        if not cname_chain:
+            return providers
+        for fp in TAKEOVER_FINGERPRINTS:
+            patterns = fp.get("cname") or []
+            for pattern in patterns:
+                for cname in cname_chain:
+                    if pattern in cname:
+                        providers.add(fp.get("provider", ""))
+                        break
+        providers.discard("")
+        return providers

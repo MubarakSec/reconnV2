@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from collections import defaultdict
 
+from recon_cli.utils.reporting import resolve_severity, resolve_finding_type
+
 __all__ = [
     "ReportFormat",
     "ReportConfig",
@@ -123,12 +125,22 @@ class ReportData:
     @classmethod
     def from_job(cls, job_data: Dict[str, Any]) -> "ReportData":
         """Create from job data."""
+        def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+            if not value:
+                return None
+            if isinstance(value, str) and value.endswith("Z"):
+                value = value.replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(value) if isinstance(value, str) else None
+            except ValueError:
+                return None
+
         return cls(
-            job_id=job_data.get("id", ""),
-            job_name=job_data.get("name", ""),
+            job_id=job_data.get("id") or job_data.get("job_id", ""),
+            job_name=job_data.get("name") or job_data.get("job_name", ""),
             targets=job_data.get("targets", []),
-            start_time=datetime.fromisoformat(job_data["start_time"]) if "start_time" in job_data else None,
-            end_time=datetime.fromisoformat(job_data["end_time"]) if "end_time" in job_data else None,
+            start_time=_parse_dt(job_data.get("start_time")),
+            end_time=_parse_dt(job_data.get("end_time")),
             findings=job_data.get("findings", []),
             hosts=job_data.get("hosts", []),
             stages=job_data.get("stages", {}),
@@ -148,7 +160,7 @@ class ReportData:
         """Get finding counts by severity."""
         counts: Dict[str, int] = defaultdict(int)
         for finding in self.findings:
-            severity = finding.get("severity", "info")
+            severity = resolve_severity(finding)
             counts[severity] += 1
         return dict(counts)
     
@@ -185,7 +197,7 @@ class ReportGenerator:
         if self.config.severity_filter:
             data.findings = [
                 f for f in data.findings
-                if f.get("severity") in self.config.severity_filter
+                if resolve_severity(f) in self.config.severity_filter
             ]
         
         if self.config.max_findings:
@@ -267,7 +279,12 @@ class ReportGenerator:
         grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         
         for finding in findings:
-            key = finding.get(group_by, "other")
+            if group_by == "severity":
+                key = resolve_severity(finding)
+            elif group_by == "type":
+                key = resolve_finding_type(finding)
+            else:
+                key = finding.get(group_by, "other")
             if isinstance(key, list):
                 key = key[0] if key else "other"
             grouped[str(key)].append(finding)
@@ -540,13 +557,22 @@ class HTMLReportGenerator:
         
         rows = []
         for finding in findings:
-            severity = finding.get("severity", "info")
+            severity = resolve_severity(finding)
+            title = finding.get("title") or finding.get("description") or resolve_finding_type(finding)
+            host = (
+                finding.get("host")
+                or finding.get("hostname")
+                or finding.get("target")
+                or finding.get("url")
+                or "N/A"
+            )
+            description = finding.get("description", "")
             rows.append(f"""
             <tr>
                 <td><span class="severity-badge severity-{severity}">{severity}</span></td>
-                <td>{finding.get('title', finding.get('type', 'Unknown'))}</td>
-                <td>{finding.get('host', finding.get('target', 'N/A'))}</td>
-                <td>{finding.get('description', '')[:100]}...</td>
+                <td>{title}</td>
+                <td>{host}</td>
+                <td>{description[:100]}...</td>
             </tr>
 """)
         
@@ -712,7 +738,7 @@ class MarkdownReportGenerator:
         grouped: Dict[str, List[Dict]] = defaultdict(list)
         
         for finding in data.findings:
-            severity = finding.get("severity", "info")
+            severity = resolve_severity(finding)
             grouped[severity].append(finding)
         
         for severity in severity_order:
@@ -722,8 +748,14 @@ class MarkdownReportGenerator:
             md += f"\n### {severity.upper()} ({len(grouped[severity])})\n\n"
             
             for finding in grouped[severity]:
-                title = finding.get("title", finding.get("type", "Unknown"))
-                host = finding.get("host", finding.get("target", "N/A"))
+                title = finding.get("title") or finding.get("description") or resolve_finding_type(finding)
+                host = (
+                    finding.get("host")
+                    or finding.get("hostname")
+                    or finding.get("target")
+                    or finding.get("url")
+                    or "N/A"
+                )
                 desc = finding.get("description", "No description")
                 
                 md += f"""#### {title}
@@ -776,7 +808,12 @@ class CSVExporter:
         writer.writeheader()
         
         for finding in data.findings:
-            writer.writerow(finding)
+            row = dict(finding)
+            row["severity"] = resolve_severity(finding)
+            row["type"] = resolve_finding_type(finding)
+            row.setdefault("title", finding.get("description") or row["type"])
+            row.setdefault("host", finding.get("hostname") or finding.get("url") or finding.get("target"))
+            writer.writerow(row)
         
         return output.getvalue()
 

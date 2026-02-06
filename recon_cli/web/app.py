@@ -16,6 +16,7 @@ except ImportError:
 from recon_cli import config
 from recon_cli.jobs.manager import JobManager
 from recon_cli.utils.jsonl import read_jsonl
+from recon_cli.utils.reporting import categorize_results, is_finding
 
 # Paths
 WEB_DIR = Path(__file__).parent
@@ -75,13 +76,7 @@ def get_recent_jobs(limit: int = 10) -> List[Dict[str, Any]]:
 
 def get_job_results(job_id: str) -> Dict[str, List[Dict]]:
     """Get categorized results for a job."""
-    results = {
-        "hosts": [],
-        "urls": [],
-        "vulnerabilities": [],
-        "secrets": [],
-        "other": [],
-    }
+    results = {"hosts": [], "urls": [], "vulnerabilities": [], "secrets": [], "other": []}
     
     manager = JobManager()
     record = manager.load_job(job_id)
@@ -92,18 +87,12 @@ def get_job_results(job_id: str) -> Dict[str, List[Dict]]:
     if not results_file.exists():
         return results
     
-    for item in read_jsonl(results_file):
-        item_type = item.get("type", "other")
-        if item_type == "host":
-            results["hosts"].append(item)
-        elif item_type == "url":
-            results["urls"].append(item)
-        elif item_type in ["vulnerability", "finding", "nuclei"]:
-            results["vulnerabilities"].append(item)
-        elif item_type in ["secret", "credential"]:
-            results["secrets"].append(item)
-        else:
-            results["other"].append(item)
+    categorized = categorize_results(read_jsonl(results_file), include_secret_in_findings=False)
+    results["hosts"] = categorized["hosts"]
+    results["urls"] = categorized["urls"]
+    results["secrets"] = categorized["secrets"]
+    results["vulnerabilities"] = categorized["findings"]
+    results["other"] = categorized["other"]
     
     return results
 
@@ -280,6 +269,8 @@ if WEB_AVAILABLE:
                 record = manager.load_job(jid)
                 if record and record.paths.results_jsonl.exists():
                     for item in read_jsonl(record.paths.results_jsonl):
+                        if not is_finding(item):
+                            continue
                         item["job_id"] = jid
                         findings.append(item)
             
@@ -336,6 +327,7 @@ if WEB_AVAILABLE:
             
             # Build job data
             job_data = {
+                "id": job_id,
                 "job_id": job_id,
                 "targets": [record.spec.target] if hasattr(record.spec, 'target') else [],
                 "findings": [],
@@ -345,12 +337,9 @@ if WEB_AVAILABLE:
             }
             
             if record.paths.results_jsonl.exists():
-                for item in read_jsonl(record.paths.results_jsonl):
-                    item_type = item.get("type", "other")
-                    if item_type == "host":
-                        job_data["hosts"].append(item)
-                    else:
-                        job_data["findings"].append(item)
+                categorized = categorize_results(read_jsonl(record.paths.results_jsonl), include_secret_in_findings=True)
+                job_data["hosts"].extend(categorized["hosts"])
+                job_data["findings"].extend(categorized["findings"])
             
             if executive:
                 gen = ExecutiveSummaryGenerator()
@@ -358,9 +347,9 @@ if WEB_AVAILABLE:
                 return summary.to_dict()
             else:
                 report_format = ReportFormat(format.lower())
-                config = ReportConfig(format=report_format)
+                config = ReportConfig()
                 generator = ReportGenerator(config)
-                content = generator.generate(job_data)
+                content = await generator.generate(job_data, format=report_format)
                 
                 if format == "json":
                     return json.loads(content)

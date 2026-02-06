@@ -31,6 +31,66 @@ __all__ = [
 ]
 
 
+FINDING_TYPES = {
+    "finding",
+    "vulnerability",
+    "vuln",
+    "idor_suspect",
+    "nuclei",
+    "secret",
+    "credential",
+}
+
+
+def _resolve_severity(finding: Dict[str, Any]) -> str:
+    severity = str(finding.get("severity") or "").lower()
+    if severity:
+        return severity
+    priority = str(finding.get("priority") or "").lower()
+    if priority in {"critical", "high", "medium", "low", "info"}:
+        return priority
+    score = finding.get("score")
+    try:
+        score_value = float(score)
+    except (TypeError, ValueError):
+        score_value = None
+    if score_value is not None:
+        if score_value >= 90:
+            return "critical"
+        if score_value >= 75:
+            return "high"
+        if score_value >= 50:
+            return "medium"
+        if score_value >= 20:
+            return "low"
+    return "info"
+
+
+def _resolve_finding_type(finding: Dict[str, Any]) -> str:
+    finding_type = finding.get("finding_type")
+    if isinstance(finding_type, str) and finding_type:
+        return finding_type
+    raw_type = finding.get("type", "unknown")
+    if raw_type != "finding":
+        return raw_type
+    tags = set(finding.get("tags", []) or [])
+    source = str(finding.get("source", "") or "").lower()
+    if "sqli" in tags or source == "sqlmap":
+        return "sql_injection"
+    if "xss" in tags or source == "dalfox":
+        return "xss"
+    if "takeover" in tags or source == "takeover-check":
+        return "subdomain_takeover"
+    if "secret" in tags or source == "secrets-static":
+        return "exposed_secret"
+    return raw_type
+
+
+def _is_finding_entry(finding: Dict[str, Any]) -> bool:
+    raw_type = finding.get("type")
+    return bool(finding.get("finding_type")) or raw_type in FINDING_TYPES
+
+
 class RiskLevel(Enum):
     """Risk assessment levels."""
     
@@ -93,13 +153,13 @@ class RiskScore:
         factors = []
         
         for finding in findings:
-            severity = finding.get("severity", "info")
+            severity = _resolve_severity(finding)
             weight = severity_weights.get(severity, 0.5)
             total_weight += weight
             
             # Track significant factors
             if severity in ("critical", "high"):
-                title = finding.get("title", finding.get("type", "Unknown"))
+                title = finding.get("title") or finding.get("description") or _resolve_finding_type(finding)
                 factors.append(f"{severity.title()}: {title}")
         
         # Normalize score (logarithmic scale to prevent extreme values)
@@ -154,8 +214,8 @@ class KeyFinding:
     def from_finding(cls, finding: Dict[str, Any]) -> "KeyFinding":
         """Create from raw finding."""
         return cls(
-            title=finding.get("title", finding.get("type", "Unknown")),
-            severity=finding.get("severity", "info"),
+            title=finding.get("title") or finding.get("description") or _resolve_finding_type(finding),
+            severity=_resolve_severity(finding),
             impact=finding.get("impact", finding.get("description", "No impact description")),
             affected_assets=[finding.get("host", finding.get("target", "Unknown"))],
             recommendation=finding.get("remediation", finding.get("recommendation", "")),
@@ -462,14 +522,15 @@ class ExecutiveSummaryGenerator:
         title: Optional[str] = None,
     ) -> ExecutiveSummary:
         """Generate executive summary from scan data."""
-        findings = data.get("findings", [])
+        raw_findings = data.get("findings", [])
+        findings = [finding for finding in raw_findings if isinstance(finding, dict) and _is_finding_entry(finding)]
         hosts = data.get("hosts", [])
         targets = data.get("targets", [])
         
         # Calculate severity counts
         severity_counts: Dict[str, int] = defaultdict(int)
         for finding in findings:
-            severity = finding.get("severity", "info")
+            severity = _resolve_severity(finding)
             severity_counts[severity] += 1
         
         # Calculate risk score
@@ -478,7 +539,8 @@ class ExecutiveSummaryGenerator:
         # Extract key findings (critical and high severity)
         key_findings = []
         for finding in findings:
-            if finding.get("severity") in ("critical", "high"):
+            severity = _resolve_severity(finding)
+            if severity in ("critical", "high"):
                 key_findings.append(KeyFinding.from_finding(finding))
         
         # Sort by severity
@@ -541,7 +603,7 @@ class ExecutiveSummaryGenerator:
         # Analyze finding types
         finding_types: Dict[str, int] = defaultdict(int)
         for finding in findings:
-            finding_type = finding.get("type", "unknown")
+            finding_type = _resolve_finding_type(finding)
             finding_types[finding_type] += 1
         
         # Generate recommendations based on patterns

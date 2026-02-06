@@ -45,6 +45,11 @@ class AuthMatrixStage(Stage):
             context.logger.info("AuthMatrix stage: no URLs to evaluate")
             return
         runtime = context.runtime_config
+        limiter = context.get_rate_limiter(
+            "auth_matrix",
+            rps=float(getattr(runtime, "auth_matrix_rps", 0)),
+            per_host=float(getattr(runtime, "auth_matrix_per_host_rps", 0)),
+        )
         tokens: List[Tuple[str, Optional[str]]] = [("anon", None)]
         if getattr(runtime, "idor_token_a", None):
             tokens.append(("token-a", runtime.idor_token_a))
@@ -67,7 +72,7 @@ class AuthMatrixStage(Stage):
             records: List[AuthRecord] = []
             baseline_data: Dict[str, Dict[str, object]] = {}
             for auth_label, token in tokens:
-                data = self._fetch(session, context, url, auth_label, token, timeout, verify_tls)
+                data = self._fetch(session, context, url, auth_label, token, timeout, verify_tls, limiter)
                 if not data:
                     continue
                 stats["tests"] += 1
@@ -122,6 +127,7 @@ class AuthMatrixStage(Stage):
         token: Optional[str],
         timeout: int,
         verify_tls: bool,
+        limiter=None,
     ) -> Optional[Dict[str, object]]:
         headers = {"User-Agent": "recon-cli auth-matrix"}
         if token:
@@ -132,11 +138,17 @@ class AuthMatrixStage(Stage):
                 headers["If-None-Match"] = cache_entry["etag"]
             if cache_entry.get("last_modified"):
                 headers["If-Modified-Since"] = cache_entry["last_modified"]
+        if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+            return None
         try:
             resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
         except Exception as exc:
             context.logger.debug("AuthMatrix request failed for %s (%s): %s", url, auth_label, exc)
+            if limiter:
+                limiter.on_error(url)
             return None
+        if limiter:
+            limiter.on_response(url, resp.status_code)
         if resp.status_code == 304 and not context.force:
             return None
         body = resp.content or b""
@@ -237,6 +249,7 @@ class AuthMatrixStage(Stage):
         involved: Sequence[str],
         record_map: Dict[str, AuthRecord],
     ) -> Dict[str, object]:
+        hostname = urlparse(url).hostname
         details = {
             label: {
                 "status": record_map[label].status,
@@ -246,9 +259,16 @@ class AuthMatrixStage(Stage):
             for label in involved
         }
         return {
-            "type": "auth_matrix_issue",
+            "type": "finding",
+            "finding_type": "auth_matrix_issue",
             "source": "auth-matrix",
+            "hostname": hostname,
             "url": url,
+            "description": f"Auth matrix mismatch: {reason}",
             "reason": reason,
             "details": details,
+            "tags": ["auth", "auth-matrix", reason],
+            "score": 60,
+            "priority": "medium",
+            "severity": "medium",
         }

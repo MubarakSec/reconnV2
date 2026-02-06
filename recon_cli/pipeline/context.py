@@ -35,6 +35,8 @@ class PipelineContext:
     _cache_dirty: bool = field(init=False, default=False)
     _simple_mode: bool = field(init=False, default=False)
     _data_store: Dict[str, object] = field(init=False, default_factory=dict)
+    _rate_limiters: Dict[str, object] = field(init=False, default_factory=dict)
+    _auth_manager: object = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.record is None:
@@ -82,6 +84,18 @@ class PipelineContext:
         self.executor = CommandExecutor(self.logger)
         pattern = self.runtime_config.url_path_allow_regex
         self._url_allow_pattern = re.compile(pattern) if pattern else None
+        try:
+            from recon_cli.utils.auth import build_auth_manager
+
+            self._auth_manager = build_auth_manager(
+                self.runtime_config,
+                logger=self.logger,
+                record=self.record,
+                manager=self.manager,
+                default_host=spec.target,
+            )
+        except Exception:
+            self._auth_manager = None
 
         def _allow_payload(payload: Dict[str, object]) -> bool:
             url_value = payload.get('url')
@@ -108,6 +122,43 @@ class PipelineContext:
     def get_data(self, key: str, default: object = None) -> object:
         return self._data_store.get(key, default)
 
+    def get_rate_limiter(
+        self,
+        name: str,
+        *,
+        rps: float,
+        per_host: float,
+        burst: int | None = None,
+        cooldown_429: float | None = None,
+        cooldown_error: float | None = None,
+    ):
+        if rps <= 0 and per_host <= 0:
+            return None
+        existing = self._rate_limiters.get(name)
+        if existing:
+            return existing
+        rps_value = float(rps) if rps > 0 else float(per_host)
+        per_host_value = float(per_host) if per_host > 0 else rps_value
+        if rps_value <= 0:
+            rps_value = max(per_host_value, 1.0)
+        if per_host_value <= 0:
+            per_host_value = max(rps_value, 1.0)
+        burst_size = int(burst) if burst and burst > 0 else max(1, int(max(rps_value, per_host_value) * 2))
+        from recon_cli.utils.rate_limiter import RateLimitConfig, RateLimiter
+
+        config = RateLimitConfig(
+            requests_per_second=rps_value,
+            per_host_limit=per_host_value,
+            burst_size=burst_size,
+        )
+        if cooldown_429 is not None:
+            config.cooldown_on_429 = float(cooldown_429)
+        if cooldown_error is not None:
+            config.cooldown_on_error = float(cooldown_error)
+        limiter = RateLimiter(config)
+        self._rate_limiters[name] = limiter
+        return limiter
+
     def url_allowed(self, url: str) -> bool:
         if not url:
             return False
@@ -118,6 +169,41 @@ class PipelineContext:
         except ValueError:
             return False
         return bool(self._url_allow_pattern.search(path))
+
+    def auth_enabled(self) -> bool:
+        return bool(self._auth_manager)
+
+    def auth_headers(self, base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        if self._auth_manager:
+            try:
+                return self._auth_manager.prepare_headers(base)
+            except Exception:
+                return base or {}
+        return base or {}
+
+    def auth_session(self, url: Optional[str] = None):
+        if self._auth_manager:
+            try:
+                return self._auth_manager.get_session(url)
+            except Exception:
+                return None
+        return None
+
+    def auth_cookies(self, default_domain: Optional[str] = None) -> List[Dict[str, object]]:
+        if self._auth_manager:
+            try:
+                return self._auth_manager.export_cookies(default_domain)
+            except Exception:
+                return []
+        return []
+
+    def auth_cookie_header(self) -> Optional[str]:
+        if self._auth_manager:
+            try:
+                return self._auth_manager.cookie_header()
+            except Exception:
+                return None
+        return None
 
     def get_cache_entry(self, url: str) -> Optional[Dict[str, str]]:
         return self._delta_cache.get(url)
@@ -179,4 +265,9 @@ class PipelineContext:
     def close(self) -> None:
         if self._cache_dirty:
             fs.write_json(self._cache_path, self._delta_cache)
+        if self._auth_manager:
+            try:
+                self._auth_manager.close()
+            except Exception:
+                pass
         silence_logger(self.logger)

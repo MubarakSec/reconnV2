@@ -24,9 +24,6 @@ class SecretsDetectionStage(Stage):
         items = read_jsonl(context.record.paths.results_jsonl)
         if not items:
             return
-        detector = SecretsDetector(
-            timeout=context.runtime_config.secrets_timeout, verify_tls=bool(context.runtime_config.verify_tls)
-        )
         candidates: List[tuple[int, str, str]] = []  # (score, url, host)
         for entry in items:
             if entry.get("type") != "url":
@@ -49,6 +46,12 @@ class SecretsDetectionStage(Stage):
         candidates.sort(reverse=True, key=lambda item: item[0])
         max_files = context.runtime_config.secrets_max_files
         selected_urls = [url for _, url, _ in candidates[:max_files]]
+        session = context.auth_session(selected_urls[0] if selected_urls else None)
+        detector = SecretsDetector(
+            timeout=context.runtime_config.secrets_timeout,
+            verify_tls=bool(context.runtime_config.verify_tls),
+            session=session,
+        )
         results = detector.scan_urls(selected_urls, max_files)
         if not results:
             context.logger.info("Secrets detector found no matches")
@@ -85,6 +88,7 @@ class SecretsDetectionStage(Stage):
                 context.results.append(
                     {
                         "type": "finding",
+                        "finding_type": "exposed_secret",
                         "source": "secrets-static",
                         "hostname": host,
                         "url": url,
@@ -99,6 +103,7 @@ class SecretsDetectionStage(Stage):
                         "tags": ["secret", "static", match.confidence],
                         "score": score,
                         "priority": priority,
+                        "severity": self._severity_from_confidence(match.confidence),
                     }
                 )
 
@@ -120,12 +125,7 @@ class SecretsDetectionStage(Stage):
                         entry["score"] = max(int(entry.get("score", 0)), boosted_urls[entry_url])
                         entry["priority"] = enrich_utils.classify_priority(entry["score"])
                 updated_entries.append(entry)
-            tmp_path = results_path.with_suffix(".tmp")
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                for entry in updated_entries:
-                    json.dump(entry, handle, separators=(",", ":"), ensure_ascii=True)
-                    handle.write("\n")
-            tmp_path.replace(results_path)
+            context.results.replace_all(updated_entries)
 
         stats = context.record.metadata.stats.setdefault("secrets", {})
         stats.update(
@@ -146,3 +146,11 @@ class SecretsDetectionStage(Stage):
         if confidence == "medium":
             return 80, "high"
         return 55, "medium"
+
+    @staticmethod
+    def _severity_from_confidence(confidence: str) -> str:
+        if confidence == "high":
+            return "critical"
+        if confidence == "medium":
+            return "high"
+        return "medium"

@@ -65,35 +65,52 @@ class DependencyResolver:
     يحلل المراحل ويحدد أي منها يمكن تشغيله بالتوازي.
     """
     
-    # تعريف التبعيات المعروفة
+    # تعريف التبعيات المعروفة (تتوافق مع أسماء المراحل الفعلية)
     STAGE_DEPENDENCIES = {
-        # المراحل الأولية ليس لها تبعيات
-        "dns_resolution": set(),
-        "subdomain_enum": set(),
-        
-        # بعد enumeration
-        "http_probe": {"subdomain_enum", "dns_resolution"},
-        "port_scan": {"subdomain_enum"},
-        
-        # بعد HTTP probe
-        "tech_detect": {"http_probe"},
-        "crawler": {"http_probe"},
-        "screenshot": {"http_probe"},
-        
-        # بعد crawling
-        "secrets_scan": {"crawler"},
-        "js_analysis": {"crawler"},
-        "backup_hunter": {"crawler"},
-        
-        # تحليل
-        "vuln_scan": {"tech_detect"},
-        "takeover": {"dns_resolution", "http_probe"},
-        
-        # نهائية
-        "correlation": {"secrets_scan", "js_analysis", "vuln_scan"},
-        "reporting": {"correlation"},
+        # البداية
+        "normalize_scope": set(),
+        "passive_enumeration": {"normalize_scope"},
+        "dedupe_canonicalize": {"passive_enumeration"},
+
+        # بعد dedupe
+        "dns_resolve": {"dedupe_canonicalize"},
+        "http_probe": {"dedupe_canonicalize"},
+        "nmap_scan": {"dedupe_canonicalize"},
+
+        # بعد DNS/HTTP
+        "asset_enrichment": {"dns_resolve"},
+        "takeover_check": {"dns_resolve", "http_probe"},
+
+        # Tagging/scoring (تحتاج نتائج المراحل السابقة كاملة)
+        "scoring_tagging": {"http_probe", "asset_enrichment", "takeover_check", "nmap_scan"},
+        "security_headers": {"scoring_tagging"},
+        "tls_hygiene": {"security_headers"},
+
+        # مراحل تحليل/هجوم لاحقة (مرتبة لتقليل الضغط على الهدف)
+        "auth_discovery": {"scoring_tagging"},
+        "waf_probe": {"auth_discovery"},
+        "idor_probe": {"waf_probe"},
+        "auth_matrix": {"idor_probe"},
+        "fuzzing": {"auth_matrix"},
+        "active_intelligence": {"fuzzing"},
+        "secrets_detection": {"active_intelligence"},
+        "runtime_crawl": {"secrets_detection"},
+        "js_intelligence": {"runtime_crawl"},
+        "api_recon": {"js_intelligence"},
+        "param_mining": {"api_recon"},
+        "vuln_scan": {"param_mining"},
+        "post_scoring": {"vuln_scan"},
+        "trim_results": {"post_scoring"},
+        "correlation": {"trim_results"},
+        "learning": {"correlation"},
+        "scanner": {"learning"},
+        "screenshots": {"scanner"},
+        "finalize": {"screenshots"},
     }
     
+    def __init__(self, dependency_map: Optional[Dict[str, Set[str]]] = None) -> None:
+        self.dependency_map = dependency_map or self.STAGE_DEPENDENCIES
+
     def resolve(self, stage_names: List[str]) -> List[List[str]]:
         """
         حل التبعيات وإرجاع مجموعات التنفيذ.
@@ -113,7 +130,7 @@ class DependencyResolver:
             # Find stages with satisfied dependencies
             ready = []
             for stage in remaining:
-                deps = self.STAGE_DEPENDENCIES.get(stage, set())
+                deps = self.dependency_map.get(stage, set())
                 # Only consider dependencies that are in our stage list
                 relevant_deps = deps & available
                 
@@ -174,7 +191,7 @@ class ParallelStageExecutor:
         # Create stage nodes
         nodes = {}
         for name, stage in self.stages.items():
-            deps = self.resolver.STAGE_DEPENDENCIES.get(name, set())
+            deps = self.resolver.dependency_map.get(name, set())
             nodes[name] = StageNode(
                 name=name,
                 stage=stage,

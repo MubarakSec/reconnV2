@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional
@@ -39,6 +40,7 @@ class ResultsTracker:
     path: Path
     allow: Optional[Callable[[Dict[str, object]], bool]] = None
     _writer: JsonlWriter = field(init=False)
+    _lock: threading.RLock = field(init=False, default_factory=threading.RLock)
     _seen: set[tuple] = field(default_factory=set)
     stats: Counter = field(default_factory=Counter)
     _records: Dict[tuple, Dict[str, object]] = field(init=False, default_factory=dict)
@@ -73,25 +75,26 @@ class ResultsTracker:
                     self.stats[f"type:{ptype}"] += 1
 
     def append(self, payload: Dict[str, object]) -> bool:
-        if self.allow and not self.allow(payload):
-            return False
-        key = dedupe_key(payload)
-        if key in self._seen:
-            merged = self._merge_entries(self._records.get(key, {}), payload)
-            if merged != self._records.get(key):
-                self._records[key] = merged
-                self._rewrite_all()
+        with self._lock:
+            if self.allow and not self.allow(payload):
+                return False
+            key = dedupe_key(payload)
+            if key in self._seen:
+                merged = self._merge_entries(self._records.get(key, {}), payload)
+                if merged != self._records.get(key):
+                    self._records[key] = merged
+                    self._rewrite_all()
+                return True
+            self._seen.add(key)
+            payload.setdefault("timestamp", time_utils.iso_now())
+            self._records[key] = payload
+            self._order.append(key)
+            with self._writer as writer:
+                writer.write(payload)
+            ptype = payload.get("type")
+            if ptype:
+                self.stats[f"type:{ptype}"] += 1
             return True
-        self._seen.add(key)
-        payload.setdefault("timestamp", time_utils.iso_now())
-        self._records[key] = payload
-        self._order.append(key)
-        with self._writer as writer:
-            writer.write(payload)
-        ptype = payload.get("type")
-        if ptype:
-            self.stats[f"type:{ptype}"] += 1
-        return True
 
     def extend(self, payloads: Iterable[Dict[str, object]]) -> int:
         added = 0
@@ -100,8 +103,45 @@ class ResultsTracker:
                 added += 1
         return added
 
+    def replace_all(self, payloads: Iterable[Dict[str, object]]) -> None:
+        """Replace all tracked results with the provided payloads."""
+        with self._lock:
+            self._seen.clear()
+            self._records.clear()
+            self._order.clear()
+            self.stats = Counter()
+            has_schema = False
+
+            for payload in payloads:
+                if not isinstance(payload, dict):
+                    continue
+                key = dedupe_key(payload)
+                if key in self._seen:
+                    merged = self._merge_entries(self._records.get(key, {}), payload)
+                    if merged != self._records.get(key):
+                        self._records[key] = merged
+                    continue
+                self._seen.add(key)
+                self._records[key] = payload
+                self._order.append(key)
+                ptype = payload.get("type")
+                if ptype:
+                    self.stats[f"type:{ptype}"] += 1
+                if ptype == "meta" and payload.get("schema_version"):
+                    has_schema = True
+
+            if not has_schema:
+                schema_key = ("meta", "1.0.0")
+                payload = {"type": "meta", "schema_version": "1.0.0", "timestamp": time_utils.iso_now()}
+                self._seen.add(schema_key)
+                self._records[schema_key] = payload
+                self._order.insert(0, schema_key)
+
+            self._rewrite_all()
+
     def to_dict(self) -> Dict[str, int]:
-        return dict(self.stats)
+        with self._lock:
+            return dict(self.stats)
 
     def _ensure_schema_record(self) -> None:
         schema_key = ("meta", "1.0.0")

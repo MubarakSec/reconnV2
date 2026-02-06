@@ -22,6 +22,8 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 from collections import defaultdict
 
+from recon_cli.utils.reporting import resolve_severity
+
 __all__ = [
     "ChartType",
     "ChartConfig",
@@ -427,7 +429,7 @@ class ChartGenerator:
             timestamp = item.get("timestamp")
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp)
-            severity = item.get("severity", "info")
+            severity = resolve_severity(item)
             severity_data[severity].append((timestamp, 1))
         
         for severity, points in severity_data.items():
@@ -450,7 +452,7 @@ class ChartGenerator:
         counts: Dict[str, int] = defaultdict(int)
         
         for finding in findings:
-            severity = finding.get("severity", "info")
+            severity = resolve_severity(finding)
             counts[severity] += 1
         
         severity_colors = {
@@ -520,7 +522,7 @@ class ChartGenerator:
         type_counts: Dict[str, int] = defaultdict(int)
         
         for finding in findings:
-            finding_type = finding.get("type", "unknown")
+            finding_type = finding.get("finding_type") or finding.get("type", "unknown")
             type_counts[finding_type] += 1
         
         # Sort by count

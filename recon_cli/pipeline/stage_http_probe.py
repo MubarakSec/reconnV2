@@ -222,7 +222,10 @@ class HttpProbeStage(Stage):
                             conn = http.client.HTTPSConnection(host, port=port, timeout=5, context=ssl_ctx)
                         else:
                             conn = http.client.HTTPConnection(host, port=port, timeout=5)
-                        headers = {"User-Agent": "recon-cli"}
+                        headers = context.auth_headers({"User-Agent": "recon-cli"})
+                        cookie_header = context.auth_cookie_header()
+                        if cookie_header and "cookie" not in {k.lower() for k in headers}:
+                            headers["Cookie"] = cookie_header
                         cache_entry = context.get_cache_entry(url)
                         if cache_entry and not context.force:
                             if cache_entry.get("etag"):
@@ -381,7 +384,10 @@ class HttpProbeStage(Stage):
                         conn = http.client.HTTPSConnection(host, timeout=5, context=ssl.create_default_context())
                     else:
                         conn = http.client.HTTPConnection(host, timeout=5)
-                    headers = {"User-Agent": "recon-cli probe++"}
+                    headers = context.auth_headers({"User-Agent": "recon-cli probe++"})
+                    cookie_header = context.auth_cookie_header()
+                    if cookie_header and "cookie" not in {k.lower() for k in headers}:
+                        headers["Cookie"] = cookie_header
                     cache_entry = context.get_cache_entry(url)
                     if cache_entry and not context.force:
                         if cache_entry.get("etag"):

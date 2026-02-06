@@ -35,9 +35,17 @@ class WafProbeStage(Stage):
             return
         max_urls = int(getattr(context.runtime_config, "waf_probe_max_urls", 25))
         timeout = int(getattr(context.runtime_config, "waf_probe_timeout", 8))
+        runtime = context.runtime_config
+        limiter = context.get_rate_limiter(
+            "waf_probe",
+            rps=float(getattr(runtime, "waf_probe_rps", 0)),
+            per_host=float(getattr(runtime, "waf_probe_per_host_rps", 0)),
+        )
         findings = 0
         for url in candidates[:max_urls]:
             try:
+                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+                    continue
                 resp_default = requests.get(
                     url,
                     timeout=timeout,
@@ -46,8 +54,14 @@ class WafProbeStage(Stage):
                     headers={"User-Agent": "recon-cli waf-probe"},
                 )
             except Exception:
+                if limiter:
+                    limiter.on_error(url)
                 continue
+            if limiter:
+                limiter.on_response(url, resp_default.status_code)
             try:
+                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+                    continue
                 resp_alt = requests.get(
                     url,
                     timeout=timeout,
@@ -61,7 +75,11 @@ class WafProbeStage(Stage):
                     },
                 )
             except Exception:
+                if limiter:
+                    limiter.on_error(url)
                 continue
+            if limiter:
+                limiter.on_response(url, resp_alt.status_code)
             if resp_default.status_code in {403, 429} and resp_alt.status_code not in {403, 429}:
                 finding = {
                     "type": "finding",

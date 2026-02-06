@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import requests
 
@@ -52,7 +52,7 @@ class TakeoverDetector:
         self.timeout = timeout
         self.verify_tls = verify_tls
 
-    def check_host(self, hostname: str) -> Optional[TakeoverFinding]:
+    def check_host(self, hostname: str, providers: Optional[Set[str]] = None) -> Optional[TakeoverFinding]:
         urls = [f"http://{hostname}", f"https://{hostname}"]
         for url in urls:
             try:
@@ -61,6 +61,8 @@ class TakeoverDetector:
                 continue
             body = (resp.text or "")[:2000]
             for fp in TAKEOVER_FINGERPRINTS:
+                if providers and fp.get("provider") not in providers:
+                    continue
                 for snippet in fp.get("responses", []):
                     if snippet.lower() in body.lower():
                         return TakeoverFinding(hostname=hostname, provider=fp["provider"], evidence=snippet)

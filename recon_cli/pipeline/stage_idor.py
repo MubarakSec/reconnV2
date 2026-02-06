@@ -63,6 +63,11 @@ class IDORStage(Stage):
             context.logger.info("IDOR stage: no suitable endpoints found")
             return
         runtime = context.runtime_config
+        limiter = context.get_rate_limiter(
+            "idor_probe",
+            rps=float(getattr(runtime, "idor_rps", 0)),
+            per_host=float(getattr(runtime, "idor_per_host_rps", 0)),
+        )
         tokens: List[Tuple[str, Optional[str]]] = [("anon", None)]
         if getattr(runtime, "idor_token_a", None):
             tokens.append(("token-a", runtime.idor_token_a))
@@ -87,7 +92,16 @@ class IDORStage(Stage):
                 baseline_url = candidate.url
                 baseline_key = (baseline_url, auth_label)
                 if baseline_key not in baseline_cache:
-                    baseline_data = self._fetch(session, context, baseline_url, auth_label, token, timeout, verify_tls)
+                    baseline_data = self._fetch(
+                        session,
+                        context,
+                        baseline_url,
+                        auth_label,
+                        token,
+                        timeout,
+                        verify_tls,
+                        limiter,
+                    )
                     if not baseline_data:
                         continue
                     baseline_cache[baseline_key] = baseline_data
@@ -95,7 +109,16 @@ class IDORStage(Stage):
                     baseline_data = baseline_cache[baseline_key]
                 for variant_url, variant_meta in variants:
                     stats["tests"] += 1
-                    data = self._fetch(session, context, variant_url, auth_label, token, timeout, verify_tls)
+                    data = self._fetch(
+                        session,
+                        context,
+                        variant_url,
+                        auth_label,
+                        token,
+                        timeout,
+                        verify_tls,
+                        limiter,
+                    )
                     if not data:
                         continue
                     if self._is_interesting(baseline_data, data):
@@ -220,7 +243,17 @@ class IDORStage(Stage):
         variants.append("")
         return variants[: self.MAX_VARIANTS_PER_PARAM]
 
-    def _fetch(self, session: "requests.Session", context: PipelineContext, url: str, auth_label: str, token: Optional[str], timeout: int, verify_tls: bool) -> Optional[Dict[str, object]]:
+    def _fetch(
+        self,
+        session: "requests.Session",
+        context: PipelineContext,
+        url: str,
+        auth_label: str,
+        token: Optional[str],
+        timeout: int,
+        verify_tls: bool,
+        limiter=None,
+    ) -> Optional[Dict[str, object]]:
         if not context.url_allowed(url):
             return None
         headers = {"User-Agent": "recon-cli idor"}
@@ -232,11 +265,17 @@ class IDORStage(Stage):
                 headers["If-None-Match"] = cache_entry["etag"]
             if cache_entry.get("last_modified"):
                 headers["If-Modified-Since"] = cache_entry["last_modified"]
+        if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+            return None
         try:
             resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
         except Exception as exc:
             context.logger.debug("IDOR request failed for %s (%s): %s", url, auth_label, exc)
+            if limiter:
+                limiter.on_error(url)
             return None
+        if limiter:
+            limiter.on_response(url, resp.status_code)
         if resp.status_code == 304 and not context.force:
             return None
         body = resp.content or b""

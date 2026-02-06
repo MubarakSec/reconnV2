@@ -78,22 +78,45 @@ class AuthDiscoveryStage(Stage):
         max_urls = int(getattr(context.runtime_config, "auth_discovery_max_urls", 40))
         timeout = int(getattr(context.runtime_config, "auth_discovery_timeout", 10))
         max_forms = int(getattr(context.runtime_config, "auth_discovery_max_forms", 80))
+        runtime = context.runtime_config
+        limiter = context.get_rate_limiter(
+            "auth_discovery",
+            rps=float(getattr(runtime, "auth_discovery_rps", 0)),
+            per_host=float(getattr(runtime, "auth_discovery_per_host_rps", 0)),
+        )
         forms_found = 0
         artifacts: List[Dict[str, object]] = []
         for candidate in candidates[:max_urls]:
             if forms_found >= max_forms:
                 break
             url = candidate["url"]
-            try:
-                resp = requests.get(
-                    url,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    headers={"User-Agent": "recon-cli auth-discovery"},
-                    verify=context.runtime_config.verify_tls,
-                )
-            except Exception:
+            session = context.auth_session(url)
+            headers = context.auth_headers({"User-Agent": "recon-cli auth-discovery"})
+            if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                 continue
+            try:
+                if session:
+                    resp = session.get(
+                        url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers=headers,
+                        verify=context.runtime_config.verify_tls,
+                    )
+                else:
+                    resp = requests.get(
+                        url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers=headers,
+                        verify=context.runtime_config.verify_tls,
+                    )
+            except Exception:
+                if limiter:
+                    limiter.on_error(url)
+                continue
+            if limiter:
+                limiter.on_response(url, resp.status_code)
             content_type = resp.headers.get("Content-Type", "")
             if "text/html" not in content_type and "<form" not in (resp.text or "").lower():
                 continue
