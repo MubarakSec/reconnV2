@@ -165,20 +165,29 @@ class FuzzStage(Stage):
         if not results_path.exists():
             return tags_by_host
         for entry in read_jsonl(results_path):
-            if entry.get("type") != "url":
-                continue
+            entry_type = entry.get("type")
             url_value = entry.get("url")
-            host = entry.get("hostname") or (urlparse(url_value).hostname if url_value else None)
+            host = None
+            if entry_type == "url":
+                host = entry.get("hostname") or (urlparse(url_value).hostname if url_value else None)
+            elif entry_type in {"hostname", "cms"}:
+                host = entry.get("hostname")
             if not host:
                 continue
             for tag in entry.get("tags", []):
                 tags_by_host[host].add(tag)
-            if url_value:
+            if entry_type == "url" and url_value:
                 path = urlparse(url_value).path.lower()
                 if "/api" in path:
                     tags_by_host[host].add("service:api")
                 if any(token in path for token in ("/wp-", "/wp-admin", "/wp-content", "/wp-json", "/xmlrpc.php")):
                     tags_by_host[host].add("cms:wordpress")
+        signals = context.signal_index()
+        for host, host_signals in signals.get("by_host", {}).items():
+            if "cms_drupal" in host_signals:
+                tags_by_host[host].add("cms:drupal")
+            if "cms_joomla" in host_signals:
+                tags_by_host[host].add("cms:joomla")
         return tags_by_host
 
     def _select_wordlist_for_host(self, runtime, host: str, tags: set[str]) -> Path:
@@ -186,6 +195,10 @@ class FuzzStage(Stage):
         candidates: List[Path] = []
         if "cms:wordpress" in tags or "tech:wordpress" in tags:
             candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "wordpress.fuzz.txt")
+        if "cms:drupal" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "drupal.txt")
+        if "cms:joomla" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "joomla.txt")
         if "service:api" in tags:
             candidates.append(base / "Discovery" / "Web-Content" / "api" / "common-api-endpoints.txt")
         if tags.intersection({"surface:login", "surface:password-reset", "surface:register"}):

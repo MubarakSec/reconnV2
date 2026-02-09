@@ -13,6 +13,16 @@ from recon_cli.utils.jsonl import iter_jsonl
 
 
 SUMMARY_TOP = int(os.environ.get("RECON_SUMMARY_TOP", 50))
+STAGE_HEALTH_SIGNALS = {
+    "graphql_recon": ("graphql_detected", "graphql_introspection_enabled"),
+    "vhost_discovery": ("vhost_found",),
+    "subdomain_permute": ("subdomain_permuted",),
+    "cloud_asset_discovery": ("cloud_asset_public", "cloud_asset_exists"),
+    "ct_asn_pivot": ("ct_discovery", "asn_prefix"),
+    "html_form_mining": ("form_discovered",),
+    "cms_scan": ("cms_drupal", "cms_joomla"),
+    "exploit_validation": ("poc_validated", "poc_failed"),
+}
 
 
 def generate_summary(context) -> None:
@@ -30,6 +40,7 @@ def generate_summary(context) -> None:
     counts = Counter()
     status_counter = Counter()
     priority_counter = Counter()
+    signal_counter = Counter()
     noise_count = 0
     top_candidates: List[dict] = []
     top_urls: List[dict] = []
@@ -91,7 +102,11 @@ def generate_summary(context) -> None:
     for entry in iter_jsonl(results_path):
         etype = entry.get("type", "unknown")
         counts[etype] += 1
-        if etype == "url":
+        if etype == "signal":
+            signal_type = entry.get("signal_type")
+            if signal_type:
+                signal_counter[str(signal_type)] += 1
+        elif etype == "url":
             score = int(entry.get("score", 0))
             status = entry.get("status_code")
             if status:
@@ -179,6 +194,13 @@ def generate_summary(context) -> None:
             lines.append(f"Total: {total_duration:.1f}s")
             for stage, duration, status in sorted(durations, key=lambda item: item[1], reverse=True)[:10]:
                 lines.append(f"{stage:20} {duration:6.1f}s ({status})")
+    if STAGE_HEALTH_SIGNALS:
+        lines.append("")
+        lines.append("== Stage Health ==")
+        for stage, signal_types in STAGE_HEALTH_SIGNALS.items():
+            total_signals = sum(signal_counter.get(sig, 0) for sig in signal_types)
+            status = "signals" if total_signals else "no-signals"
+            lines.append(f"{stage:20} {status} ({total_signals})")
     if noise_count:
         metadata.stats["noise_suppressed"] = noise_count
     correlation_stats = getattr(metadata, 'stats', {}).get('correlation') if hasattr(metadata, 'stats') else None

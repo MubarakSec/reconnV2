@@ -20,10 +20,22 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("hostname"), payload.get("ip"))
     if ptype == "url":
         return (ptype, payload.get("url"))
+    if ptype == "api":
+        return (ptype, payload.get("url"), payload.get("hostname"))
+    if ptype == "api_spec":
+        return (ptype, payload.get("url"), payload.get("hostname"))
+    if ptype == "parameter":
+        return (ptype, payload.get("name"), payload.get("source"))
+    if ptype == "form":
+        return (ptype, payload.get("url"), payload.get("action"), payload.get("method"))
+    if ptype == "auth_form":
+        return (ptype, payload.get("url"), payload.get("action"), payload.get("method"))
     if ptype == "asset_enrichment":
         return (ptype, payload.get("hostname"), payload.get("ip"))
     if ptype == "finding":
         return (ptype, payload.get("description"), payload.get("hostname"))
+    if ptype == "cms":
+        return (ptype, payload.get("hostname"), payload.get("cms"), payload.get("source"))
     if ptype == "learning_prediction":
         return (ptype, payload.get("hostname"))
     if ptype == "screenshot":
@@ -38,6 +50,8 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
             payload.get("target"),
             payload.get("source"),
         )
+    if ptype == "ip_prefix":
+        return (ptype, payload.get("prefix"), payload.get("asn"), payload.get("source"))
     if ptype == "meta":
         return (ptype, payload.get("schema_version"))
     return (ptype, payload.get("source"))

@@ -16,6 +16,11 @@ class JSIntelligenceStage(Stage):
     ENDPOINT_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
     RELATIVE_PATTERN = re.compile(r"/(?:api|graphql|v1|v2|v3|v4|auth|oauth|login|logout|register)[^\s\"'<>]*")
     SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
+    AUTH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "register", "password", "reset", "forgot", "auth", "oauth", "sso")
+    ADMIN_HINTS = ("admin", "dashboard", "console", "manage", "staff", "internal", "superuser")
+    ACCOUNT_HINTS = ("account", "profile", "user", "customer", "member")
+    BILLING_HINTS = ("billing", "invoice", "payment", "stripe", "checkout", "subscription", "plan")
+    PII_HINTS = ("ssn", "passport", "token", "secret", "apikey", "api-key", "credit", "card")
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_js_intel", False))
@@ -141,17 +146,43 @@ class JSIntelligenceStage(Stage):
             for endpoint in endpoints:
                 if not context.url_allowed(endpoint):
                     continue
+                parsed = urlparse(endpoint)
+                path = parsed.path.lower()
+                tags = {"js:discovered", "source:js"}
+                if "/api" in path or "/graphql" in path:
+                    tags.add("service:api")
+                if any(hint in path for hint in self.AUTH_HINTS):
+                    tags.add("surface:login")
+                if "reset" in path or "forgot" in path:
+                    tags.add("surface:password-reset")
+                if "register" in path or "signup" in path:
+                    tags.add("surface:register")
+                if any(hint in path for hint in self.ADMIN_HINTS):
+                    tags.add("surface:admin")
+                if any(hint in path for hint in self.ACCOUNT_HINTS):
+                    tags.add("surface:account")
+                if any(hint in path for hint in self.BILLING_HINTS):
+                    tags.add("surface:billing")
+                if any(hint in path for hint in self.PII_HINTS):
+                    tags.add("surface:pii")
+                score = 30
+                if "surface:admin" in tags:
+                    score += 15
+                if "surface:login" in tags or "surface:register" in tags:
+                    score += 10
+                if tags.intersection({"surface:billing", "surface:pii"}):
+                    score += 10
                 payload = {
                     "type": "url",
                     "source": "js-intel",
                     "url": endpoint,
-                    "hostname": urlparse(endpoint).hostname,
-                    "tags": ["js:discovered", "source:js"],
-                    "score": 30,
+                    "hostname": parsed.hostname,
+                    "tags": sorted(tags),
+                    "score": score,
                 }
                 if context.results.append(payload):
                     discovered_urls.append(endpoint)
-                host = urlparse(endpoint).hostname
+                host = parsed.hostname
                 if host:
                     context.emit_signal(
                         "js_endpoint",
@@ -161,7 +192,36 @@ class JSIntelligenceStage(Stage):
                         source="js-intel",
                         tags=["source:js"],
                     )
-                    path = urlparse(endpoint).path.lower()
+                    if tags.intersection({"surface:login", "surface:register", "surface:password-reset"}):
+                        context.emit_signal(
+                            "auth_surface",
+                            "url",
+                            endpoint,
+                            confidence=0.5,
+                            source="js-intel",
+                            tags=sorted(tags),
+                            evidence={"url": endpoint},
+                        )
+                    if "surface:admin" in tags:
+                        context.emit_signal(
+                            "admin_surface",
+                            "url",
+                            endpoint,
+                            confidence=0.5,
+                            source="js-intel",
+                            tags=sorted(tags),
+                            evidence={"url": endpoint},
+                        )
+                    if tags.intersection({"surface:billing", "surface:pii", "surface:account"}):
+                        context.emit_signal(
+                            "sensitive_surface",
+                            "url",
+                            endpoint,
+                            confidence=0.4,
+                            source="js-intel",
+                            tags=sorted(tags),
+                            evidence={"url": endpoint},
+                        )
                     if ("/api" in path or "/graphql" in path) and host not in signaled_hosts:
                         context.emit_signal(
                             "api_surface",

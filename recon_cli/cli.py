@@ -402,6 +402,8 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
         ("sqlmap", ["--version"], "install via pipx install sqlmap or apt install sqlmap"),
         ("nmap", ["--version"], "install via apt install nmap"),
         ("wpscan", ["--version"], "install via gem install wpscan"),
+        ("droopescan", ["--version"], "install via pipx install droopescan or pip install droopescan"),
+        ("joomscan", ["--version"], "install via apt install joomscan"),
         ("waybackurls", ["-h"], "install via go install github.com/tomnomnom/waybackurls@latest"),
         ("gau", ["-h"], "install via go install github.com/lc/gau/v2/cmd/gau@latest"),
     ]

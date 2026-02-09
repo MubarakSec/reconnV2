@@ -70,19 +70,23 @@ class DependencyResolver:
         # البداية
         "normalize_scope": set(),
         "passive_enumeration": {"normalize_scope"},
-        "dedupe_canonicalize": {"passive_enumeration"},
+        "subdomain_permute": {"passive_enumeration"},
+        "ct_asn_pivot": {"subdomain_permute"},
+        "dedupe_canonicalize": {"ct_asn_pivot"},
 
         # بعد dedupe
         "dns_resolve": {"dedupe_canonicalize"},
         "http_probe": {"dedupe_canonicalize"},
         "nmap_scan": {"dedupe_canonicalize"},
+        "vhost_discovery": {"http_probe"},
 
         # بعد DNS/HTTP
         "asset_enrichment": {"dns_resolve"},
+        "cloud_asset_discovery": {"asset_enrichment"},
         "takeover_check": {"dns_resolve", "http_probe"},
 
         # Tagging/scoring (تحتاج نتائج المراحل السابقة كاملة)
-        "scoring_tagging": {"http_probe", "asset_enrichment", "takeover_check", "nmap_scan"},
+        "scoring_tagging": {"http_probe", "asset_enrichment", "cloud_asset_discovery", "takeover_check", "nmap_scan", "vhost_discovery"},
         "security_headers": {"scoring_tagging"},
         "tls_hygiene": {"security_headers"},
 
@@ -97,15 +101,19 @@ class DependencyResolver:
         "runtime_crawl": {"secrets_detection"},
         "js_intelligence": {"runtime_crawl"},
         "api_recon": {"js_intelligence"},
-        "param_mining": {"api_recon"},
-        "vuln_scan": {"param_mining"},
-        "post_scoring": {"vuln_scan"},
+        "graphql_recon": {"api_recon"},
+        "param_mining": {"graphql_recon"},
+        "html_form_mining": {"param_mining"},
+        "vuln_scan": {"html_form_mining"},
+        "cms_scan": {"vuln_scan"},
+        "post_scoring": {"cms_scan"},
         "trim_results": {"post_scoring"},
         "correlation": {"trim_results"},
         "learning": {"correlation"},
         "scanner": {"learning"},
         "verify_findings": {"scanner"},
-        "screenshots": {"verify_findings"},
+        "exploit_validation": {"verify_findings"},
+        "screenshots": {"exploit_validation"},
         "finalize": {"screenshots"},
     }
     

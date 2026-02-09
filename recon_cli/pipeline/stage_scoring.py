@@ -53,6 +53,12 @@ class ScoringStage(Stage):
                         tags.add("service:waf")
                     if "api_surface" in host_signals:
                         tags.add("service:api")
+                    if "cms_drupal" in host_signals:
+                        tags.add("cms:drupal")
+                        tags.add("service:cms")
+                    if "cms_joomla" in host_signals:
+                        tags.add("cms:joomla")
+                        tags.add("service:cms")
                     if "auth_surface" in host_signals:
                         tags.add("surface:login")
                     tags.update(rules_engine.apply_rules(entry, self.rules))
@@ -123,15 +129,47 @@ class ScoringStage(Stage):
                 if "service:api" not in tags:
                     tags.add("service:api")
                     score += 10
+            if "graphql_detected" in url_signals:
+                tags.add("api:graphql")
+                score += 10
+            if "graphql_introspection_enabled" in url_signals:
+                tags.add("api:graphql:introspection")
+                score += 15
             if "auth_surface" in url_signals:
                 if "surface:login" not in tags:
                     tags.add("surface:login")
                     score += 15
+            if "admin_surface" in url_signals:
+                tags.add("surface:admin")
+                score += 20
+            if "sensitive_surface" in url_signals:
+                tags.add("surface:sensitive")
+                score += 15
+            if "form_discovered" in url_signals:
+                tags.add("surface:form")
+                score += 5
             if "waf_detected" in host_signals or "waf_detected" in url_signals:
                 tags.add("service:waf")
             if "waf_bypass_possible" in url_signals:
                 tags.add("waf-bypass-possible")
                 score += 15
+            if "vhost_found" in host_signals:
+                tags.add("surface:vhost")
+                score += 10
+            if "cloud_asset_public" in url_signals or "cloud_asset_public" in host_signals:
+                tags.add("cloud:exposed")
+                score += 25
+            if "cms_drupal" in host_signals:
+                tags.add("cms:drupal")
+                tags.add("service:cms")
+                score += 5
+            if "cms_joomla" in host_signals:
+                tags.add("cms:joomla")
+                tags.add("service:cms")
+                score += 5
+            if "ct_discovery" in host_signals:
+                tags.add("source:ct")
+                score += 5
             if "verified_live" in url_signals:
                 tags.add("verified:live")
                 score += 10

@@ -52,7 +52,7 @@ main_menu() {
     echo -e "${WHITE}║${NC} ${GREEN}[2]${NC} 🎯 فحص سلبي (Passive Scan)        ${WHITE}║${NC}"
     echo -e "${WHITE}║${NC} ${GREEN}[3]${NC} 🚀 فحص شامل (Full Scan)           ${WHITE}║${NC}"
     echo -e "${WHITE}║${NC} ${GREEN}[4]${NC} 🔬 فحص عميق (Deep Scan)           ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[5]${NC} 🐛 فحص Bug Bounty                 ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[5]${NC} 🐛 فحص Bug Bounty (محسّن)         ${WHITE}║${NC}"
     echo -e "${WHITE}║${NC} ${GREEN}[6]${NC} 🕵️  فحص خفي (Stealth)              ${WHITE}║${NC}"
     echo -e "${WHITE}║${NC} ${GREEN}[7]${NC} 📱 فحص API فقط                    ${WHITE}║${NC}"
     echo -e "${WHITE}║${NC} ${GREEN}[8]${NC} 🔧 فحص WordPress                  ${WHITE}║${NC}"
@@ -388,8 +388,8 @@ main() {
             1) run_scan "quick" ;;
             2) run_scan "passive" ;;
             3) run_scan "full" ;;
-            4) run_scan "deep" --scanner nuclei ;;
-            5) run_scan "bugbounty" --scanner nuclei --active-module js-secrets --active-module backup ;;
+            4) run_scan "deep" ;;
+            5) run_scan "bugbounty" --active-module js-secrets --active-module backup ;;
             6) run_scan "stealth" ;;
             7) run_scan "api-only" ;;
             8) run_scan "wordpress" --scanner wpscan ;;
