@@ -104,7 +104,8 @@ class DependencyResolver:
         "correlation": {"trim_results"},
         "learning": {"correlation"},
         "scanner": {"learning"},
-        "screenshots": {"scanner"},
+        "verify_findings": {"scanner"},
+        "screenshots": {"verify_findings"},
         "finalize": {"screenshots"},
     }
     

@@ -31,6 +31,7 @@ from recon_cli.pipeline.stage_rescore import RescoreStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
 from recon_cli.pipeline.stage_learning import LearningStage
 from recon_cli.pipeline.stage_scanner import ScannerStage
+from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
 from recon_cli.pipeline.stage_screenshots import ScreenshotStage
 from recon_cli.pipeline.stage_finalize import FinalizeStage
 
@@ -65,6 +66,7 @@ PIPELINE_STAGES: List[Stage] = [
     CorrelationStage(),
     LearningStage(),
     ScannerStage(),
+    VerifyFindingsStage(),
     ScreenshotStage(),
     FinalizeStage(),
 ]

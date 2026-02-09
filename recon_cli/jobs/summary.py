@@ -284,6 +284,22 @@ def generate_summary(context) -> None:
         lines.append('')
         lines.append('== Vuln Scanners ==')
         lines.append(f"Findings: {vuln_stats.get('findings', 0)}")
+    verify_stats = getattr(metadata, 'stats', {}).get('verification') if hasattr(metadata, 'stats') else None
+    if verify_stats:
+        lines.append('')
+        lines.append('== Verification ==')
+        lines.append(
+            f"Attempted: {verify_stats.get('attempted', 0)} | "
+            f"Verified: {verify_stats.get('verified', 0)} | "
+            f"Failed: {verify_stats.get('failed', 0)} | "
+            f"Skipped: {verify_stats.get('skipped', 0)}"
+        )
+        status_codes = verify_stats.get('status_codes')
+        if isinstance(status_codes, dict) and status_codes:
+            status_summary = ', '.join(f"{code}:{count}" for code, count in sorted(status_codes.items()))
+            lines.append(f"Status codes: {status_summary}")
+        if verify_stats.get('artifact'):
+            lines.append(f"Artifact: {verify_stats.get('artifact')}")
     idor_stats = getattr(metadata, 'stats', {}).get('idor') if hasattr(metadata, 'stats') else None
     if idor_stats and idor_stats.get('suspects'):
         lines.append('')

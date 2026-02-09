@@ -360,6 +360,7 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
     config.ensure_base_directories(force=fix)
     import io
     import tokenize
+    import subprocess
 
     source_root = Path(__file__).resolve().parent
     issues: list[str] = []
@@ -371,20 +372,60 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
             if token.type == tokenize.OP and token.string == "...":
                 issues.append(f"ellipsis operator found in {py_file}:{token.start[0]}")
 
-    tool_hints = {
-        "subfinder": "install via go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
-        "amass": "install via go install github.com/owasp-amass/amass/v4/...@latest",
-        "massdns": "install from https://github.com/blechschmidt/massdns",
-        "httpx": "install via go install github.com/projectdiscovery/httpx/cmd/httpx@latest",
-        "ffuf": "install via go install github.com/ffuf/ffuf@latest",
-        "nuclei": "install via go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
-        "wpscan": "install via gem install wpscan",
-    }
-    for tool, hint in tool_hints.items():
+    def _version_line(tool: str, args: List[str]) -> str:
+        try:
+            completed = subprocess.run(
+                [tool] + args,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except Exception:
+            return ""
+        output = (completed.stdout or "") + (completed.stderr or "")
+        output = output.strip()
+        if not output:
+            return ""
+        return output.splitlines()[0][:120]
+
+    tool_checks = [
+        ("subfinder", ["-version"], "install via go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"),
+        ("amass", ["-version"], "install via go install github.com/owasp-amass/amass/v4/...@latest"),
+        ("massdns", ["-h"], "install from https://github.com/blechschmidt/massdns"),
+        ("httpx", ["-version"], "install via go install github.com/projectdiscovery/httpx/cmd/httpx@latest"),
+        ("ffuf", ["-V"], "install via go install github.com/ffuf/ffuf@latest"),
+        ("nuclei", ["-version"], "install via go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"),
+        ("naabu", ["-version"], "install via go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"),
+        ("katana", ["-version"], "install via go install github.com/projectdiscovery/katana/cmd/katana@latest"),
+        ("dalfox", ["version"], "install via go install github.com/hahwul/dalfox/v2@latest"),
+        ("sqlmap", ["--version"], "install via pipx install sqlmap or apt install sqlmap"),
+        ("nmap", ["--version"], "install via apt install nmap"),
+        ("wpscan", ["--version"], "install via gem install wpscan"),
+        ("waybackurls", ["-h"], "install via go install github.com/tomnomnom/waybackurls@latest"),
+        ("gau", ["-h"], "install via go install github.com/lc/gau/v2/cmd/gau@latest"),
+    ]
+    tool_results: list[tuple[str, str, str]] = []
+    for tool, version_args, hint in tool_checks:
         if not CommandExecutor.available(tool):
-            typer.echo(f"[warn] tool '{tool}' not found in PATH ({hint})")
+            tool_results.append((tool, "missing", ""))
+            if tool not in {"waybackurls", "gau"}:
+                typer.echo(f"[warn] tool '{tool}' not found in PATH ({hint})")
+            continue
+        version = _version_line(tool, version_args)
+        tool_results.append((tool, "ok", version))
+
     if not (CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")):
         typer.echo("[warn] tool 'waybackurls' or 'gau' not found in PATH (install via go install github.com/tomnomnom/waybackurls@latest or go install github.com/lc/gau/v2/cmd/gau@latest)")
+
+    typer.echo("")
+    typer.echo("== Tool Health ==")
+    for tool, status, version in tool_results:
+        if status == "missing":
+            typer.echo(f"{tool:12} : missing")
+        else:
+            suffix = f" ({version})" if version else ""
+            typer.echo(f"{tool:12} : ok{suffix}")
 
     try:
         __import__("recon_cli.pipeline.stage_idor")

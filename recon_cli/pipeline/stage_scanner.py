@@ -188,6 +188,11 @@ class ScannerStage(Stage):
                     base_url,
                     scanner_dir,
                     runtime.scanner_timeout,
+                    enumerate=getattr(runtime, "wpscan_enumerate", None),
+                    plugins_detection=getattr(runtime, "wpscan_plugins_detection", None),
+                    random_user_agent=bool(getattr(runtime, "wpscan_random_user_agent", True)),
+                    max_threads=int(getattr(runtime, "wpscan_max_threads", 0) or 0),
+                    api_token=getattr(runtime, "wpscan_api_token", None),
                 )
                 for finding in result.findings:
                     context.results.append(finding.payload)

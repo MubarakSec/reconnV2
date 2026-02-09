@@ -269,6 +269,11 @@ def run_wpscan(
     base_url: str,
     artifact_dir: Path,
     timeout: int,
+    enumerate: Optional[str] = None,
+    plugins_detection: Optional[str] = None,
+    random_user_agent: bool = True,
+    max_threads: Optional[int] = None,
+    api_token: Optional[str] = None,
 ) -> ScannerExecution:
     if not shutil.which("wpscan"):
         logger.info("wpscan not available; skipping for %s", host)
@@ -285,9 +290,17 @@ def run_wpscan(
         str(artifact_path),
         "--disable-tls-checks",
     ]
-    api_token = subprocess.os.environ.get("WPSCAN_API_TOKEN")
-    if api_token:
-        cmd.extend(["--api-token", api_token])
+    if enumerate:
+        cmd.extend(["--enumerate", str(enumerate)])
+    if plugins_detection:
+        cmd.extend(["--plugins-detection", str(plugins_detection)])
+    if random_user_agent:
+        cmd.append("--random-user-agent")
+    if max_threads and int(max_threads) > 0:
+        cmd.extend(["--max-threads", str(int(max_threads))])
+    token = api_token or subprocess.os.environ.get("WPSCAN_API_TOKEN")
+    if token:
+        cmd.extend(["--api-token", token])
 
     logger.info("Running wpscan against %s", base_url)
     try:
