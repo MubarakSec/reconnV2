@@ -53,6 +53,7 @@ class APIReconStage(Stage):
             rps=float(getattr(runtime, "api_recon_rps", 0)),
             per_host=float(getattr(runtime, "api_recon_per_host_rps", 0)),
         )
+        signaled_hosts: set[str] = set()
         specs_found = 0
         urls_added = 0
         for host in hosts[:max_hosts]:
@@ -104,6 +105,17 @@ class APIReconStage(Stage):
                         }
                         if context.results.append(payload):
                             urls_added += 1
+                        if host not in signaled_hosts:
+                            context.emit_signal(
+                                "api_surface",
+                                "host",
+                                host,
+                                confidence=0.6,
+                                source="api-recon",
+                                tags=["api:graphql"],
+                                evidence={"url": url},
+                            )
+                            signaled_hosts.add(host)
                     continue
                 if "json" in content_type or text.strip().startswith("{"):
                     try:
@@ -137,6 +149,17 @@ class APIReconStage(Stage):
                             "score": 40,
                         }
                         context.results.append(spec_payload)
+                        if host not in signaled_hosts:
+                            context.emit_signal(
+                                "api_surface",
+                                "host",
+                                host,
+                                confidence=0.7,
+                                source="api-recon",
+                                tags=["api:openapi"],
+                                evidence={"url": url},
+                            )
+                            signaled_hosts.add(host)
         if specs_found or urls_added:
             stats = context.record.metadata.stats.setdefault("api_recon", {})
             stats["specs"] = specs_found

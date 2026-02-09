@@ -49,6 +49,7 @@ class JSIntelligenceStage(Stage):
             rps=float(getattr(runtime, "js_intel_rps", 0)),
             per_host=float(getattr(runtime, "js_intel_per_host_rps", 0)),
         )
+        signaled_hosts: set[str] = set()
         js_urls = list(dict.fromkeys(js_urls))[:max_files]
         artifacts: List[Dict[str, object]] = []
         discovered_urls: List[str] = []
@@ -150,6 +151,28 @@ class JSIntelligenceStage(Stage):
                 }
                 if context.results.append(payload):
                     discovered_urls.append(endpoint)
+                host = urlparse(endpoint).hostname
+                if host:
+                    context.emit_signal(
+                        "js_endpoint",
+                        "url",
+                        endpoint,
+                        confidence=0.4,
+                        source="js-intel",
+                        tags=["source:js"],
+                    )
+                    path = urlparse(endpoint).path.lower()
+                    if ("/api" in path or "/graphql" in path) and host not in signaled_hosts:
+                        context.emit_signal(
+                            "api_surface",
+                            "host",
+                            host,
+                            confidence=0.4,
+                            source="js-intel",
+                            tags=["api:js"],
+                            evidence={"url": endpoint},
+                        )
+                        signaled_hosts.add(host)
         if artifacts:
             artifact_path = context.record.paths.artifact("js_intel.json")
             artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")

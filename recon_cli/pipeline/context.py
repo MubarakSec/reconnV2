@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Pattern
 from urllib.parse import urlparse
+import uuid
 import re
 
 from recon_cli import config
@@ -11,6 +13,7 @@ from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.jobs.results import ResultsTracker
 from recon_cli.tools.executor import CommandExecutor
 from recon_cli.utils import fs
+from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.logging import build_file_logger, silence_logger
 
 
@@ -204,6 +207,95 @@ class PipelineContext:
             except Exception:
                 return None
         return None
+
+    def emit_signal(
+        self,
+        signal_type: str,
+        target_type: str,
+        target: str,
+        *,
+        confidence: float = 0.5,
+        source: str = "pipeline",
+        tags: Optional[List[str]] = None,
+        evidence: Optional[Dict[str, object]] = None,
+        metadata: Optional[Dict[str, object]] = None,
+    ) -> str:
+        """Append a structured signal record and return its signal_id."""
+        if not signal_type or not target_type or not target:
+            return ""
+        if not hasattr(self, "results") or self.results is None:
+            return ""
+        signal_id = f"sig_{uuid.uuid4().hex[:10]}"
+        payload: Dict[str, object] = {
+            "type": "signal",
+            "signal_id": signal_id,
+            "signal_type": str(signal_type),
+            "target_type": str(target_type),
+            "target": str(target),
+            "confidence": float(confidence),
+            "source": str(source),
+        }
+        if tags:
+            payload["tags"] = list(tags)
+        if evidence:
+            payload["evidence"] = evidence
+        if metadata:
+            payload["metadata"] = metadata
+        self.results.append(payload)
+        self._data_store.pop("_signals", None)
+        self._data_store.pop("_signal_index", None)
+        return signal_id
+
+    def _signal_source_path(self) -> Optional[Path]:
+        if getattr(self, "record", None):
+            return self.record.paths.results_jsonl
+        return getattr(self, "results_file", None)
+
+    def _load_signals(self) -> List[Dict[str, object]]:
+        cached = self._data_store.get("_signals")
+        if isinstance(cached, list):
+            return cached
+        signals: List[Dict[str, object]] = []
+        path = self._signal_source_path()
+        if path and path.exists():
+            records = iter_jsonl(path)
+            if records is not None:
+                for entry in records:
+                    if isinstance(entry, dict) and entry.get("type") == "signal":
+                        signals.append(entry)
+        self._data_store["_signals"] = signals
+        return signals
+
+    def signal_index(self) -> Dict[str, Dict[str, set[str]]]:
+        cached = self._data_store.get("_signal_index")
+        if isinstance(cached, dict):
+            return cached
+        by_url: Dict[str, set[str]] = defaultdict(set)
+        by_host: Dict[str, set[str]] = defaultdict(set)
+        by_ip: Dict[str, set[str]] = defaultdict(set)
+        for signal in self._load_signals():
+            stype = signal.get("signal_type")
+            ttype = signal.get("target_type")
+            target = signal.get("target")
+            if not stype or not target or not ttype:
+                continue
+            stype_value = str(stype)
+            if ttype == "url":
+                target_value = str(target)
+                by_url[target_value].add(stype_value)
+                try:
+                    host = urlparse(target_value).hostname
+                except ValueError:
+                    host = None
+                if host:
+                    by_host[host].add(stype_value)
+            elif ttype == "host":
+                by_host[str(target)].add(stype_value)
+            elif ttype == "ip":
+                by_ip[str(target)].add(stype_value)
+        index = {"by_url": by_url, "by_host": by_host, "by_ip": by_ip}
+        self._data_store["_signal_index"] = index
+        return index
 
     def get_cache_entry(self, url: str) -> Optional[Dict[str, str]]:
         return self._delta_cache.get(url)

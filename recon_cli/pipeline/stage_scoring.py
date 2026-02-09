@@ -27,6 +27,7 @@ class ScoringStage(Stage):
         items = read_jsonl(results_path)
         if not items:
             return
+        signals = context.signal_index()
 
         enrichment_map: Dict[str, list] = {}
         enrichment_artifact = context.record.paths.artifact("ip_enrichment.json")
@@ -47,6 +48,13 @@ class ScoringStage(Stage):
                 if hostname:
                     tags = set(entry.get("tags", []))
                     tags.update(enrich_utils.hostname_tags(hostname))
+                    host_signals = signals.get("by_host", {}).get(hostname, set())
+                    if "waf_detected" in host_signals:
+                        tags.add("service:waf")
+                    if "api_surface" in host_signals:
+                        tags.add("service:api")
+                    if "auth_surface" in host_signals:
+                        tags.add("surface:login")
                     tags.update(rules_engine.apply_rules(entry, self.rules))
                     if tags:
                         entry["tags"] = sorted(tags)
@@ -74,6 +82,8 @@ class ScoringStage(Stage):
             url = entry.get("url", "")
             lower_url = url.lower()
             host = entry.get("hostname")
+            url_signals = signals.get("by_url", {}).get(url, set())
+            host_signals = signals.get("by_host", {}).get(host, set()) if host else set()
             host_enrichments = enrichment_map.get(host, []) if host else []
             if host_enrichments:
                 for enriched in host_enrichments:
@@ -108,6 +118,26 @@ class ScoringStage(Stage):
                 if lower_url.endswith(ext):
                     tags.add("backup")
                     score += 60
+
+            if "api_surface" in host_signals or "api_surface" in url_signals:
+                if "service:api" not in tags:
+                    tags.add("service:api")
+                    score += 10
+            if "auth_surface" in url_signals:
+                if "surface:login" not in tags:
+                    tags.add("surface:login")
+                    score += 15
+            if "waf_detected" in host_signals or "waf_detected" in url_signals:
+                tags.add("service:waf")
+            if "waf_bypass_possible" in url_signals:
+                tags.add("waf-bypass-possible")
+                score += 15
+            if "verified_live" in url_signals:
+                tags.add("verified:live")
+                score += 10
+            if "verified_blocked" in url_signals:
+                tags.add("verified:blocked")
+                score = max(score - 10, 0)
 
             status_code = entry.get("status_code")
             length = entry.get("length") or entry.get("content_length") or entry.get("content-length")

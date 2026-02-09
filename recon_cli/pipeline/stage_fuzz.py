@@ -145,7 +145,18 @@ class FuzzStage(Stage):
                 host = entry.get("hostname")
                 if host:
                     hosts[host] = max(hosts[host], int(entry.get("score", 0)))
-        sorted_hosts = sorted(hosts.items(), key=lambda item: item[1], reverse=True)
+        signals = context.signal_index()
+        adjusted: Dict[str, int] = {}
+        for host, score in hosts.items():
+            host_signals = signals.get("by_host", {}).get(host, set())
+            if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
+                score = max(score - 20, 0)
+            if "api_surface" in host_signals:
+                score += 10
+            if "auth_surface" in host_signals:
+                score += 5
+            adjusted[host] = score
+        sorted_hosts = sorted(adjusted.items(), key=lambda item: item[1], reverse=True)
         return [host for host, _ in sorted_hosts]
 
     def _tags_for_hosts(self, context: PipelineContext) -> Dict[str, set[str]]:

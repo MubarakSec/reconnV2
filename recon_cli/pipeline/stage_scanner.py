@@ -76,6 +76,11 @@ class ScannerStage(Stage):
             elif technologies:
                 data["technologies"].add(str(technologies).lower())
 
+        signal_index = context.signal_index()
+        for host, info in host_info.items():
+            if "api_surface" in signal_index.get("by_host", {}).get(host, set()):
+                info["api"] = True
+
         runtime = context.runtime_config
         scanner_dir = context.record.paths.ensure_subdir("scanners")
         summary: Dict[str, Dict[str, object]] = {}
@@ -158,9 +163,11 @@ class ScannerStage(Stage):
 
         if "wpscan" in available:
 
-            def is_wordpress(info: Dict[str, object]) -> bool:
+            def is_wordpress(info: Dict[str, object], host_value: str) -> bool:
                 tags = {t.lower() for t in info.get("tags", set())}
                 if any("wordpress" in tag for tag in tags):
+                    return True
+                if "cms:wordpress" in signal_index.get("by_host", {}).get(host_value, set()):
                     return True
                 techs = info.get("technologies", set())
                 if any("wordpress" in tech for tech in techs):
@@ -175,7 +182,7 @@ class ScannerStage(Stage):
                         return True
                 return False
 
-            wp_hosts = [host for host, info in host_info.items() if is_wordpress(info)]
+            wp_hosts = [host for host, info in host_info.items() if is_wordpress(info, host)]
             wp_hosts = wp_hosts[: runtime.max_scanner_hosts]
             findings = []
             for host in wp_hosts:

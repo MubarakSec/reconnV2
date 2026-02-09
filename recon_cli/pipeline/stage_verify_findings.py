@@ -116,6 +116,15 @@ class VerifyFindingsStage(Stage):
             final_url = str(getattr(resp, "url", "")) or url
             content_length = resp.headers.get("Content-Length")
             resp.close()
+            signal_type = "verified_blocked" if resp.status_code in {401, 403, 429, 503} else "verified_live"
+            signal_id = context.emit_signal(
+                signal_type,
+                "url",
+                final_url,
+                confidence=0.6,
+                source="verification",
+                evidence={"status_code": resp.status_code},
+            )
 
             record = {
                 "url": url,
@@ -129,6 +138,8 @@ class VerifyFindingsStage(Stage):
                 "source": entry.get("source"),
                 "description": entry.get("description") or entry.get("title"),
                 "timestamp": time_utils.iso_now(),
+                "signal_id": signal_id or None,
+                "signal_type": signal_type,
             }
             records.append(record)
 

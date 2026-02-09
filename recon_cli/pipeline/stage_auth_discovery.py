@@ -150,6 +150,17 @@ class AuthDiscoveryStage(Stage):
                     "tags": sorted(tags),
                     "score": 40 if "surface:login" in tags else 20,
                 }
+                signal_id = context.emit_signal(
+                    "auth_surface",
+                    "url",
+                    url,
+                    confidence=0.5,
+                    source="auth-discovery",
+                    tags=sorted(tags),
+                    evidence={"action": action_url, "method": form.get("method")},
+                )
+                if signal_id:
+                    payload["evidence_id"] = signal_id
                 if context.results.append(payload):
                     forms_found += 1
                     artifacts.append(payload)

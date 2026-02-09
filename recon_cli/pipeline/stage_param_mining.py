@@ -18,12 +18,23 @@ class ParamMiningStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         candidates: List[str] = []
+        auth_inputs: Dict[str, List[str]] = defaultdict(list)
         for entry in read_jsonl(context.record.paths.results_jsonl):
-            if entry.get("type") != "url":
-                continue
-            url = entry.get("url")
-            if url and "?" in url:
-                candidates.append(url)
+            etype = entry.get("type")
+            if etype == "url":
+                url = entry.get("url")
+                if url and "?" in url:
+                    candidates.append(url)
+            elif etype == "auth_form":
+                url = entry.get("url") or entry.get("action")
+                inputs = entry.get("inputs") or []
+                if isinstance(inputs, list):
+                    for item in inputs:
+                        if not isinstance(item, dict):
+                            continue
+                        name = item.get("name")
+                        if name:
+                            auth_inputs.setdefault(str(name), []).append(str(url) if url else "")
         js_endpoints = context.get_data("js_endpoints", []) or []
         for url in js_endpoints:
             if url and "?" in url:
@@ -41,6 +52,11 @@ class ParamMiningStage(Stage):
             for name, _ in parse_qsl(parsed.query, keep_blank_values=True):
                 params[name] += 1
                 if len(examples[name]) < 3:
+                    examples[name].append(url)
+        for name, urls in auth_inputs.items():
+            params[name] += len(urls)
+            for url in urls[:3]:
+                if url:
                     examples[name].append(url)
         max_params = int(getattr(context.runtime_config, "param_mining_max_params", 60))
         for name, count in params.most_common(max_params):

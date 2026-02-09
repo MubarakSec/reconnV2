@@ -30,6 +30,14 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("screenshot_path"))
     if ptype == "runtime_crawl":
         return (ptype, payload.get("url"))
+    if ptype == "signal":
+        return (
+            ptype,
+            payload.get("signal_type"),
+            payload.get("target_type"),
+            payload.get("target"),
+            payload.get("source"),
+        )
     if ptype == "meta":
         return (ptype, payload.get("schema_version"))
     return (ptype, payload.get("source"))

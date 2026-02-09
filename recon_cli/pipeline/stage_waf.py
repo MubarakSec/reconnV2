@@ -177,6 +177,19 @@ class WafProbeStage(Stage):
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(alt_resp)))
 
             if (not baseline_blocked and attack_blocked) or waf_tags:
+                signal_id = context.emit_signal(
+                    "waf_detected",
+                    "url",
+                    url,
+                    confidence=0.6,
+                    source="waf-probe",
+                    tags=sorted({"service:waf"} | waf_tags),
+                    evidence={
+                        "baseline_status": baseline_resp.status_code,
+                        "attack_status": attack_resp.status_code,
+                        "alternate_status": alt_resp.status_code,
+                    },
+                )
                 finding = {
                     "type": "finding",
                     "source": "waf-probe",
@@ -196,11 +209,25 @@ class WafProbeStage(Stage):
                     "tags": sorted({"waf", "detected", "service:waf"} | waf_tags),
                     "score": 40,
                     "priority": "low",
+                    "evidence_id": signal_id or None,
                 }
                 if context.results.append(finding):
                     findings += 1
 
             if (baseline_blocked and not alt_blocked) or (attack_blocked and not alt_blocked):
+                signal_id = context.emit_signal(
+                    "waf_bypass_possible",
+                    "url",
+                    url,
+                    confidence=0.7,
+                    source="waf-probe",
+                    tags=sorted({"waf", "bypass-possible"} | waf_tags),
+                    evidence={
+                        "baseline_status": baseline_resp.status_code,
+                        "attack_status": attack_resp.status_code,
+                        "alternate_status": alt_resp.status_code,
+                    },
+                )
                 finding = {
                     "type": "finding",
                     "source": "waf-probe",
@@ -220,6 +247,7 @@ class WafProbeStage(Stage):
                     "tags": sorted({"waf", "bypass-possible"} | waf_tags),
                     "score": 65,
                     "priority": "medium",
+                    "evidence_id": signal_id or None,
                 }
                 if context.results.append(finding):
                     findings += 1
