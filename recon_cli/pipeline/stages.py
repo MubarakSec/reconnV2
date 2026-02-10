@@ -26,6 +26,7 @@ from recon_cli.pipeline.stage_fuzz import FuzzStage
 from recon_cli.pipeline.stage_active_intel import ActiveIntelligenceStage
 from recon_cli.pipeline.stage_secrets import SecretsDetectionStage
 from recon_cli.pipeline.stage_runtime_crawl import RuntimeCrawlStage
+from recon_cli.crawl.runtime import PLAYWRIGHT_AVAILABLE, crawl_urls
 from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
 from recon_cli.pipeline.stage_api_recon import APIReconStage
 from recon_cli.pipeline.stage_graphql import GraphQLReconStage

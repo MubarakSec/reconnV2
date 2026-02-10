@@ -290,16 +290,6 @@ class CMSScanStage(Stage):
             output = (result.stdout or "") + "\n" + (result.stderr or "")
             return {"tool": "droopescan", "output": output.strip(), "findings": [], "artifact_path": None}
 
-        if cms == "joomla" and CommandExecutor.available("joomscan"):
-            cmd = ["joomscan", "-u", base_url]
-            try:
-                result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
-            except CommandError as exc:
-                context.logger.warning("joomscan failed for %s: %s", host, exc)
-                return {}
-            output = (result.stdout or "") + "\n" + (result.stderr or "")
-            return {"tool": "joomscan", "output": output.strip(), "findings": [], "artifact_path": None}
-
         if scanner_integrations is not None and CommandExecutor.available("nuclei"):
             tags = [cms]
             runtime = context.runtime_config
@@ -331,8 +321,6 @@ class CMSScanStage(Stage):
 
         context.logger.warning("CMS scan tool missing; skipping %s", host)
         note_missing_tool(context, "droopescan")
-        if cms == "joomla":
-            note_missing_tool(context, "joomscan")
         if not CommandExecutor.available("nuclei"):
             note_missing_tool(context, "nuclei")
         return {}

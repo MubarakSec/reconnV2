@@ -229,13 +229,13 @@ class WafProbeStage(Stage):
 
             waf_tags = set()
             waf_tags.update(self._header_tags(baseline_resp))
-            waf_tags.update(enrich_utils.detect_waf_tags(baseline_resp.headers.get("server"), baseline_resp.headers.get("via")))
+            waf_tags.update(enrich_utils.detect_waf_tags(self._get_header(baseline_resp, "server"), self._get_header(baseline_resp, "via")))
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(baseline_resp)))
             waf_tags.update(self._header_tags(attack_resp))
-            waf_tags.update(enrich_utils.detect_waf_tags(attack_resp.headers.get("server"), attack_resp.headers.get("via")))
+            waf_tags.update(enrich_utils.detect_waf_tags(self._get_header(attack_resp, "server"), self._get_header(attack_resp, "via")))
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(attack_resp)))
             waf_tags.update(self._header_tags(alt_resp))
-            waf_tags.update(enrich_utils.detect_waf_tags(alt_resp.headers.get("server"), alt_resp.headers.get("via")))
+            waf_tags.update(enrich_utils.detect_waf_tags(self._get_header(alt_resp, "server"), self._get_header(alt_resp, "via")))
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(alt_resp)))
 
             blocked_delta = self._blocked_delta(baseline_meta, attack_meta)
@@ -438,7 +438,11 @@ class WafProbeStage(Stage):
     def _header_tags(self, resp) -> set[str]:
         if not resp:
             return set()
-        headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+        raw_headers = getattr(resp, "headers", {}) or {}
+        try:
+            headers = {str(k).lower(): str(v) for k, v in raw_headers.items()}
+        except Exception:
+            headers = {}
         tags: set[str] = set()
         for key, tag in self.HEADER_TAGS.items():
             if key in headers:
@@ -464,6 +468,16 @@ class WafProbeStage(Stage):
         return title[:120]
 
     @staticmethod
+    def _get_header(resp, name: str) -> str | None:
+        if resp is None:
+            return None
+        headers = getattr(resp, "headers", {}) or {}
+        try:
+            return headers.get(name)
+        except Exception:
+            return None
+
+    @staticmethod
     def _cookie_headers(resp) -> List[str]:
         if resp is None:
             return []
@@ -475,7 +489,8 @@ class WafProbeStage(Stage):
                     return [h for h in header_obj.getlist("Set-Cookie") if h]
         except Exception:
             pass
-        value = resp.headers.get("Set-Cookie")
+        headers = getattr(resp, "headers", {}) or {}
+        value = headers.get("Set-Cookie") if isinstance(headers, dict) else None
         if not value:
             return []
         if isinstance(value, str):

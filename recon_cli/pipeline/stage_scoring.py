@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Dict, List
 
 from recon_cli.pipeline.context import PipelineContext
@@ -27,7 +28,10 @@ class ScoringStage(Stage):
         items = read_jsonl(results_path)
         if not items:
             return
-        signals = context.signal_index()
+        if hasattr(context, "signal_index"):
+            signals = context.signal_index()
+        else:
+            signals = {"by_host": {}, "by_url": {}}
 
         enrichment_map: Dict[str, list] = {}
         enrichment_artifact = context.record.paths.artifact("ip_enrichment.json")
@@ -320,7 +324,17 @@ class ScoringStage(Stage):
             entry["priority"] = enrich_utils.classify_priority(entry["score"])
             updated.append(entry)
 
-        context.results.replace_all(updated)
+        if hasattr(context, "results") and hasattr(context.results, "replace_all"):
+            context.results.replace_all(updated)
+        else:
+            results_path.write_text(
+                "\n".join(
+                    json.dumps(item, separators=(",", ":"), ensure_ascii=True)
+                    for item in updated
+                )
+                + "\n",
+                encoding="utf-8",
+            )
         surface_stats = context.record.metadata.stats.setdefault("auth_surface", {})
         surface_stats["login"] = sum(1 for entry in updated if "surface:login" in entry.get("tags", []))
         surface_stats["password_reset"] = sum(

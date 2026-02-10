@@ -26,8 +26,16 @@ STATIC_DIR = WEB_DIR / "static"
 
 if WEB_AVAILABLE:
     app = FastAPI(title="ReconnV2 Dashboard", docs_url=None, redoc_url=None)
-    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-    
+
+    class _TemplateStub:
+        def TemplateResponse(self, *_args, **_kwargs):  # pragma: no cover - fallback
+            raise HTTPException(status_code=503, detail="Templates not available (install jinja2)")
+
+    try:
+        templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    except Exception:
+        templates = _TemplateStub()
+
     # Mount static files if directory exists
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

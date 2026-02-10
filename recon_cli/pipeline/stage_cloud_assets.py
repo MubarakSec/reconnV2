@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -208,7 +208,7 @@ class CloudAssetDiscoveryStage(Stage):
         return False, False, "unknown"
 
     @staticmethod
-    def _keywords_for(provider: str) -> Tuple[str, ...]:
+    def _keywords_for(provider: str) -> Sequence[str]:
         if provider == "s3":
             return CloudAssetDiscoveryStage.S3_KEYWORDS
         if provider == "gcs":

@@ -58,6 +58,20 @@ class RuntimeCrawlStage(Stage):
         concurrency = max(1, getattr(context.runtime_config, "runtime_crawl_concurrency", 2))
 
         if not PLAYWRIGHT_AVAILABLE:
+            available = False
+        else:
+            available = True
+
+        crawl_func = crawl_urls
+        try:
+            from recon_cli.pipeline import stages as stages_module
+
+            available = getattr(stages_module, "PLAYWRIGHT_AVAILABLE", available)
+            crawl_func = getattr(stages_module, "crawl_urls", crawl_func)
+        except Exception:
+            pass
+
+        if not available:
             stats.update(
                 {
                     "selected": 0,
@@ -175,7 +189,7 @@ class RuntimeCrawlStage(Stage):
             default_domain = urlparse(selected_urls[0]).hostname if selected_urls else None
             auth_cookies = context.auth_cookies(default_domain)
         try:
-            results = crawl_urls(
+            results = crawl_func(
                 selected_urls,
                 timeout,
                 concurrency,
