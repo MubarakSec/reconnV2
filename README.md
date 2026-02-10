@@ -372,6 +372,7 @@ recon dashboard --port 9000
 - 📋 قائمة الوظائف مع حالتها
 - 🔍 تصفية وبحث متقدم
 - 📥 تحميل التقارير (HTML, PDF, JSON)
+- ✅ عرض النتائج المؤكدة + تنزيل النتائج الكبيرة
 - 🌙 دعم RTL للعربية
 - 🔄 تحديث تلقائي
 
@@ -589,6 +590,8 @@ jobs/finished/example.com_20260201_143052_a1b2/
 ├── spec.json          # مواصفات الفحص
 ├── results.jsonl      # النتائج (JSON Lines)
 ├── results.txt        # النتائج (نص)
+├── results_bigger.txt # النتائج المهمة (Score >= 60)
+├── results_confirmed.txt # النتائج المؤكدة فقط
 ├── artifacts/         # الملفات المستخرجة
 │   ├── targets.txt
 │   ├── subfinder.txt

@@ -96,6 +96,7 @@
         .badge-url { background: var(--success-color); }
         .badge-vulnerability { background: var(--danger-color); }
         .badge-secret { background: var(--warning-color); }
+        .badge-confirmed { background: var(--success-color); }
         
         .progress-stages {
             display: flex;
@@ -159,6 +160,12 @@
             background: var(--primary-color);
             color: white;
             border-radius: 10px 10px 0 0;
+        }
+
+        .output-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 1.5rem;
         }
     </style>
 </head>
@@ -256,6 +263,25 @@
         </div>
         {% endif %}
 
+        <!-- Outputs -->
+        <div class="output-card mb-4">
+            <h5 class="mb-3"><i class="bi bi-download me-2"></i>مخرجات المهمة</h5>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="/api/jobs/{{ job.id }}/outputs/results" class="btn btn-outline-light btn-action">
+                    <i class="bi bi-file-text me-1"></i> results.txt
+                </a>
+                <a href="/api/jobs/{{ job.id }}/outputs/results_bigger" class="btn btn-outline-warning btn-action">
+                    <i class="bi bi-graph-up me-1"></i> results_bigger.txt
+                </a>
+                <a href="/api/jobs/{{ job.id }}/outputs/results_confirmed" class="btn btn-outline-success btn-action">
+                    <i class="bi bi-shield-check me-1"></i> results_confirmed.txt
+                </a>
+                <a href="/api/jobs/{{ job.id }}/outputs/results_jsonl" class="btn btn-outline-info btn-action">
+                    <i class="bi bi-code-slash me-1"></i> results.jsonl
+                </a>
+            </div>
+        </div>
+
         <!-- Results Tabs -->
         <div class="card">
             <ul class="nav nav-tabs p-3 pb-0" role="tablist">
@@ -272,6 +298,11 @@
                 <li class="nav-item">
                     <button class="nav-link" data-bs-toggle="tab" data-bs-target="#vulns">
                         <i class="bi bi-bug me-1"></i> الثغرات ({{ results.vulnerabilities|length }})
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#confirmed">
+                        <i class="bi bi-shield-check me-1"></i> مؤكدة ({{ results.confirmed|length }})
                     </button>
                 </li>
                 <li class="nav-item">
@@ -341,6 +372,8 @@
                 <div class="tab-pane fade" id="vulns">
                     {% if results.vulnerabilities %}
                     {% for vuln in results.vulnerabilities %}
+                    {% set vuln_tags = vuln.tags or [] %}
+                    {% set is_confirmed = ('confirmed' in vuln_tags) or ('ssrf:confirmed' in vuln_tags) or ('xxe:confirmed' in vuln_tags) or ('lfi:confirmed' in vuln_tags) or ('redirect:confirmed' in vuln_tags) %}
                     <div class="result-item vulnerability">
                         <div class="d-flex justify-content-between align-items-start">
                             <div>
@@ -354,14 +387,45 @@
                                 <p class="mt-2 mb-0 small">{{ vuln.description }}</p>
                                 {% endif %}
                             </div>
-                            <span class="badge bg-{{ 'danger' if (vuln.severity or vuln.priority) == 'critical' else 'warning' if (vuln.severity or vuln.priority) == 'high' else 'info' }}">
-                                {{ vuln.severity or vuln.priority or 'info' }}
-                            </span>
+                            <div class="d-flex flex-column align-items-end gap-1">
+                                <span class="badge bg-{{ 'danger' if (vuln.severity or vuln.priority) == 'critical' else 'warning' if (vuln.severity or vuln.priority) == 'high' else 'info' }}">
+                                    {{ vuln.severity or vuln.priority or 'info' }}
+                                </span>
+                                {% if is_confirmed %}
+                                <span class="badge badge-confirmed">CONFIRMED</span>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
                     {% else %}
                     <p class="text-center text-secondary py-4">لا توجد ثغرات</p>
+                    {% endif %}
+                </div>
+
+                <!-- Confirmed Tab -->
+                <div class="tab-pane fade" id="confirmed">
+                    {% if results.confirmed %}
+                    {% for vuln in results.confirmed %}
+                    <div class="result-item vulnerability">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong class="severity-{{ vuln.severity or vuln.priority or 'info' }}">
+                                    {{ vuln.title or vuln.description or vuln.finding_type or vuln.name or vuln.template_id or 'Unknown' }}
+                                </strong>
+                                <div class="text-secondary small mt-1">
+                                    {{ vuln.host or vuln.url or 'N/A' }}
+                                </div>
+                                {% if vuln.description %}
+                                <p class="mt-2 mb-0 small">{{ vuln.description }}</p>
+                                {% endif %}
+                            </div>
+                            <span class="badge badge-confirmed">CONFIRMED</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="text-center text-secondary py-4">لا توجد ثغرات مؤكدة</p>
                     {% endif %}
                 </div>
                 
@@ -420,7 +484,8 @@
                 
                 if (data.success) {
                     showToast('تم إعادة تشغيل المهمة', 'success');
-                    setTimeout(() => window.location.href = `/jobs/${data.new_job_id}`, 1500);
+                    const redirectId = data.new_job_id || data.job_id || jobId;
+                    setTimeout(() => window.location.href = `/jobs/${redirectId}`, 1500);
                 } else {
                     showToast(data.error || 'فشل في إعادة المهمة', 'danger');
                 }

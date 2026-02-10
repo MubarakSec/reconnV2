@@ -14,14 +14,27 @@ from recon_cli.utils.jsonl import iter_jsonl
 
 SUMMARY_TOP = int(os.environ.get("RECON_SUMMARY_TOP", 50))
 STAGE_HEALTH_SIGNALS = {
+    "api_recon": ("api_spec_auth_required", "api_spec_auth_challenge"),
     "graphql_recon": ("graphql_detected", "graphql_introspection_enabled"),
+    "graphql_exploit": ("graphql_sensitive_schema", "graphql_query_enabled"),
+    "api_schema_probe": (
+        "api_schema_endpoint",
+        "api_auth_required",
+        "api_auth_weak",
+        "api_auth_challenge",
+        "api_public_endpoint",
+    ),
+    "oauth_discovery": ("oidc_config", "oauth_config", "oauth_authorize_endpoint", "oauth_token_endpoint"),
+    "ws_grpc_discovery": ("ws_detected", "ws_candidate", "grpc_detected"),
+    "upload_probe": ("upload_surface", "upload_dir_exposed"),
     "vhost_discovery": ("vhost_found",),
     "subdomain_permute": ("subdomain_permuted",),
     "cloud_asset_discovery": ("cloud_asset_public", "cloud_asset_exists"),
     "ct_asn_pivot": ("ct_discovery", "asn_prefix"),
     "html_form_mining": ("form_discovered",),
-    "cms_scan": ("cms_drupal", "cms_joomla"),
+    "cms_scan": ("cms_drupal", "cms_joomla", "cms_magento", "cms_module_discovered"),
     "exploit_validation": ("poc_validated", "poc_failed"),
+    "extended_validation": ("ssrf_confirmed", "xxe_confirmed", "open_redirect_confirmed", "lfi_confirmed"),
 }
 
 
@@ -98,6 +111,17 @@ def generate_summary(context) -> None:
             return datetime.fromisoformat(value)
         except ValueError:
             return None
+
+    def _is_confirmed(entry: dict) -> bool:
+        tags = entry.get("tags", [])
+        if isinstance(tags, list):
+            for tag in tags:
+                if tag == "confirmed" or str(tag).endswith(":confirmed"):
+                    return True
+        source = entry.get("source")
+        if isinstance(source, str) and source in {"extended-validation", "exploit-validation"}:
+            return True
+        return False
 
     for entry in iter_jsonl(results_path):
         etype = entry.get("type", "unknown")
@@ -350,6 +374,16 @@ def generate_summary(context) -> None:
             priority = entry.get("priority", "unknown")
             tags = ",".join(entry.get("tags", []))
             lines.append(f"[{score:4}] ({priority}) {label} {tags}")
+    confirmed_findings = [entry for entry in top_findings if _is_confirmed(entry)]
+    if confirmed_findings:
+        lines.append("")
+        lines.append(f"== Confirmed Findings (top {min(len(confirmed_findings), SUMMARY_TOP)}) ==")
+        for entry in confirmed_findings[:SUMMARY_TOP]:
+            label = _format_finding_label(entry)
+            score = entry.get("score", 0)
+            priority = entry.get("priority", "unknown")
+            tags = ",".join(entry.get("tags", []))
+            lines.append(f"[{score:4}] ({priority}) {label} {tags}")
     if top_urls:
         lines.append("")
         lines.append(f"== Top URLs (top {min(len(top_urls), SUMMARY_TOP)}) ==")
@@ -378,9 +412,77 @@ def generate_summary(context) -> None:
         for item in next_actions:
             lines.append(f"- {item}")
     record.paths.results_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Write expanded findings list (score >= 60) to results_bigger.txt
+    def _is_finding(entry: dict) -> bool:
+        if entry.get("finding_type"):
+            return True
+        etype = entry.get("type")
+        return isinstance(etype, str) and etype in {"finding", "idor_suspect", "vulnerability", "vuln"}
+
+    bigger_path = record.paths.root / "results_bigger.txt"
+    big_lines: List[str] = []
+    big_findings: List[dict] = []
+    for entry in iter_jsonl(results_path):
+        if not isinstance(entry, dict):
+            continue
+        if not _is_finding(entry):
+            continue
+        score = int(entry.get("score", 0))
+        if score < 60:
+            continue
+        priority = entry.get("priority") or "unknown"
+        payload = entry | {"score": score, "priority": priority}
+        big_findings.append(payload)
+
+    big_findings.sort(key=lambda item: item.get("score", 0), reverse=True)
+    big_lines.append(f"Findings >= 60: {len(big_findings)}")
+    for entry in big_findings:
+        confirmed = _is_confirmed(entry)
+        label = _format_finding_label(entry)
+        score = entry.get("score", 0)
+        priority = entry.get("priority", "unknown")
+        tags = ",".join(entry.get("tags", []))
+        url_value = entry.get("url") or entry.get("details", {}).get("url") if isinstance(entry.get("details"), dict) else ""
+        status_label = "CONFIRMED" if confirmed else "CANDIDATE"
+        if url_value:
+            big_lines.append(f"[{score:4}] ({priority}) {status_label} {label} | {url_value} {tags}")
+        else:
+            big_lines.append(f"[{score:4}] ({priority}) {status_label} {label} {tags}")
+    bigger_path.write_text("\n".join(big_lines) + "\n", encoding="utf-8")
+
+    confirmed_path = record.paths.root / "results_confirmed.txt"
+    confirmed_lines: List[str] = []
+    confirmed_entries: List[dict] = []
+    for entry in iter_jsonl(results_path):
+        if not isinstance(entry, dict):
+            continue
+        if not _is_finding(entry):
+            continue
+        if not _is_confirmed(entry):
+            continue
+        score = int(entry.get("score", 0))
+        priority = entry.get("priority") or "unknown"
+        payload = entry | {"score": score, "priority": priority}
+        confirmed_entries.append(payload)
+    confirmed_entries.sort(key=lambda item: item.get("score", 0), reverse=True)
+    confirmed_lines.append(f"Confirmed findings: {len(confirmed_entries)}")
+    for entry in confirmed_entries:
+        label = _format_finding_label(entry)
+        score = entry.get("score", 0)
+        priority = entry.get("priority", "unknown")
+        tags = ",".join(entry.get("tags", []))
+        url_value = entry.get("url") or entry.get("details", {}).get("url") if isinstance(entry.get("details"), dict) else ""
+        if url_value:
+            confirmed_lines.append(f"[{score:4}] ({priority}) {label} | {url_value} {tags}")
+        else:
+            confirmed_lines.append(f"[{score:4}] ({priority}) {label} {tags}")
+    confirmed_path.write_text("\n".join(confirmed_lines) + "\n", encoding="utf-8")
+
     metadata.stats.update({f"type_{key}": value for key, value in counts.items()})
     metadata.stats.update({f"status_{code}": value for code, value in status_counter.items()})
     metadata.stats["noise_suppressed"] = noise_count
+    metadata.stats["confirmed_findings"] = len(confirmed_entries)
     for priority, count in priority_counter.items():
         metadata.stats[f"priority_{priority}"] = count
     context.manager.update_metadata(record)

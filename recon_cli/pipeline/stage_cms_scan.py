@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -36,6 +36,19 @@ class CMSScanStage(Stage):
         "/templates/",
         "option=com_",
     )
+    MAGENTO_HINTS = (
+        "/static/",
+        "/media/",
+        "/customer/account",
+        "/checkout",
+        "/catalogsearch",
+        "/index.php/admin",
+        "/magento",
+    )
+    DRUPAL_MODULE_RE = re.compile(r"/modules/(?:contrib/)?([^/\\s\"']+)", re.IGNORECASE)
+    DRUPAL_LEGACY_RE = re.compile(r"/sites/(?:all|default)/modules/([^/\\s\"']+)", re.IGNORECASE)
+    MAGENTO_THEME_RE = re.compile(r"/static/(?:version\\d+/)?frontend/([^/\\s\"']+/[^/\\s\"']+)", re.IGNORECASE)
+    MAGENTO_ADMIN_THEME_RE = re.compile(r"/static/(?:version\\d+/)?adminhtml/([^/\\s\"']+/[^/\\s\"']+)", re.IGNORECASE)
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_cms_scan", False))
@@ -68,6 +81,8 @@ class CMSScanStage(Stage):
                 cms_targets[host].add("drupal")
             if "cms:joomla" in tags or any("joomla" in t for t in techs):
                 cms_targets[host].add("joomla")
+            if "cms:magento" in tags or any("magento" in t for t in techs):
+                cms_targets[host].add("magento")
             if not cms_targets[host]:
                 for url in urls:
                     lower_url = url.lower()
@@ -75,9 +90,11 @@ class CMSScanStage(Stage):
                         cms_targets[host].add("drupal")
                     if any(hint in lower_url for hint in self.JOOMLA_HINTS):
                         cms_targets[host].add("joomla")
-        if not cms_targets:
-            context.logger.info("No CMS detections for drupal/joomla")
-            return
+                    if any(hint in lower_url for hint in self.MAGENTO_HINTS):
+                        cms_targets[host].add("magento")
+            if not cms_targets:
+                context.logger.info("No CMS detections for drupal/joomla/magento")
+                return
 
         cms_dir = context.record.paths.ensure_subdir("cms")
         stats = context.record.metadata.stats.setdefault("cms_scan", {})
@@ -85,7 +102,9 @@ class CMSScanStage(Stage):
         findings = 0
         tool_stats: Dict[str, int] = defaultdict(int)
         cms_stats: Dict[str, int] = defaultdict(int)
+        module_stats: Dict[str, int] = defaultdict(int)
         artifacts: List[Dict[str, object]] = []
+        module_cache: Dict[str, Tuple[str, str]] = {}
 
         for host in list(cms_targets.keys())[:max_hosts]:
             info = host_info.get(host, {})
@@ -179,6 +198,40 @@ class CMSScanStage(Stage):
                     if context.results.append(finding_payload):
                         findings += 1
 
+                modules = self._discover_modules(
+                    context,
+                    cms,
+                    host,
+                    base_url,
+                    timeout,
+                    limiter,
+                    module_cache,
+                )
+                if modules:
+                    module_stats[cms] += len(modules)
+                    signal_id = context.emit_signal(
+                        "cms_module_discovered",
+                        "host",
+                        host,
+                        confidence=0.4,
+                        source="cms-scan",
+                        tags=[f"cms:{cms}", "module"],
+                        evidence={"modules": modules[:10]},
+                    )
+                    for module in modules:
+                        module_payload = {
+                            "type": "cms_module",
+                            "source": "cms-scan",
+                            "hostname": host,
+                            "url": base_url,
+                            "cms": cms,
+                            "module": module,
+                            "tags": ["cms", f"cms:{cms}", "module"],
+                            "score": 20,
+                            "evidence_id": signal_id or None,
+                        }
+                        context.results.append(module_payload)
+
         if artifacts:
             manifest_path = cms_dir / "cms_manifest.json"
             manifest_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
@@ -188,6 +241,7 @@ class CMSScanStage(Stage):
         stats["findings"] = findings
         stats["by_tool"] = dict(tool_stats)
         stats["by_cms"] = dict(cms_stats)
+        stats["modules"] = dict(module_stats)
         context.manager.update_metadata(context.record)
 
     @staticmethod
@@ -282,3 +336,75 @@ class CMSScanStage(Stage):
         if not CommandExecutor.available("nuclei"):
             note_missing_tool(context, "nuclei")
         return {}
+
+    def _discover_modules(
+        self,
+        context: PipelineContext,
+        cms: str,
+        host: str,
+        base_url: str,
+        timeout: int,
+        limiter,
+        cache: Dict[str, Tuple[str, str]],
+    ) -> List[str]:
+        if cms not in {"drupal", "magento"}:
+            return []
+        cache_key = f"{host}:{cms}"
+        if cache_key in cache:
+            html, final_url = cache[cache_key]
+        else:
+            try:
+                import requests
+            except Exception:
+                return []
+            headers = context.auth_headers({"User-Agent": "recon-cli cms-modules"})
+            if limiter and not limiter.wait_for_slot(base_url, timeout=timeout):
+                return []
+            session = context.auth_session(base_url)
+            try:
+                if session:
+                    resp = session.get(
+                        base_url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers=headers,
+                        verify=context.runtime_config.verify_tls,
+                    )
+                else:
+                    resp = requests.get(
+                        base_url,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        headers=headers,
+                        verify=context.runtime_config.verify_tls,
+                    )
+            except Exception:
+                if limiter:
+                    limiter.on_error(base_url)
+                return []
+            if limiter:
+                limiter.on_response(base_url, resp.status_code)
+            if resp.status_code >= 400:
+                return []
+            html = resp.text or ""
+            final_url = str(getattr(resp, "url", "")) or base_url
+            cache[cache_key] = (html, final_url)
+
+        modules: Set[str] = set()
+        if cms == "drupal":
+            modules.update(self.DRUPAL_MODULE_RE.findall(html))
+            modules.update(self.DRUPAL_LEGACY_RE.findall(html))
+        elif cms == "magento":
+            modules.update(self.MAGENTO_THEME_RE.findall(html))
+            modules.update(self.MAGENTO_ADMIN_THEME_RE.findall(html))
+
+        max_modules = int(getattr(context.runtime_config, "cms_module_max", 60))
+        cleaned = []
+        for module in sorted(modules):
+            module = module.strip().strip("/")
+            if not module:
+                continue
+            cleaned.append(module)
+            if max_modules > 0 and len(cleaned) >= max_modules:
+                break
+        return cleaned

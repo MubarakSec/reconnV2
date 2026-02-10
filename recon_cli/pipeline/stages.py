@@ -29,8 +29,13 @@ from recon_cli.pipeline.stage_runtime_crawl import RuntimeCrawlStage
 from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
 from recon_cli.pipeline.stage_api_recon import APIReconStage
 from recon_cli.pipeline.stage_graphql import GraphQLReconStage
+from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
+from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
+from recon_cli.pipeline.stage_oauth_discovery import OAuthDiscoveryStage
+from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 from recon_cli.pipeline.stage_param_mining import ParamMiningStage
 from recon_cli.pipeline.stage_html_forms import HTMLFormMiningStage
+from recon_cli.pipeline.stage_upload_probe import UploadProbeStage
 from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
 from recon_cli.pipeline.stage_cms_scan import CMSScanStage
 from recon_cli.pipeline.stage_trim_results import TrimResultsStage
@@ -39,6 +44,7 @@ from recon_cli.pipeline.stage_correlation import CorrelationStage
 from recon_cli.pipeline.stage_learning import LearningStage
 from recon_cli.pipeline.stage_scanner import ScannerStage
 from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
+from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_exploit_validation import ExploitValidationStage
 from recon_cli.pipeline.stage_screenshots import ScreenshotStage
 from recon_cli.pipeline.stage_finalize import FinalizeStage
@@ -72,8 +78,13 @@ PIPELINE_STAGES: List[Stage] = [
     JSIntelligenceStage(),
     APIReconStage(),
     GraphQLReconStage(),
+    GraphQLExploitStage(),
+    ApiSchemaProbeStage(),
+    OAuthDiscoveryStage(),
+    WsGrpcDiscoveryStage(),
     ParamMiningStage(),
     HTMLFormMiningStage(),
+    UploadProbeStage(),
     VulnScanStage(),
     CMSScanStage(),
     RescoreStage(),
@@ -82,6 +93,7 @@ PIPELINE_STAGES: List[Stage] = [
     LearningStage(),
     ScannerStage(),
     VerifyFindingsStage(),
+    ExtendedValidationStage(),
     ExploitValidationStage(),
     ScreenshotStage(),
     FinalizeStage(),

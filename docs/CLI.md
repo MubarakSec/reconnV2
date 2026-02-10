@@ -701,6 +701,7 @@ The web dashboard at `http://localhost:8080` provides:
 | Charts | `/api/charts/severity` | Severity distribution |
 | WebSocket | `/ws/updates` | Real-time updates |
 | Reports | `/api/jobs/{id}/report` | Generate reports |
+| Outputs | `/api/jobs/{id}/outputs/*` | Download results.txt / results_bigger.txt / results_confirmed.txt |
 
 ---
 

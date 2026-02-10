@@ -236,6 +236,8 @@ recon_cli/
 │  ├── spec.json        # Original request                            │
 │  ├── results.jsonl    # All findings (JSONL)                        │
 │  ├── results.txt      # Human-readable                              │
+│  ├── results_bigger.txt # Findings score >= 60                      │
+│  ├── results_confirmed.txt # Confirmed-only findings                │
 │  ├── artifacts/       # Tool outputs                                │
 │  │   ├── targets.txt                                                │
 │  │   ├── subfinder.txt                                              │

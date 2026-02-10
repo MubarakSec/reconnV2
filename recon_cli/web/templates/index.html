@@ -314,6 +314,7 @@
                         <th>المعرف</th>
                         <th>الهدف</th>
                         <th>الحالة</th>
+                        <th>المؤكدة</th>
                         <th>البداية</th>
                         <th>الإجراءات</th>
                     </tr>
@@ -328,6 +329,7 @@
                                 {{ job.status }}
                             </span>
                         </td>
+                        <td>{{ job.stats.get('confirmed_findings', 0) if job.stats else 0 }}</td>
                         <td>{{ job.started_at or 'لم يبدأ' }}</td>
                         <td>
                             <a href="/jobs/{{ job.id }}" class="btn btn-outline-light btn-action me-1">

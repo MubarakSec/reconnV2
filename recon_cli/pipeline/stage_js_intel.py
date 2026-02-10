@@ -14,13 +14,43 @@ class JSIntelligenceStage(Stage):
     name = "js_intelligence"
 
     ENDPOINT_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
-    RELATIVE_PATTERN = re.compile(r"/(?:api|graphql|v1|v2|v3|v4|auth|oauth|login|logout|register)[^\s\"'<>]*")
+    RELATIVE_PATTERN = re.compile(
+        r"/(?:api|graphql|v\\d+|auth|oauth|login|logout|register|admin|internal|debug|config|upload|media)[^\\s\"'<>]*"
+    )
     SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
     AUTH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "register", "password", "reset", "forgot", "auth", "oauth", "sso")
     ADMIN_HINTS = ("admin", "dashboard", "console", "manage", "staff", "internal", "superuser")
     ACCOUNT_HINTS = ("account", "profile", "user", "customer", "member")
     BILLING_HINTS = ("billing", "invoice", "payment", "stripe", "checkout", "subscription", "plan")
     PII_HINTS = ("ssn", "passport", "token", "secret", "apikey", "api-key", "credit", "card")
+    INTERNAL_HINTS = ("internal", "intranet", "employee", "corp", "backoffice")
+    DEBUG_HINTS = ("debug", "trace", "health", "metrics", "status", "actuator")
+    UPLOAD_HINTS = ("upload", "file", "attachment", "media", "avatar", "profile-picture")
+    CONFIG_HINTS = ("config", "settings", "env", "secrets", "apikey", "token", "jwt")
+    GRAPHQL_HINTS = ("graphql", "graphiql", "apollo")
+    SPEC_HINTS = ("swagger", "openapi", "api-docs")
+    STATIC_EXTENSIONS = (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".ico",
+        ".css",
+        ".map",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+        ".mp4",
+        ".webm",
+        ".mov",
+        ".pdf",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".7z",
+    )
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_js_intel", False))
@@ -135,7 +165,15 @@ class JSIntelligenceStage(Stage):
                         if limiter:
                             limiter.on_error(source_map)
                         pass
-            endpoints = list(endpoints)[:max_urls]
+            normalized = []
+            seen_norm = set()
+            for endpoint in endpoints:
+                norm = self._normalize_endpoint(endpoint)
+                if not norm or norm in seen_norm:
+                    continue
+                seen_norm.add(norm)
+                normalized.append(norm)
+            endpoints = normalized[:max_urls]
             artifacts.append(
                 {
                     "js_url": js_url,
@@ -148,30 +186,9 @@ class JSIntelligenceStage(Stage):
                     continue
                 parsed = urlparse(endpoint)
                 path = parsed.path.lower()
-                tags = {"js:discovered", "source:js"}
-                if "/api" in path or "/graphql" in path:
-                    tags.add("service:api")
-                if any(hint in path for hint in self.AUTH_HINTS):
-                    tags.add("surface:login")
-                if "reset" in path or "forgot" in path:
-                    tags.add("surface:password-reset")
-                if "register" in path or "signup" in path:
-                    tags.add("surface:register")
-                if any(hint in path for hint in self.ADMIN_HINTS):
-                    tags.add("surface:admin")
-                if any(hint in path for hint in self.ACCOUNT_HINTS):
-                    tags.add("surface:account")
-                if any(hint in path for hint in self.BILLING_HINTS):
-                    tags.add("surface:billing")
-                if any(hint in path for hint in self.PII_HINTS):
-                    tags.add("surface:pii")
-                score = 30
-                if "surface:admin" in tags:
-                    score += 15
-                if "surface:login" in tags or "surface:register" in tags:
-                    score += 10
-                if tags.intersection({"surface:billing", "surface:pii"}):
-                    score += 10
+                if self._is_static_asset(path):
+                    continue
+                tags, score = self._classify_endpoint(path)
                 payload = {
                     "type": "url",
                     "source": "js-intel",
@@ -212,6 +229,26 @@ class JSIntelligenceStage(Stage):
                             tags=sorted(tags),
                             evidence={"url": endpoint},
                         )
+                    if "surface:internal" in tags:
+                        context.emit_signal(
+                            "internal_surface",
+                            "url",
+                            endpoint,
+                            confidence=0.4,
+                            source="js-intel",
+                            tags=sorted(tags),
+                            evidence={"url": endpoint},
+                        )
+                    if "surface:debug" in tags:
+                        context.emit_signal(
+                            "debug_surface",
+                            "url",
+                            endpoint,
+                            confidence=0.4,
+                            source="js-intel",
+                            tags=sorted(tags),
+                            evidence={"url": endpoint},
+                        )
                     if tags.intersection({"surface:billing", "surface:pii", "surface:account"}):
                         context.emit_signal(
                             "sensitive_surface",
@@ -241,3 +278,74 @@ class JSIntelligenceStage(Stage):
             stats["files"] = len(artifacts)
             stats["endpoints"] = len(discovered_urls)
             context.manager.update_metadata(context.record)
+
+    def _classify_endpoint(self, path: str) -> tuple[set[str], int]:
+        tags = {"js:discovered", "source:js"}
+        score = 30
+        if "/api" in path or "/graphql" in path:
+            tags.add("service:api")
+        if any(hint in path for hint in self.GRAPHQL_HINTS):
+            tags.add("api:graphql")
+        if any(hint in path for hint in self.SPEC_HINTS) and path.endswith((".json", ".yaml", ".yml")):
+            tags.add("api:spec")
+        if any(hint in path for hint in self.AUTH_HINTS):
+            tags.add("surface:login")
+        if "reset" in path or "forgot" in path:
+            tags.add("surface:password-reset")
+        if "register" in path or "signup" in path:
+            tags.add("surface:register")
+        if any(hint in path for hint in self.ADMIN_HINTS):
+            tags.add("surface:admin")
+        if any(hint in path for hint in self.ACCOUNT_HINTS):
+            tags.add("surface:account")
+        if any(hint in path for hint in self.BILLING_HINTS):
+            tags.add("surface:billing")
+        if any(hint in path for hint in self.PII_HINTS):
+            tags.add("surface:pii")
+        if any(hint in path for hint in self.INTERNAL_HINTS):
+            tags.add("surface:internal")
+        if any(hint in path for hint in self.DEBUG_HINTS):
+            tags.add("surface:debug")
+        if any(hint in path for hint in self.UPLOAD_HINTS):
+            tags.add("surface:upload")
+        if any(hint in path for hint in self.CONFIG_HINTS):
+            tags.add("surface:config")
+        if "surface:admin" in tags:
+            score += 15
+        if "surface:login" in tags or "surface:register" in tags:
+            score += 10
+        if tags.intersection({"surface:billing", "surface:pii"}):
+            score += 10
+        if "surface:internal" in tags:
+            score += 10
+        if "surface:debug" in tags:
+            score += 12
+        if "surface:config" in tags:
+            score += 8
+        if "surface:upload" in tags:
+            score += 6
+        if "api:graphql" in tags:
+            score += 5
+        if "api:spec" in tags:
+            score += 5
+        return tags, score
+
+    def _normalize_endpoint(self, endpoint: str) -> str:
+        if not endpoint:
+            return ""
+        try:
+            parsed = urlparse(endpoint)
+        except Exception:
+            return ""
+        if not parsed.scheme or not parsed.netloc:
+            return ""
+        cleaned = parsed._replace(fragment="")
+        return cleaned.geturl()
+
+    def _is_static_asset(self, path: str) -> bool:
+        if not path:
+            return False
+        for ext in self.STATIC_EXTENSIONS:
+            if path.endswith(ext):
+                return True
+        return False

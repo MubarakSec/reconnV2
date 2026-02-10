@@ -2,10 +2,11 @@
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import json
+import uuid
 
 try:
     from fastapi import FastAPI, Request, HTTPException
-    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     import uvicorn
@@ -76,7 +77,7 @@ def get_recent_jobs(limit: int = 10) -> List[Dict[str, Any]]:
 
 def get_job_results(job_id: str) -> Dict[str, List[Dict]]:
     """Get categorized results for a job."""
-    results = {"hosts": [], "urls": [], "vulnerabilities": [], "secrets": [], "other": []}
+    results = {"hosts": [], "urls": [], "vulnerabilities": [], "confirmed": [], "secrets": [], "other": []}
     
     manager = JobManager()
     record = manager.load_job(job_id)
@@ -93,8 +94,94 @@ def get_job_results(job_id: str) -> Dict[str, List[Dict]]:
     results["secrets"] = categorized["secrets"]
     results["vulnerabilities"] = categorized["findings"]
     results["other"] = categorized["other"]
+    results["confirmed"] = [finding for finding in categorized["findings"] if _is_confirmed_finding(finding)]
     
     return results
+
+
+def _is_confirmed_finding(entry: Dict[str, Any]) -> bool:
+    tags = entry.get("tags", [])
+    if isinstance(tags, list):
+        for tag in tags:
+            tag_value = str(tag)
+            if tag_value == "confirmed" or tag_value.endswith(":confirmed"):
+                return True
+    source = entry.get("source")
+    if isinstance(source, str) and source in {"extended-validation", "exploit-validation"}:
+        return True
+    return False
+
+
+def _normalize_targets(data: Dict[str, Any]) -> List[str]:
+    targets: List[str] = []
+    raw_targets = data.get("targets")
+    if isinstance(raw_targets, list):
+        targets.extend([str(item).strip() for item in raw_targets if str(item).strip()])
+    elif isinstance(raw_targets, str):
+        targets.extend([line.strip() for line in raw_targets.splitlines() if line.strip()])
+    target = data.get("target")
+    if isinstance(target, str) and target.strip():
+        targets.append(target.strip())
+    deduped = []
+    seen = set()
+    for item in targets:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
+def _stage_overrides(selected: List[str]) -> Dict[str, Any]:
+    selected_set = {str(item).lower() for item in selected}
+    overrides: Dict[str, Any] = {}
+    if not selected_set:
+        return overrides
+
+    def disable(keys: List[str]) -> None:
+        for key in keys:
+            overrides[key] = False
+
+    if "dns" not in selected_set:
+        disable(["enable_ct_pivot", "enable_asn_pivot"])
+    if "subdomains" not in selected_set:
+        disable(["enable_subdomain_permute", "enable_vhost", "enable_takeover", "enable_cloud_discovery"])
+    if "ports" not in selected_set:
+        disable(["enable_nmap"])
+    if "web" not in selected_set:
+        disable([
+            "enable_waf_probe",
+            "enable_security_headers",
+            "enable_tls_hygiene",
+            "enable_runtime_crawl",
+            "enable_js_intel",
+            "enable_api_recon",
+            "enable_api_schema_probe",
+            "enable_graphql_recon",
+            "enable_graphql_exploit",
+            "enable_oauth_discovery",
+            "enable_ws_grpc_discovery",
+            "enable_upload_probe",
+            "enable_cms_scan",
+        ])
+    if "vulnerabilities" not in selected_set:
+        disable([
+            "enable_fuzz",
+            "enable_param_fuzz",
+            "enable_param_mining",
+            "enable_dalfox",
+            "enable_sqlmap",
+            "auto_scanners",
+            "enable_verification",
+            "enable_extended_validation",
+            "enable_exploit_validation",
+        ])
+    if "secrets" not in selected_set:
+        disable(["enable_secrets"])
+    return overrides
+
+
+def record_id_safe() -> str:
+    return uuid.uuid4().hex[:10]
 
 
 if WEB_AVAILABLE:
@@ -368,22 +455,67 @@ if WEB_AVAILABLE:
         """Start a new scan from web interface."""
         try:
             data = await request.json()
-            target = data.get("target")
+            targets = _normalize_targets(data)
             profile = data.get("profile", "passive")
-            notify = data.get("notify", False)
             scan_mode = data.get("scanMode", "queued")
+            stages = data.get("stages") if isinstance(data.get("stages"), list) else []
+            passive_only = bool(data.get("passive", False))
 
-            if not target:
+            if not targets:
                 raise HTTPException(status_code=400, detail="Target is required")
+
+            if passive_only:
+                profile = "passive"
+
+            runtime_overrides: Dict[str, Any] = {}
+            threads = data.get("threads")
+            if isinstance(threads, int) and threads > 0:
+                runtime_overrides["httpx_threads"] = threads
+                runtime_overrides["ffuf_threads"] = max(5, int(threads // 2))
+            timeout = data.get("timeout")
+            if isinstance(timeout, int) and timeout > 0:
+                runtime_overrides["timeout_http"] = timeout
+            rate_limit = data.get("rate_limit")
+            if isinstance(rate_limit, int) and rate_limit > 0:
+                runtime_overrides["requests_per_second"] = rate_limit
+                runtime_overrides["per_host_limit"] = max(1, int(rate_limit // 4))
+
+            resolvers = data.get("resolvers")
+            if resolvers in {"cloudflare", "google"}:
+                resolver_lines = [
+                    "1.1.1.1" if resolvers == "cloudflare" else "8.8.8.8",
+                    "1.0.0.1" if resolvers == "cloudflare" else "8.8.4.4",
+                ]
+                resolver_dir = config.RECON_HOME / "tmp"
+                resolver_dir.mkdir(parents=True, exist_ok=True)
+                resolver_path = resolver_dir / f"web_resolvers_{record_id_safe()}.txt"
+                resolver_path.write_text("\n".join(resolver_lines) + "\n", encoding="utf-8")
+                runtime_overrides["resolvers_file"] = str(resolver_path)
+
+            runtime_overrides.update(_stage_overrides(stages))
 
             from recon_cli.jobs.manager import JobManager
             from recon_cli.pipeline.runner import run_pipeline
 
             manager = JobManager()
+            targets_file = None
+            if len(targets) > 1:
+                targets_dir = config.RECON_HOME / "tmp"
+                targets_dir.mkdir(parents=True, exist_ok=True)
+                targets_path = targets_dir / f"web_targets_{record_id_safe()}.txt"
+                targets_path.write_text("\n".join(targets) + "\n", encoding="utf-8")
+                targets_file = str(targets_path)
+
             record = manager.create_job(
-                target=target,
+                target=targets[0],
                 profile=profile,
+                targets_file=targets_file,
+                runtime_overrides=runtime_overrides,
             )
+
+            if stages:
+                record.spec.stages = [str(stage) for stage in stages]
+                manager.update_spec(record)
 
             # If scanMode is 'immediate', run the pipeline right away
             if scan_mode == "immediate":
@@ -398,16 +530,44 @@ if WEB_AVAILABLE:
                 return {
                     "success": True,
                     "job_id": record.spec.job_id,
-                    "message": f"Scan started immediately for {target}",
+                    "message": f"Scan started immediately for {targets[0]}",
                 }
             else:
                 return {
                     "success": True,
                     "job_id": record.spec.job_id,
-                    "message": f"Scan queued for {target}",
+                    "message": f"Scan queued for {targets[0]}",
                 }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    # ========================================================================
+    # OUTPUTS API - Download job outputs
+    # ========================================================================
+
+    @app.get("/api/jobs/{job_id}/outputs/{output_name}")
+    async def outputs_api(job_id: str, output_name: str):
+        """Download job output files (results, confirmed, bigger, jsonl)."""
+        manager = JobManager()
+        record = manager.load_job(job_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        output_map = {
+            "results": ("results.txt", "text/plain"),
+            "results_bigger": ("results_bigger.txt", "text/plain"),
+            "results_confirmed": ("results_confirmed.txt", "text/plain"),
+            "results_jsonl": ("results.jsonl", "application/x-ndjson"),
+            "results_trimmed": ("results_trimmed.jsonl", "application/x-ndjson"),
+        }
+        file_info = output_map.get(output_name)
+        if not file_info:
+            raise HTTPException(status_code=404, detail="Output not found")
+        filename, mime = file_info
+        path = record.paths.root / filename
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Output file missing")
+        return FileResponse(path, media_type=mime, filename=filename)
     
     # ========================================================================
     # SETTINGS PAGE

@@ -404,6 +404,7 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
         ("wpscan", ["--version"], "install via gem install wpscan"),
         ("droopescan", ["--version"], "install via pipx install droopescan or pip install droopescan"),
         ("joomscan", ["--version"], "install via apt install joomscan"),
+        ("interactsh-client", ["-version"], "install via go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"),
         ("waybackurls", ["-h"], "install via go install github.com/tomnomnom/waybackurls@latest"),
         ("gau", ["-h"], "install via go install github.com/lc/gau/v2/cmd/gau@latest"),
     ]

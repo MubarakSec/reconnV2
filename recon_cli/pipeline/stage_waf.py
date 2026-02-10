@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Tuple
+import re
+from typing import Dict, List, Tuple
 from urllib.parse import urlparse, urlsplit, urlunsplit, quote_plus
 
 from recon_cli.pipeline.context import PipelineContext
@@ -36,7 +37,57 @@ class WafProbeStage(Stage):
         "<script>alert(1)</script>",
         "../../etc/passwd",
         "${jndi:ldap://127.0.0.1/a}",
+        "';WAITFOR DELAY '0:0:2'--",
     ]
+    CHALLENGE_KEYWORDS = (
+        "captcha",
+        "turnstile",
+        "challenge",
+        "verify you are human",
+        "bot detection",
+        "please enable cookies",
+        "just a moment",
+    )
+    HEADER_TAGS: Dict[str, str] = {
+        "cf-ray": "waf:cloudflare",
+        "cf-cache-status": "waf:cloudflare",
+        "cf-chl-bypass": "waf:cloudflare",
+        "x-sucuri-id": "waf:sucuri",
+        "x-sucuri-block": "waf:sucuri",
+        "x-sucuri-cache": "waf:sucuri",
+        "x-akamai-transformed": "waf:akamai",
+        "x-akamai-request-id": "waf:akamai",
+        "x-incapsula": "waf:incapsula",
+        "x-iinfo": "waf:imperva",
+        "x-distil-cs": "waf:distil",
+        "x-waf": "waf:generic",
+        "x-firewall": "waf:generic",
+        "x-cdn": "waf:cdn",
+        "x-amzn-waf-blocked": "waf:aws",
+        "x-amz-cf-id": "waf:cloudfront",
+        "x-amz-cf-pop": "waf:cloudfront",
+    }
+    HEADER_VALUE_TAGS: Dict[str, Dict[str, str]] = {
+        "server": {
+            "cloudflare": "waf:cloudflare",
+            "akamai": "waf:akamai",
+            "imperva": "waf:imperva",
+            "incapsula": "waf:incapsula",
+            "sucuri": "waf:sucuri",
+            "f5": "waf:f5",
+            "barracuda": "waf:barracuda",
+        },
+        "via": {
+            "cloudflare": "waf:cloudflare",
+            "imperva": "waf:imperva",
+            "akamai": "waf:akamai",
+        },
+        "x-powered-by": {
+            "imperia": "waf:imperva",
+            "mod_security": "waf:modsecurity",
+        },
+    }
+    TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_waf_probe", False))
@@ -145,6 +196,7 @@ class WafProbeStage(Stage):
             try:
                 if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                     continue
+                alt_path = urlsplit(url).path or "/"
                 resp_alt = self._fetch(
                     context,
                     attack_url,
@@ -155,6 +207,8 @@ class WafProbeStage(Stage):
                         "X-Forwarded-For": "127.0.0.1",
                         "X-Originating-IP": "127.0.0.1",
                         "X-Real-IP": "127.0.0.1",
+                        "X-Original-URL": alt_path,
+                        "X-Rewrite-URL": alt_path,
                     },
                 )
             except Exception:
@@ -165,18 +219,37 @@ class WafProbeStage(Stage):
                 limiter.on_response(url, resp_alt[0].status_code)
             alt_resp, alt_snip = resp_alt
 
+            baseline_meta = self._response_meta(baseline_resp, baseline_snip)
+            attack_meta = self._response_meta(attack_resp, attack_snip)
+            alt_meta = self._response_meta(alt_resp, alt_snip)
+
             baseline_blocked = self._looks_blocked(baseline_resp, baseline_snip)
             attack_blocked = self._looks_blocked(attack_resp, attack_snip)
             alt_blocked = self._looks_blocked(alt_resp, alt_snip)
+
             waf_tags = set()
+            waf_tags.update(self._header_tags(baseline_resp))
             waf_tags.update(enrich_utils.detect_waf_tags(baseline_resp.headers.get("server"), baseline_resp.headers.get("via")))
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(baseline_resp)))
+            waf_tags.update(self._header_tags(attack_resp))
             waf_tags.update(enrich_utils.detect_waf_tags(attack_resp.headers.get("server"), attack_resp.headers.get("via")))
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(attack_resp)))
+            waf_tags.update(self._header_tags(alt_resp))
             waf_tags.update(enrich_utils.detect_waf_tags(alt_resp.headers.get("server"), alt_resp.headers.get("via")))
             waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(alt_resp)))
 
-            if (not baseline_blocked and attack_blocked) or waf_tags:
+            blocked_delta = self._blocked_delta(baseline_meta, attack_meta)
+            indicators = 0
+            if blocked_delta:
+                indicators += 1
+            if waf_tags:
+                indicators += 1
+            if self._looks_challenge(attack_resp, attack_snip):
+                indicators += 1
+            if (not baseline_blocked and attack_blocked):
+                indicators += 1
+
+            if indicators >= 2:
                 signal_id = context.emit_signal(
                     "waf_detected",
                     "url",
@@ -185,9 +258,12 @@ class WafProbeStage(Stage):
                     source="waf-probe",
                     tags=sorted({"service:waf"} | waf_tags),
                     evidence={
-                        "baseline_status": baseline_resp.status_code,
-                        "attack_status": attack_resp.status_code,
-                        "alternate_status": alt_resp.status_code,
+                        "baseline_status": baseline_meta["status"],
+                        "attack_status": attack_meta["status"],
+                        "alternate_status": alt_meta["status"],
+                        "baseline_title": baseline_meta["title"],
+                        "attack_title": attack_meta["title"],
+                        "alternate_title": alt_meta["title"],
                     },
                 )
                 finding = {
@@ -199,12 +275,15 @@ class WafProbeStage(Stage):
                     "details": {
                         "url": url,
                         "attack_url": attack_url,
-                        "baseline_status": baseline_resp.status_code,
-                        "attack_status": attack_resp.status_code,
-                        "alternate_status": alt_resp.status_code,
-                        "baseline_length": len(baseline_snip),
-                        "attack_length": len(attack_snip),
-                        "alternate_length": len(alt_snip),
+                        "baseline_status": baseline_meta["status"],
+                        "attack_status": attack_meta["status"],
+                        "alternate_status": alt_meta["status"],
+                        "baseline_length": baseline_meta["length"],
+                        "attack_length": attack_meta["length"],
+                        "alternate_length": alt_meta["length"],
+                        "baseline_title": baseline_meta["title"],
+                        "attack_title": attack_meta["title"],
+                        "alternate_title": alt_meta["title"],
                     },
                     "tags": sorted({"waf", "detected", "service:waf"} | waf_tags),
                     "score": 40,
@@ -223,9 +302,9 @@ class WafProbeStage(Stage):
                     source="waf-probe",
                     tags=sorted({"waf", "bypass-possible"} | waf_tags),
                     evidence={
-                        "baseline_status": baseline_resp.status_code,
-                        "attack_status": attack_resp.status_code,
-                        "alternate_status": alt_resp.status_code,
+                        "baseline_status": baseline_meta["status"],
+                        "attack_status": attack_meta["status"],
+                        "alternate_status": alt_meta["status"],
                     },
                 )
                 finding = {
@@ -237,12 +316,15 @@ class WafProbeStage(Stage):
                     "details": {
                         "url": url,
                         "attack_url": attack_url,
-                        "baseline_status": baseline_resp.status_code,
-                        "attack_status": attack_resp.status_code,
-                        "alternate_status": alt_resp.status_code,
-                        "baseline_length": len(baseline_snip),
-                        "attack_length": len(attack_snip),
-                        "alternate_length": len(alt_snip),
+                        "baseline_status": baseline_meta["status"],
+                        "attack_status": attack_meta["status"],
+                        "alternate_status": alt_meta["status"],
+                        "baseline_length": baseline_meta["length"],
+                        "attack_length": attack_meta["length"],
+                        "alternate_length": alt_meta["length"],
+                        "baseline_title": baseline_meta["title"],
+                        "attack_title": attack_meta["title"],
+                        "alternate_title": alt_meta["title"],
                     },
                     "tags": sorted({"waf", "bypass-possible"} | waf_tags),
                     "score": 65,
@@ -251,6 +333,19 @@ class WafProbeStage(Stage):
                 }
                 if context.results.append(finding):
                     findings += 1
+            if self._looks_challenge(attack_resp, attack_snip):
+                context.emit_signal(
+                    "waf_challenge",
+                    "url",
+                    url,
+                    confidence=0.5,
+                    source="waf-probe",
+                    tags=sorted({"waf", "challenge"} | waf_tags),
+                    evidence={
+                        "attack_status": attack_meta["status"],
+                        "attack_title": attack_meta["title"],
+                    },
+                )
         stats = context.record.metadata.stats.setdefault("waf_probe", {})
         stats["findings"] = findings
         stats["checked"] = checked
@@ -295,7 +390,78 @@ class WafProbeStage(Stage):
         lowered = (body_snippet or "").lower()
         if any(keyword in lowered for keyword in self.BLOCK_KEYWORDS):
             return True
+        if any(keyword in lowered for keyword in self.CHALLENGE_KEYWORDS):
+            return True
         return False
+
+    def _looks_challenge(self, resp, body_snippet: str) -> bool:
+        if not resp:
+            return False
+        lowered = (body_snippet or "").lower()
+        if any(keyword in lowered for keyword in self.CHALLENGE_KEYWORDS):
+            return True
+        title = self._extract_title(body_snippet).lower()
+        if "just a moment" in title or "attention required" in title:
+            return True
+        return False
+
+    def _response_meta(self, resp, body_snippet: str) -> Dict[str, object]:
+        status = int(getattr(resp, "status_code", 0) or 0)
+        return {
+            "status": status,
+            "length": len(body_snippet or ""),
+            "title": self._extract_title(body_snippet),
+        }
+
+    def _blocked_delta(self, baseline: Dict[str, object], attack: Dict[str, object]) -> bool:
+        try:
+            baseline_status = int(baseline.get("status") or 0)
+        except Exception:
+            baseline_status = 0
+        try:
+            attack_status = int(attack.get("status") or 0)
+        except Exception:
+            attack_status = 0
+        if attack_status in self.BLOCK_STATUSES and baseline_status not in self.BLOCK_STATUSES:
+            return True
+        base_len = int(baseline.get("length") or 0)
+        attack_len = int(attack.get("length") or 0)
+        if base_len > 0 and attack_len > 0 and attack_len < base_len * 0.4:
+            return True
+        base_title = str(baseline.get("title") or "")
+        attack_title = str(attack.get("title") or "")
+        if base_title and attack_title and base_title != attack_title:
+            if any(keyword in attack_title.lower() for keyword in ("denied", "blocked", "forbidden")):
+                return True
+        return False
+
+    def _header_tags(self, resp) -> set[str]:
+        if not resp:
+            return set()
+        headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+        tags: set[str] = set()
+        for key, tag in self.HEADER_TAGS.items():
+            if key in headers:
+                tags.add(tag)
+        for header, mapping in self.HEADER_VALUE_TAGS.items():
+            value = headers.get(header)
+            if not value:
+                continue
+            lower_value = value.lower()
+            for needle, tag in mapping.items():
+                if needle in lower_value:
+                    tags.add(tag)
+        return tags
+
+    def _extract_title(self, body_snippet: str) -> str:
+        if not body_snippet:
+            return ""
+        match = self.TITLE_RE.search(body_snippet)
+        if not match:
+            return ""
+        title = match.group(1)
+        title = re.sub(r"\s+", " ", title).strip()
+        return title[:120]
 
     @staticmethod
     def _cookie_headers(resp) -> List[str]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -25,6 +26,9 @@ class APIReconStage(Stage):
         "/graphiql",
         "/graphql/console",
     ]
+    SPEC_INDICATORS = ("openapi", "swagger", "\"openapi\"", "\"swagger\"")
+    LOGIN_HINTS = ("login", "signin", "sign-in", "auth", "sso", "oauth")
+    TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_api_recon", False))
@@ -62,7 +66,9 @@ class APIReconStage(Stage):
                 if not context.url_allowed(url):
                     continue
                 session = context.auth_session(url)
-                headers = context.auth_headers({"User-Agent": "recon-cli api-recon"})
+                headers = context.auth_headers(
+                    {"User-Agent": "recon-cli api-recon", "Accept": "application/json"}
+                )
                 if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                     continue
                 try:
@@ -88,12 +94,15 @@ class APIReconStage(Stage):
                     continue
                 if limiter:
                     limiter.on_response(url, resp.status_code)
-                if resp.status_code >= 400:
+                content_type = resp.headers.get("Content-Type", "").lower()
+                status_code = int(resp.status_code or 0)
+                text = resp.text or ""
+                meta = self._response_meta(resp, text)
+                if status_code >= 500:
                     continue
                 text = resp.text or ""
-                content_type = resp.headers.get("Content-Type", "").lower()
                 if "graphql" in path:
-                    if "graphql" in text.lower() or resp.status_code in {200, 400}:
+                    if "graphql" in text.lower() or status_code in {200, 400}:
                         payload = {
                             "type": "api",
                             "source": "api-recon",
@@ -115,8 +124,57 @@ class APIReconStage(Stage):
                                 evidence={"url": url},
                             )
                             signaled_hosts.add(host)
+                    elif status_code in {401, 403, 302}:
+                        context.emit_signal(
+                            "graphql_candidate",
+                            "url",
+                            url,
+                            confidence=0.4,
+                            source="api-recon",
+                            tags=["api:graphql"],
+                            evidence={"status_code": status_code, "location": meta.get("location")},
+                        )
                     continue
                 data, spec_format = self._parse_spec(text, content_type)
+                spec_hint = self._looks_like_spec(path, text)
+                if status_code in {401, 403, 302} and spec_hint:
+                    spec_payload = {
+                        "type": "api_spec",
+                        "source": "api-recon",
+                        "hostname": host,
+                        "url": url,
+                        "tags": ["api:openapi", "api:auth-required"],
+                        "score": 30,
+                        "status_code": status_code,
+                        "content_type": content_type,
+                        "title": meta.get("title"),
+                        "location": meta.get("location"),
+                    }
+                    context.results.append(spec_payload)
+                    signal_type = "api_spec_auth_required"
+                    if status_code == 302 and self._looks_like_login(meta):
+                        signal_type = "api_spec_auth_challenge"
+                    context.emit_signal(
+                        signal_type,
+                        "url",
+                        url,
+                        confidence=0.5,
+                        source="api-recon",
+                        tags=["api:openapi"],
+                        evidence={"status_code": status_code, "location": meta.get("location")},
+                    )
+                    if host not in signaled_hosts:
+                        context.emit_signal(
+                            "api_surface",
+                            "host",
+                            host,
+                            confidence=0.5,
+                            source="api-recon",
+                            tags=["api:openapi"],
+                            evidence={"url": url},
+                        )
+                        signaled_hosts.add(host)
+                    continue
                 if isinstance(data, dict) and data:
                     specs_found += 1
                     paths = data.get("paths") or {}
@@ -142,6 +200,10 @@ class APIReconStage(Stage):
                         "url": url,
                         "tags": ["api:openapi"],
                         "score": 40,
+                        "status_code": status_code,
+                        "content_type": content_type,
+                        "title": meta.get("title"),
+                        "location": meta.get("location"),
                     }
                     if spec_format:
                         spec_payload["spec_format"] = spec_format
@@ -238,3 +300,41 @@ class APIReconStage(Stage):
             if isinstance(data, dict) and ("openapi" in data or "swagger" in data):
                 return data, "yaml"
         return {}, None
+
+    def _looks_like_spec(self, path: str, text: str) -> bool:
+        lowered_path = path.lower()
+        if any(token in lowered_path for token in ("swagger", "openapi", "api-docs")):
+            return True
+        lowered_text = (text or "").lower()
+        if any(token in lowered_text for token in self.SPEC_INDICATORS):
+            return True
+        return False
+
+    def _response_meta(self, resp, body: str) -> Dict[str, object]:
+        content_type = resp.headers.get("Content-Type", "") if resp else ""
+        location = resp.headers.get("Location", "") if resp else ""
+        title = self._extract_title(body)
+        return {
+            "content_type": content_type,
+            "location": location,
+            "title": title,
+        }
+
+    def _extract_title(self, body: str) -> str:
+        if not body:
+            return ""
+        match = self.TITLE_RE.search(body)
+        if not match:
+            return ""
+        title = match.group(1)
+        title = re.sub(r"\\s+", " ", title).strip()
+        return title[:120]
+
+    def _looks_like_login(self, meta: Dict[str, object]) -> bool:
+        location = str(meta.get("location") or "").lower()
+        title = str(meta.get("title") or "").lower()
+        if any(hint in location for hint in self.LOGIN_HINTS):
+            return True
+        if any(hint in title for hint in self.LOGIN_HINTS):
+            return True
+        return False

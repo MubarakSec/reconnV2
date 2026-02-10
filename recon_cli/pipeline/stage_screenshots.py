@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List
+import re
+from typing import Dict, List, Set
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -11,6 +12,9 @@ from recon_cli.utils.jsonl import read_jsonl
 
 class ScreenshotStage(Stage):
     name = "screenshots"
+    LOGIN_HINTS = ("login", "sign in", "signin", "log in", "auth", "password", "otp", "verify")
+    ADMIN_HINTS = ("admin", "dashboard", "console", "portal", "manage", "backend", "staff")
+    TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
     def is_enabled(self, context: PipelineContext) -> bool:
         spec = context.record.spec
@@ -27,6 +31,20 @@ class ScreenshotStage(Stage):
             context.logger.warning("playwright not installed; skipping screenshots")
             note_missing_tool(context, "playwright")
             return
+        runtime = context.runtime_config
+        ocr_enabled = bool(getattr(runtime, "enable_screenshot_ocr", False))
+        ocr_max = int(getattr(runtime, "screenshot_ocr_max", 0))
+        ocr_lang = str(getattr(runtime, "screenshot_ocr_lang", "eng") or "eng")
+        ocr_ready = False
+        if ocr_enabled and ocr_max:
+            try:
+                import pytesseract  # type: ignore
+                from PIL import Image  # type: ignore
+                ocr_ready = True
+            except Exception:
+                context.logger.warning("pytesseract/PIL not available; skipping OCR")
+                note_missing_tool(context, "pytesseract")
+                ocr_ready = False
         max_shots = context.record.spec.max_screenshots or context.runtime_config.max_screenshots
         candidates = self._select_urls(context, max_shots)
         if not candidates:
@@ -35,6 +53,7 @@ class ScreenshotStage(Stage):
         screenshots_dir = context.record.paths.ensure_subdir("screenshots")
         hars_dir = context.record.paths.ensure_subdir("hars")
         manifest: List[Dict[str, object]] = []
+        ocr_count = 0
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -43,6 +62,7 @@ class ScreenshotStage(Stage):
                 url = entry["url"]
                 screenshot_path = screenshots_dir / f"shot_{idx}.png"
                 html_path = screenshots_dir / f"shot_{idx}.html"
+                ocr_path = screenshots_dir / f"shot_{idx}.txt"
                 har_path = hars_dir / f"shot_{idx}.har"
                 payload = None
                 browser_context = None
@@ -52,8 +72,22 @@ class ScreenshotStage(Stage):
                     page = browser_context.new_page()
                     page.goto(url, timeout=15000, wait_until="networkidle")
                     page.screenshot(path=str(screenshot_path), full_page=True)
-                    html_path.write_text(page.content(), encoding="utf-8")
+                    html_content = page.content()
+                    html_path.write_text(html_content, encoding="utf-8")
+                    page_title = page.title() or self._extract_title(html_content)
                     hostname = urlparse(page.url).hostname or ""
+                    portal_tags = self._classify_portal(page.url, page_title, html_content, "")
+                    ocr_snippet = ""
+                    if ocr_ready and ocr_count < ocr_max and screenshot_path.exists():
+                        ocr_text = self._run_ocr(str(screenshot_path), ocr_lang)
+                        if ocr_text:
+                            ocr_count += 1
+                            ocr_path.write_text(ocr_text, encoding="utf-8")
+                            ocr_snippet = ocr_text[:500]
+                            portal_tags.update(
+                                self._classify_portal(page.url, page_title, html_content, ocr_text)
+                            )
+                    portal_tags_list = sorted(portal_tags) if portal_tags else []
                     payload = {
                         "type": "screenshot",
                         "source": "playwright",
@@ -65,7 +99,13 @@ class ScreenshotStage(Stage):
                         "selection_tags": entry.get("tags"),
                         "selection_reason": entry.get("reason"),
                         "screenshot_path": str(screenshot_path.relative_to(context.record.paths.root)),
+                        "title": page_title,
                     }
+                    if portal_tags_list:
+                        payload["tags"] = portal_tags_list
+                        self._emit_portal_signals(context, page.url, portal_tags_list, page_title)
+                    if ocr_snippet:
+                        payload["ocr_snippet"] = ocr_snippet
                 except Exception as exc:
                     if browser_context is None:
                         context.logger.warning("Failed to initialize browser context for %s: %s", url, exc)
@@ -87,6 +127,8 @@ class ScreenshotStage(Stage):
                         payload["har_path"] = str(har_path.relative_to(context.record.paths.root))
                     if html_path.exists():
                         payload["html_path"] = str(html_path.relative_to(context.record.paths.root))
+                    if ocr_path.exists():
+                        payload["ocr_path"] = str(ocr_path.relative_to(context.record.paths.root))
                     context.results.append(payload)
                     manifest.append(payload)
             browser.close()
@@ -121,3 +163,76 @@ class ScreenshotStage(Stage):
             )
         urls.sort(key=lambda item: item.get("score", 0), reverse=True)
         return urls[:limit]
+
+    def _classify_portal(self, url: str, title: str, html: str, ocr_text: str) -> Set[str]:
+        tags: Set[str] = set()
+        title_lower = (title or "").lower()
+        url_lower = (url or "").lower()
+        html_lower = (html or "").lower()
+        ocr_lower = (ocr_text or "").lower()
+        combined = " ".join([title_lower, url_lower, html_lower[:2000], ocr_lower[:2000]])
+        if "type=\"password\"" in html_lower or "type='password'" in html_lower:
+            tags.add("portal:login")
+        if any(hint in combined for hint in self.LOGIN_HINTS):
+            tags.add("portal:login")
+        if any(hint in combined for hint in self.ADMIN_HINTS):
+            tags.add("portal:admin")
+        if "dashboard" in combined:
+            tags.add("portal:dashboard")
+        return tags
+
+    def _emit_portal_signals(self, context: PipelineContext, url: str, tags: List[str], title: str) -> None:
+        if "portal:login" in tags:
+            context.emit_signal(
+                "portal_login",
+                "url",
+                url,
+                confidence=0.5,
+                source="screenshots",
+                tags=["portal", "login"],
+                evidence={"title": title},
+            )
+        if "portal:admin" in tags:
+            context.emit_signal(
+                "portal_admin",
+                "url",
+                url,
+                confidence=0.5,
+                source="screenshots",
+                tags=["portal", "admin"],
+                evidence={"title": title},
+            )
+        if "portal:dashboard" in tags:
+            context.emit_signal(
+                "portal_dashboard",
+                "url",
+                url,
+                confidence=0.4,
+                source="screenshots",
+                tags=["portal", "dashboard"],
+                evidence={"title": title},
+            )
+
+    def _extract_title(self, html: str) -> str:
+        if not html:
+            return ""
+        match = self.TITLE_RE.search(html)
+        if not match:
+            return ""
+        title = match.group(1)
+        title = re.sub(r"\s+", " ", title).strip()
+        return title[:120]
+
+    @staticmethod
+    def _run_ocr(image_path: str, lang: str) -> str:
+        try:
+            import pytesseract  # type: ignore
+            from PIL import Image  # type: ignore
+        except Exception:
+            return ""
+        try:
+            img = Image.open(image_path)
+            text = pytesseract.image_to_string(img, lang=lang)
+            return text or ""
+        except Exception:
+            return ""

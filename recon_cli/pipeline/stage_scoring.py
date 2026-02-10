@@ -59,6 +59,17 @@ class ScoringStage(Stage):
                     if "cms_joomla" in host_signals:
                         tags.add("cms:joomla")
                         tags.add("service:cms")
+                    if "cms_magento" in host_signals:
+                        tags.add("cms:magento")
+                        tags.add("service:cms")
+                    if "oauth_config" in host_signals:
+                        tags.add("service:oauth")
+                    if "oidc_config" in host_signals:
+                        tags.add("service:oidc")
+                    if "grpc_detected" in host_signals:
+                        tags.add("service:grpc")
+                    if "ws_detected" in host_signals:
+                        tags.add("service:ws")
                     if "auth_surface" in host_signals:
                         tags.add("surface:login")
                     tags.update(rules_engine.apply_rules(entry, self.rules))
@@ -129,12 +140,39 @@ class ScoringStage(Stage):
                 if "service:api" not in tags:
                     tags.add("service:api")
                     score += 10
+            if "api_spec_auth_required" in url_signals:
+                tags.add("api:spec-auth-required")
+                score += 10
+            if "api_spec_auth_challenge" in url_signals:
+                tags.add("api:spec-auth-challenge")
+                score += 8
+            if "api_schema_endpoint" in url_signals:
+                tags.add("api:schema")
+                score += 10
+            if "api_auth_required" in url_signals:
+                tags.add("api:auth-required")
+                score += 10
+            if "api_auth_weak" in url_signals:
+                tags.add("api:auth-weak")
+                score += 25
+            if "api_auth_challenge" in url_signals:
+                tags.add("api:auth-challenge")
+                score += 10
+            if "api_public_endpoint" in url_signals:
+                tags.add("api:public")
+                score += 5
             if "graphql_detected" in url_signals:
                 tags.add("api:graphql")
                 score += 10
             if "graphql_introspection_enabled" in url_signals:
                 tags.add("api:graphql:introspection")
                 score += 15
+            if "graphql_sensitive_schema" in url_signals:
+                tags.add("api:graphql:sensitive")
+                score += 10
+            if "graphql_query_enabled" in url_signals:
+                tags.add("api:graphql:query")
+                score += 5
             if "auth_surface" in url_signals:
                 if "surface:login" not in tags:
                     tags.add("surface:login")
@@ -142,16 +180,54 @@ class ScoringStage(Stage):
             if "admin_surface" in url_signals:
                 tags.add("surface:admin")
                 score += 20
+            if "internal_surface" in url_signals:
+                tags.add("surface:internal")
+                score += 12
+            if "debug_surface" in url_signals:
+                tags.add("surface:debug")
+                score += 15
             if "sensitive_surface" in url_signals:
                 tags.add("surface:sensitive")
                 score += 15
             if "form_discovered" in url_signals:
                 tags.add("surface:form")
                 score += 5
+            if "oauth_authorize_endpoint" in url_signals:
+                tags.add("surface:authorize")
+                score += 20
+            if "oauth_token_endpoint" in url_signals:
+                tags.add("surface:token")
+                score += 25
+            if "oauth_config" in host_signals:
+                tags.add("service:oauth")
+            if "oidc_config" in host_signals:
+                tags.add("service:oidc")
+            if "ws_detected" in url_signals:
+                tags.add("service:ws")
+                tags.add("surface:ws")
+                score += 10
+            if "ws_candidate" in url_signals:
+                tags.add("surface:ws")
+                score += 5
+            if "grpc_detected" in host_signals or "grpc_detected" in url_signals:
+                tags.add("service:grpc")
+                score += 10
+            if "upload_surface" in url_signals:
+                tags.add("surface:upload")
+                score += 10
+            if "upload_dir_exposed" in url_signals:
+                tags.add("upload:exposed")
+                score += 30
             if "waf_detected" in host_signals or "waf_detected" in url_signals:
                 tags.add("service:waf")
             if "waf_bypass_possible" in url_signals:
                 tags.add("waf-bypass-possible")
+                score += 15
+            if "xss_candidate" in url_signals:
+                tags.add("xss:candidate")
+                score += 10
+            if "sqli_candidate" in url_signals:
+                tags.add("sqli:candidate")
                 score += 15
             if "vhost_found" in host_signals:
                 tags.add("surface:vhost")
@@ -167,6 +243,10 @@ class ScoringStage(Stage):
                 tags.add("cms:joomla")
                 tags.add("service:cms")
                 score += 5
+            if "cms_magento" in host_signals:
+                tags.add("cms:magento")
+                tags.add("service:cms")
+                score += 5
             if "ct_discovery" in host_signals:
                 tags.add("source:ct")
                 score += 5
@@ -176,6 +256,29 @@ class ScoringStage(Stage):
             if "verified_blocked" in url_signals:
                 tags.add("verified:blocked")
                 score = max(score - 10, 0)
+            if "portal_login" in url_signals:
+                tags.add("surface:login")
+                tags.add("portal:login")
+                score += 20
+            if "portal_admin" in url_signals:
+                tags.add("surface:admin")
+                tags.add("portal:admin")
+                score += 25
+            if "portal_dashboard" in url_signals:
+                tags.add("portal:dashboard")
+                score += 10
+            if "ssrf_confirmed" in url_signals:
+                tags.add("ssrf:confirmed")
+                score += 40
+            if "xxe_confirmed" in url_signals:
+                tags.add("xxe:confirmed")
+                score += 35
+            if "open_redirect_confirmed" in url_signals:
+                tags.add("redirect:confirmed")
+                score += 25
+            if "lfi_confirmed" in url_signals:
+                tags.add("lfi:confirmed")
+                score += 35
 
             status_code = entry.get("status_code")
             length = entry.get("length") or entry.get("content_length") or entry.get("content-length")

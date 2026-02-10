@@ -17,7 +17,7 @@ class FuzzStage(Stage):
 
     def is_enabled(self, context: PipelineContext) -> bool:
         spec = context.record.spec
-        if not context.runtime_config.enable_fuzz and not spec.wordlist:
+        if not context.runtime_config.enable_fuzz and not context.runtime_config.enable_param_fuzz and not spec.wordlist:
             return False
         return spec.profile in {"full", "fuzz-only"} or bool(spec.wordlist)
 
@@ -42,6 +42,11 @@ class FuzzStage(Stage):
             context.logger.info("No hosts qualified for fuzzing")
             return
         host_tags = self._tags_for_hosts(context)
+        host_meta = self._collect_fuzz_metadata(context)
+        enable_param_fuzz = bool(getattr(runtime, "enable_param_fuzz", False))
+        fuzz_custom_max_words = int(getattr(runtime, "fuzz_custom_max_words", 1500))
+        fuzz_combined_max_words = int(getattr(runtime, "fuzz_combined_max_words", 6000))
+        fuzz_param_max_words = int(getattr(runtime, "fuzz_param_max_words", 500))
         for host in targets[: context.runtime_config.max_fuzz_hosts]:
             wordlist_path = wordlist_override or self._select_wordlist_for_host(
                 runtime, host, host_tags.get(host, set())
@@ -49,13 +54,26 @@ class FuzzStage(Stage):
             if not wordlist_path.exists():
                 context.logger.warning("Wordlist not found: %s", wordlist_path)
                 continue
+            meta = host_meta.get(host, {})
+            base_url = self._base_url_for_host(host, meta)
+            base_root = self._root_url(base_url)
+            path_words = meta.get("path_words", set())
+            param_words = meta.get("param_words", set())
+            combined_wordlist = self._build_combined_wordlist(
+                context,
+                host,
+                wordlist_path,
+                path_words,
+                max_custom=fuzz_custom_max_words,
+                max_combined=fuzz_combined_max_words,
+            )
             artifact = context.record.paths.artifact(f"ffuf_{host}.json")
             cmd = [
                 "ffuf",
                 "-w",
-                str(wordlist_path),
+                str(combined_wordlist),
                 "-u",
-                f"https://{host}/FUZZ",
+                f"{base_root}/FUZZ",
                 "-t",
                 str(context.runtime_config.ffuf_threads),
                 "-mc",
@@ -66,77 +84,57 @@ class FuzzStage(Stage):
                 "-o",
                 str(artifact),
             ]
-            try:
-                ffuf_maxtime = max(0, int(getattr(runtime, "ffuf_maxtime", 0)))
-                if ffuf_maxtime:
-                    cmd.extend(["-maxtime", str(ffuf_maxtime)])
-                timeout = tool_timeout
-                if ffuf_maxtime:
-                    timeout = ffuf_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
-                executor.run(cmd, check=False, timeout=timeout)
-            except CommandError as exc:
-                retried = False
-                if getattr(runtime, "ffuf_retry_on_timeout", True) and "timeout" in str(exc).lower():
-                    retry_maxtime = max(
-                        ffuf_maxtime + int(getattr(runtime, "ffuf_retry_extra_time", 120)),
-                        ffuf_maxtime,
-                    )
-                    retry_threads = max(10, int(context.runtime_config.ffuf_threads // 2) or 10)
-                    retry_cmd = [part for part in cmd if part not in {"-maxtime", str(ffuf_maxtime)}]
-                    retry_cmd = list(retry_cmd)
-                    if "-t" in retry_cmd:
-                        t_idx = retry_cmd.index("-t") + 1
-                        if t_idx < len(retry_cmd):
-                            retry_cmd[t_idx] = str(retry_threads)
-                    if retry_maxtime:
-                        retry_cmd.extend(["-maxtime", str(retry_maxtime)])
-                    retry_timeout = retry_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
-                    try:
-                        executor.run(retry_cmd, check=False, timeout=retry_timeout)
-                        retried = True
-                    except CommandError:
-                        pass
-                if not retried:
-                    context.logger.warning("ffuf failed for %s", host)
-                continue
-            if artifact.exists():
-                try:
-                    data = json.loads(artifact.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    continue
-                for result in data.get("results", []):
-                    payload = {
-                        "type": "url",
-                        "source": "ffuf",
-                        "url": result.get("url"),
-                        "status_code": result.get("status"),
-                        "length": result.get("length"),
-                        "tags": ["fuzz"],
-                        "score": 50,
-                    }
-                    entry_url = payload.get("url")
-                    if not entry_url:
-                        continue
-                    if not context.url_allowed(entry_url):
-                        continue
-                    if entry_url in stage_seen:
-                        continue
-                    host = payload.get("hostname") or urlparse(entry_url).hostname
-                    if host:
-                        payload.setdefault("hostname", host)
-                    if host and per_host_limit > 0 and per_host_counts[host] >= per_host_limit:
-                        continue
-                    appended = context.results.append(payload)
-                    if appended:
-                        stage_seen.add(entry_url)
-                        if host:
-                            per_host_counts[host] += 1
+            if self._run_ffuf(context, cmd, tool_timeout, runtime):
+                self._ingest_ffuf_results(
+                    context,
+                    artifact,
+                    stage_seen,
+                    per_host_counts,
+                    per_host_limit,
+                    tag="fuzz",
+                )
+
+            if enable_param_fuzz and param_words:
+                param_wordlist = self._write_wordlist(
+                    context,
+                    f"ffuf_{host}_params.txt",
+                    param_words,
+                    limit=fuzz_param_max_words,
+                )
+                if param_wordlist and param_wordlist.exists():
+                    param_artifact = context.record.paths.artifact(f"ffuf_params_{host}.json")
+                    param_cmd = [
+                        "ffuf",
+                        "-w",
+                        str(param_wordlist),
+                        "-u",
+                        f"{base_root}/?FUZZ=1",
+                        "-t",
+                        str(max(5, int(context.runtime_config.ffuf_threads // 2) or 5)),
+                        "-mc",
+                        "200,301,302,401,403",
+                        "-ac",
+                        "-of",
+                        "json",
+                        "-o",
+                        str(param_artifact),
+                    ]
+                    if self._run_ffuf(context, param_cmd, tool_timeout, runtime):
+                        self._ingest_ffuf_results(
+                            context,
+                            param_artifact,
+                            stage_seen,
+                            per_host_counts,
+                            per_host_limit,
+                            tag="param-fuzz",
+                        )
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts = defaultdict(int)
         results_path = context.record.paths.results_jsonl
         if not results_path.exists():
             return []
+        soft_404_hosts = set(context.record.metadata.stats.get("soft_404", {}).get("hosts", []))
         for entry in read_jsonl(results_path):
             if entry.get("type") == "url" and entry.get("status_code") in {200, 204}:
                 url_value = entry.get("url")
@@ -155,9 +153,241 @@ class FuzzStage(Stage):
                 score += 10
             if "auth_surface" in host_signals:
                 score += 5
+            if host in soft_404_hosts:
+                score = max(score - 40, 0)
             adjusted[host] = score
         sorted_hosts = sorted(adjusted.items(), key=lambda item: item[1], reverse=True)
         return [host for host, _ in sorted_hosts]
+
+    def _collect_fuzz_metadata(self, context: PipelineContext) -> Dict[str, Dict[str, object]]:
+        metadata: Dict[str, Dict[str, object]] = defaultdict(
+            lambda: {"path_words": set(), "param_words": set(), "base_url": None, "base_score": -1}
+        )
+        results_path = context.record.paths.results_jsonl
+        if not results_path.exists():
+            return metadata
+        for entry in read_jsonl(results_path):
+            etype = entry.get("type")
+            if etype == "url":
+                url_value = entry.get("url")
+                if not url_value:
+                    continue
+                host = entry.get("hostname") or urlparse(url_value).hostname
+                if not host:
+                    continue
+                score = int(entry.get("score", 0))
+                if score > int(metadata[host].get("base_score", -1)):
+                    metadata[host]["base_url"] = url_value
+                    metadata[host]["base_score"] = score
+                self._add_path_words(metadata[host]["path_words"], urlparse(url_value).path)
+            elif etype == "form":
+                action = entry.get("action") or entry.get("url")
+                if not action:
+                    continue
+                host = urlparse(action).hostname
+                if not host:
+                    continue
+                self._add_path_words(metadata[host]["path_words"], urlparse(action).path)
+            elif etype == "parameter":
+                name = entry.get("name")
+                if not name:
+                    continue
+                examples = entry.get("examples") or []
+                if not isinstance(examples, list) or not examples:
+                    continue
+                for example in examples:
+                    if not isinstance(example, str):
+                        continue
+                    host = urlparse(example).hostname
+                    if host:
+                        metadata[host]["param_words"].add(str(name))
+        js_endpoints = context.get_data("js_endpoints", []) or []
+        for endpoint in js_endpoints:
+            if not isinstance(endpoint, str) or not endpoint:
+                continue
+            host = urlparse(endpoint).hostname
+            if not host:
+                continue
+            self._add_path_words(metadata[host]["path_words"], urlparse(endpoint).path)
+        return metadata
+
+    @staticmethod
+    def _add_path_words(word_set: Set[str], path: str) -> None:
+        if not path:
+            return
+        stripped = path.strip("/")
+        if not stripped:
+            return
+        word_set.add(stripped)
+        for part in stripped.split("/"):
+            if part:
+                word_set.add(part)
+
+    @staticmethod
+    def _root_url(url: str) -> str:
+        parsed = urlparse(url)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or parsed.hostname or ""
+        if not netloc:
+            return url
+        return f"{scheme}://{netloc}".rstrip("/")
+
+    def _base_url_for_host(self, host: str, meta: Dict[str, object]) -> str:
+        base = meta.get("base_url")
+        if isinstance(base, str) and base:
+            return base
+        return f"https://{host}"
+
+    def _write_wordlist(
+        self,
+        context: PipelineContext,
+        filename: str,
+        words: Set[str],
+        *,
+        limit: int,
+    ) -> Path | None:
+        if not words:
+            return None
+        cleaned: List[str] = []
+        seen: Set[str] = set()
+        for word in sorted(words):
+            if not word:
+                continue
+            normalized = str(word).strip().lstrip("/")
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            cleaned.append(normalized)
+            if limit > 0 and len(cleaned) >= limit:
+                break
+        if not cleaned:
+            return None
+        wordlist_dir = context.record.paths.ensure_subdir("wordlists")
+        path = wordlist_dir / filename
+        path.write_text("\n".join(cleaned) + "\n", encoding="utf-8")
+        return path
+
+    def _build_combined_wordlist(
+        self,
+        context: PipelineContext,
+        host: str,
+        base_wordlist: Path,
+        custom_words: Set[str],
+        *,
+        max_custom: int,
+        max_combined: int,
+    ) -> Path:
+        if not custom_words:
+            return base_wordlist
+        custom_path = self._write_wordlist(
+            context,
+            f"ffuf_{host}_custom.txt",
+            custom_words,
+            limit=max_custom,
+        )
+        if custom_path is None or not custom_path.exists():
+            return base_wordlist
+        combined: List[str] = []
+        seen: Set[str] = set()
+        for line in custom_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line in seen:
+                continue
+            combined.append(line)
+            seen.add(line)
+        if base_wordlist.exists():
+            for line in base_wordlist.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if not line or line in seen:
+                    continue
+                combined.append(line)
+                seen.add(line)
+                if max_combined > 0 and len(combined) >= max_combined:
+                    break
+        wordlist_dir = context.record.paths.ensure_subdir("wordlists")
+        combined_path = wordlist_dir / f"ffuf_{host}_combined.txt"
+        combined_path.write_text("\n".join(combined) + "\n", encoding="utf-8")
+        return combined_path
+
+    def _run_ffuf(self, context: PipelineContext, cmd: List[str], tool_timeout: int, runtime) -> bool:
+        try:
+            ffuf_maxtime = max(0, int(getattr(runtime, "ffuf_maxtime", 0)))
+            if ffuf_maxtime:
+                cmd.extend(["-maxtime", str(ffuf_maxtime)])
+            timeout = tool_timeout
+            if ffuf_maxtime:
+                timeout = ffuf_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
+            context.executor.run(cmd, check=False, timeout=timeout)
+            return True
+        except CommandError as exc:
+            retried = False
+            if getattr(runtime, "ffuf_retry_on_timeout", True) and "timeout" in str(exc).lower():
+                retry_maxtime = max(
+                    ffuf_maxtime + int(getattr(runtime, "ffuf_retry_extra_time", 120)),
+                    ffuf_maxtime,
+                )
+                retry_threads = max(10, int(context.runtime_config.ffuf_threads // 2) or 10)
+                retry_cmd = [part for part in cmd if part not in {"-maxtime", str(ffuf_maxtime)}]
+                retry_cmd = list(retry_cmd)
+                if "-t" in retry_cmd:
+                    t_idx = retry_cmd.index("-t") + 1
+                    if t_idx < len(retry_cmd):
+                        retry_cmd[t_idx] = str(retry_threads)
+                if retry_maxtime:
+                    retry_cmd.extend(["-maxtime", str(retry_maxtime)])
+                retry_timeout = retry_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
+                try:
+                    context.executor.run(retry_cmd, check=False, timeout=retry_timeout)
+                    retried = True
+                except CommandError:
+                    pass
+            if not retried:
+                context.logger.warning("ffuf failed for %s", cmd[cmd.index("-u") + 1] if "-u" in cmd else "target")
+            return retried
+
+    def _ingest_ffuf_results(
+        self,
+        context: PipelineContext,
+        artifact: Path,
+        stage_seen: Set[str],
+        per_host_counts: Dict[str, int],
+        per_host_limit: int,
+        *,
+        tag: str,
+    ) -> None:
+        if not artifact.exists():
+            return
+        try:
+            data = json.loads(artifact.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return
+        for result in data.get("results", []):
+            payload = {
+                "type": "url",
+                "source": "ffuf",
+                "url": result.get("url"),
+                "status_code": result.get("status"),
+                "length": result.get("length"),
+                "tags": ["fuzz", tag],
+                "score": 50,
+            }
+            entry_url = payload.get("url")
+            if not entry_url:
+                continue
+            if not context.url_allowed(entry_url):
+                continue
+            if entry_url in stage_seen:
+                continue
+            host = payload.get("hostname") or urlparse(entry_url).hostname
+            if host:
+                payload.setdefault("hostname", host)
+            if host and per_host_limit > 0 and per_host_counts[host] >= per_host_limit:
+                continue
+            appended = context.results.append(payload)
+            if appended:
+                stage_seen.add(entry_url)
+                if host:
+                    per_host_counts[host] += 1
 
     def _tags_for_hosts(self, context: PipelineContext) -> Dict[str, set[str]]:
         tags_by_host: Dict[str, set[str]] = defaultdict(set)
