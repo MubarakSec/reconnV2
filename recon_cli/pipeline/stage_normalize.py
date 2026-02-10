@@ -18,7 +18,13 @@ class NormalizeStage(Stage):
             if not targets_path.is_absolute():
                 targets_path = Path.cwd() / targets_path
             if not targets_path.exists():
-                raise StageError(f"Targets file not found: {targets_path}")
+                candidate = context.record.paths.root / "inputs" / Path(spec.targets_file).name
+                if candidate.exists():
+                    targets_path = candidate
+                    spec.targets_file = str(candidate)
+                    context.manager.update_spec(context.record)
+                else:
+                    raise StageError(f"Targets file not found: {targets_path}")
             targets = validation.load_targets_from_file(str(targets_path), allow_ip=allow_ip)
         else:
             targets = [validation.validate_target(spec.target, allow_ip=allow_ip)]

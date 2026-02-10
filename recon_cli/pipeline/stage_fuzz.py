@@ -47,6 +47,7 @@ class FuzzStage(Stage):
         fuzz_custom_max_words = int(getattr(runtime, "fuzz_custom_max_words", 1500))
         fuzz_combined_max_words = int(getattr(runtime, "fuzz_combined_max_words", 6000))
         fuzz_param_max_words = int(getattr(runtime, "fuzz_param_max_words", 500))
+        param_wordlist_words = self._load_param_wordlist(runtime)
         for host in targets[: context.runtime_config.max_fuzz_hosts]:
             wordlist_path = wordlist_override or self._select_wordlist_for_host(
                 runtime, host, host_tags.get(host, set())
@@ -94,6 +95,9 @@ class FuzzStage(Stage):
                     tag="fuzz",
                 )
 
+            if enable_param_fuzz:
+                if param_wordlist_words:
+                    param_words.update(param_wordlist_words)
             if enable_param_fuzz and param_words:
                 param_wordlist = self._write_wordlist(
                     context,
@@ -435,7 +439,27 @@ class FuzzStage(Stage):
             candidates.append(base / "Discovery" / "Web-Content" / "Logins.fuzz.txt")
         if "surface:admin" in tags:
             candidates.append(base / "Discovery" / "Web-Content" / "admin.txt")
+        candidates.append(base / "Discovery" / "Web-Content" / "raft-medium-words.txt")
+        candidates.append(base / "Discovery" / "Web-Content" / "raft-medium-directories.txt")
         for candidate in candidates:
             if candidate.exists():
                 return candidate
         return base / "Discovery" / "Web-Content" / "common.txt"
+
+    @staticmethod
+    def _load_param_wordlist(runtime) -> Set[str]:
+        base = runtime.seclists_root
+        candidates = [
+            base / "Discovery" / "Web-Content" / "burp-parameter-names.txt",
+            base / "Discovery" / "Web-Content" / "parameter-names.txt",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                words: Set[str] = set()
+                for line in candidate.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    words.add(line)
+                return words
+        return set()

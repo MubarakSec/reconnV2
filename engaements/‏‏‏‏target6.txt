@@ -1,0 +1,323 @@
+
+Bugcrowd logo
+
+    Hacker Login Customer Login 
+
+    EngagementsSimpliSafe Managed Bug Bounty Engagement
+
+    Bug Bounty
+
+SimpliSafe Managed Bug Bounty Engagement
+
+SimpliSafe designs award-winning smart home security systems that are wireless, affordable and user-friendly. Their seamless 24/7 professional monitoring protects 4 million people without the long-term contracts and sky-high prices of traditional alarm companies.
+Program logo
+
+    TechnologySafe harbor
+
+    Scope rating
+    4 out of 4
+    Testing period Ongoing Started at Dec 17, 2024
+    Status In progress 17 Dec 2024 18:00:00 GMT+0
+
+    Details
+    Changelog
+    Announcements4
+    CrowdStream
+    Hall of Fame
+
+Last Updated :07 Oct 2025 15:29:25 GMT+0View changes
+On this page
+
+    Overview
+    Description
+    Targets
+    What’s new
+    Recent activity
+    Crowd highlights
+    Things to know
+
+    Vulnerabilities rewarded 29
+    Validation within 9 days 75% of submissions are accepted or rejected within 9 days in last 3 months
+    Average payout $600 last 3 months
+
+SimpliSafe's mission is to make every home secure. Delivering on that means putting our customers at the center of everything we do to improve their safety and comfort. Our home security solutions are designed with cutting-edge technology yet are affordable to purchase, easy to install and don’t require contracts. We protect more than four million people throughout the United States and the United Kingdom against everything from intruders to fires, water damage and more.
+
+As part of our commitment to our customers, we take data privacy and security issues very seriously. By engaging with talented security researchers across the globe through programs like Bugcrowd, SimpliSafe can more effectively identify and resolve suspected vulnerabilities.
+
+Thank you for participating in our program and helping protect SimpliSafe and its customers from potential threats.
+Now Public in September 2025!
+
+We are excited to have this program open to the public. In these first weeks, we expect increased activity, so please keep these in mind while testing our targets:
+
+    Use an account tied with your @bugcrowdninja.com email for all testing. We will block and restrict suspicious activity from other accounts. Submissions that involve other email addresses will be marked as Out of Scope.
+    The auth.simplisafe.com subdomain handles authentication and is owned by Auth0. Since SimpliSafe doesn’t own the system, it is Out of Scope for testing and suspicious activity will be blocked. Normal behavior with this system is expected as part of testing.
+    Be a good neighbor while testing our systems and refrain from activities that could affect system availability. We're co-workers now, so let's be kind to each other.
+
+If you have any questions about our systems or want to know more information to help test, feel free to reach out to support and they can pass the questions along.
+
+Thanks for joining us in our bug bounty program!
+Ratings/Rewards:
+
+For the initial prioritization/rating of findings, this program will use the Bugcrowd Vulnerability Rating Taxonomy. However, it is important to note that in some cases a vulnerability priority will be modified due to its likelihood or impact. In any instance where an issue is downgraded, a full, detailed explanation will be provided to the researcher - along with the opportunity to appeal, and make a case for a higher priority.
+
+Good luck, and happy hunting!
+Targets
+4 out of 4
+Bugcrowd calculates scope ratings based on the depth and breadth of in-scope targets.
+
+    SimpliSafe Home Security Platform - Backend
+    In scope
+    Payment reward chart
+
+    P1
+        $4000 – $6000
+    P2
+        $2000 – $3000
+    P3
+        $600 – $1000
+    P4
+        $250 – $500
+
+    SimpliSafe's Home Security Platform comprises of the hardware devices and software services that our customers rely on to keep them safe. The below targets are the public backend software components that facilitate communication with our devices. We want to encourage researchers to use our hardware while testing and will award higher payouts when hardware was required.
+
+    Basestations establish connections and communicate with bb1.simplisafe.com and bb2.simplisafe.com
+
+    Cameras establish connections and communicate with cb.simplisafe.com and *.prd.cam.simplisafe.com
+
+    The Home Security Platform leverages APIs found at api.simplisafe.com and api.services.simplisafe.com, alongside communicating with services at *.prd.services.simplisafe.com
+    Name / Location	Tags	Known issues
+    bb1.simplisafe.com	
+        API TestingC++
+    bb2.simplisafe.com	
+        API TestingC++
+    cb.simplisafe.com	
+        API TestingC++
+    api.simplisafe.com (HSP Endpoints)	
+        API TestingJavascript
+    api.services.simplisafe.com (HSP Endpoints)	
+        API TestingTypeScript
+    *.prd.cam.simplisafe.com (HSP Endpoints)	
+        API TestingC++
+    *.prd.platform.simplisafe.com (HSP Endpoints)	
+        RustAPI TestingTypeScript
+    *.prd.services.simplisafe.com (HSP Endpoints)	
+        RustAPI TestingTypeScript
+    SimpliSafe Customer App
+    In scope
+    Payment reward chart
+
+    P1
+        $3500 – $6000
+    P2
+        $1500 – $3000
+    P3
+        $500 – $1000
+    P4
+        $175 – $500
+
+    The SimpliSafe Customer App is the primary way that our customers interact with their system through their smartphone or browser. We want to encourage researchers to use our hardware while testing and will award higher payouts when hardware was required for a submission.
+
+    For the next few weeks, submissions opened against our recently announced Additional User Access feature are eligible for a 30% bonus on top of displayed rewards.
+
+    Authentication is handled by auth.simplisafe.com which is owned by Auth0 and is subject to their engagement terms. The subdomain is not in-scope of our engagement. MFA support comes from mfa.simplisafe.com.
+
+    The Customer App's backend services are accessed through *.prd.aser.simplisafe.com and *.prd.webapps.simplisafe.com
+
+    The Customer App leverages shared APIs found at api.simplisafe.com and api.services.simplisafe.com, alongside communicating with services at *.prd.services.simplisafe.com and *.prd.platform.simplisafe.com
+
+    Video data is shared with the Customer App through media.simplisafe.com and *.prd.cam.simplisafe.com
+    Name / Location	Tags	Known issues
+    SimpliSafe Customer Webapp - US	
+        Website TestingAngular
+    SimpliSafe Customer Webapp - UK	
+        Website TestingAngular
+    SimpliSafe Customer iOS App	
+        SwiftMobile Application TestingiOS
+    SimpliSafe Customer Android App	
+        JavaMobile Application TestingKotlin+1
+    mfa.simplisafe.com	
+        API TestingTypeScriptAuthentication Systems
+    *.prd.aser.simplisafe.com	
+        API TestingTypeScript
+    *.prd.webapps.simplisafe.com	
+        API TestingTypeScript
+    api.simplisafe.com (App Endpoints)	
+        API TestingJavascript
+    api.services.simplisafe.com (App Endpoints)	
+        API TestingTypeScript
+    *.prd.services.simplisafe.com (App Endpoints)	
+        RustAPI TestingTypeScript
+    *.prd.platform.simplisafe.com (App Endpoints)	
+        RustAPI Testing
+    media.simplisafe.com	
+        API TestingJavascript
+    *.prd.cam.simplisafe.com (App Endpoints)	
+        API TestingC++
+    SimpliSafe Ecommerce Platform
+    In scope
+    Payment reward chart
+
+    P1
+        $3500 – $4500
+    P2
+        $1500 – $2500
+    P3
+        $500 – $750
+    P4
+        $175 – $225
+
+    simplisafe.com and simplisafe.co.uk are the front-end of SimpliSafe's Ecommerce Platform
+
+    All calls to backend ecommerce services go through api.prd.commerce.simplisafe.com
+
+    All paths on the top-level domain are in scope. Webpages that are on a separate subdomain are out of scope.
+    Name / Location	Tags	Known issues
+    SimpliSafe Website - US	
+        ReactJSWebsite Testing
+    SimpliSafe Website - UK	
+        ReactJSWebsite Testing
+    api.prd.commerce.simplisafe.com	
+        API TestingTypeScript
+    Out of Scope Targets
+    Out of scope
+
+    While our systems are generally resilient to a high number of requests, until further notice, rate limiting (or lack thereof) submissions are considered Out of Scope.
+    Name / Location	Tags	Known issues
+    auth.simplisafe.com	
+        RustAPI TestingAuth0
+    careers.simplisafe.com	
+    clicks.simplisafe.com	
+    library.simplisafe.com	
+    livechat.simplisafe.com	
+    press.simplisafe.com	
+    support.simplisafe.com	
+
+Testing is only authorized on the targets listed as in scope. Any domain/property of SimpliSafe not listed in the targets section is out of scope. This includes any/all subdomains not listed above. If you happen to identify a security vulnerability on a target that is not in scope, but it demonstrably belongs to SimpliSafe, you can report it to this program. However, be aware that it is ineligible for rewards or points-based compensation.
+Access:
+
+All of the targets are accessible via the public internet and available. Simplisafe is designed for US and UK based customers. Access from other countries may inhibit testing.
+
+Our systems help keep millions of our customers safe. Testing and research on a system can impact its ability to do so. Do not perform any testing on a system that you or others are actively using.
+
+If you encounter a We are unable to create your account at this time error during account creation, reach out to Bugcrowd support or add a comment in a submission with your IP address and the email you used.
+Credentials:
+
+To gain access to the application, please sign up for an account using your @bugcrowdninja.com email address. For more info regarding @bugcrowdninja email addresses, see here. With that email address, you can perform a Forgot Password reset to gain access to the account. You may register for accounts here.
+
+PLEASE NOTE: Submissions that are created without using your @bugcrowdninja email will be marked as Out of Scope.
+Exclusions:
+
+We do not allow and will not review submissions based on:
+
+    brute force authentication requests
+    denial of service
+    web crawling bots
+    social engineering
+    physical attacks
+
+    minor website misconfigurations such as 404 codes and others
+
+    Any vulnerabilities found in our vendors’ products, e.g., third party software libraries, fall outside this policy’s scope and should be reported directly to the vendor according to their vulnerability disclosure policy.
+
+    Obviously, if we are using a vulnerable library or component and are affected by the vulnerability, that would be a finding we want to be submitted. But just utilizing a library that has a vulnerability shouldn't be a qualified finding.
+
+N-Day Policy:
+
+    When N-Day bugs are released to the public, we will consider these as in scope after 14 days has gone by
+        e.g: N-day released on 01/01/2023, we would consider it in-scope on 01/15/2023
+
+Out of Scope
+
+Websites on subdomains linked to from simplisafe.com are out of scope. These include but are not limited to:
+
+    careers.simplisafe.com
+    clicks.simplisafe.com
+    library.simplisafe.com
+    livechat.simplisafe.com
+    press.simplisafe.com
+    support.simplisafe.com
+
+Safe Harbor:
+
+When conducting vulnerability research according to this policy, we consider this research to be:
+
+    Authorized in accordance with the Computer Fraud and Abuse Act (CFAA) (and/or similar state laws), and we will not initiate or support legal action against you for accidental, good faith violations of this policy;
+    Exempt from the Digital Millennium Copyright Act (DMCA), and we will not bring a claim against you for circumvention of technology controls;
+    Exempt from restrictions in our Terms & Conditions that would interfere with conducting security research, and we waive those restrictions on a limited basis for work done under this policy; and
+    Lawful, helpful to the overall security of the Internet, and conducted in good faith.
+    You are expected, as always, to comply with all applicable laws.
+
+If at any time you have concerns or are uncertain whether your security research is consistent with this policy, please create a ticket with Bugcrowd Support for clarification before proceeding.
+What’s new
+View all announcements
+
+    REDACTED’s avatarBugcrowd logo
+
+    REDACTED announced The engagement SimpliSafe Managed Bug Bounty Engagement has transitioned to public
+        5 months ago(24 Sep 2025 16:45:27 GMT+0)
+
+    Effective immediately, participation in this engagement has transitioned to public. This means that hackers no longer need an invitation to participate in this engagement.
+    If you have any questions, please contact Bugcrowd support.
+    eamondawes’s avatar
+
+    eamondawes announced Reward bonuses for Additional User Access
+        11 months ago(26 Mar 2025 19:30:25 GMT+0)
+
+    SimpliSafe is excited to announce that a popular feature request from our Community is now available - Additional User Access!
+
+    For the next few weeks, submissions opened against this feature are eligible for a 30% bonus reward.
+    	Standard Reward 	With Bonus
+    P1 	$3500-$6000 	$4450-$7800
+    P2 	$1500-$3000 	$1950-$3900
+    P3 	$500-$1000 	$650-$1300
+    P4 	$175-$500 	$230-$650
+
+    For further details, please review the brief.
+
+    If you have any questions, please create a ticket with Bugcrowd Support to get them answered.
+    JenRoz’s avatarBugcrowd logo
+
+    JenRoz announced auth.simplisafe.com is now out of Scope
+        11 months ago(25 Mar 2025 17:19:12 GMT+0)
+
+    Effective immediately, auth.simplisafe.com is now out of scope:
+
+    Authentication is handled by auth.simplisafe.com which is owned by Auth0 and is subject to their engagement terms. The subdomain is not in-scope of our engagement. MFA support comes from mfa.simplisafe.com.
+
+    Any pending submissions submitted before the out of scope changes will be reviewed and processed accordingly.
+
+    If you have any questions on the change in the scope, please create a ticket with Bugcrowd Support to get them answered.
+
+Recent activity
+View all CrowdStream activity
+
+    Submission accepted
+        By Private userEngagement SimpliSafe Managed Bug Bounty EngagementPriority P3Accepted on 15 Dec 2025
+
+    Submission accepted on target: api.prd.commerce.simplisafe.com
+        By faizan-bugcrowdEngagement SimpliSafe Managed Bug Bounty EngagementReward $2,500Priority P2Accepted on 24 Oct 2025
+
+    Submission accepted on target: SimpliSafe Website - UK
+        By Private userEngagement SimpliSafe Managed Bug Bounty EngagementPriority P4Accepted on 16 Oct 2025
+
+Crowd highlights
+
+    Latest hall of famers
+        Private user's avatarfaizan-bugcrowd's avatarPrivate user's avatarPrivate user's avatar3M0oo0ry's avatarPrivate user's avatarPrivate user's avatarPrivate user's avatarAhsanKhan's avatarsandrunner's avatarHall of Fame
+    Recently joined this engagement
+        Private user's avatard0xing's avatarfaizan-bugcrowd's avatargodiego's avatarZer0_Sec's avatarPrivate user's avatarakshay1's avatarRohit_443's avatarPrivate user's avatarK2ito's avatar86 total
+
+Things to know
+
+    Testing problems
+    For any testing issues (such as broken credentials, inaccessible application, or Bugcrowd Ninja email problems), please visit Bugcrowd Support and create a support ticket. We will address your issue as soon as possible.
+    Engagement rules
+    This engagement follows Bugcrowd’s standard disclosure terms.
+    Nondisclosure
+    This engagement does not allow disclosure. You may not release information about vulnerabilities found in this engagement to the public.
+
+    Terms & ConditionsPrivacy PolicySecurityDo Not Sell My Information
+
+    DocsFAQResourcesBlogContactGet Help
+
+Copyright © 2014 – 2026 Bugcrowd, Inc. All rights reserved.

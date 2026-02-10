@@ -192,7 +192,23 @@ DEFAULT_PROFILES_CONTENT = """{
   }
 }
 """
-DEFAULT_SECLISTS_ROOT = Path(os.environ.get("SECLISTS_ROOT", "/opt/recon-tools/seclists"))
+def _detect_seclists_root() -> Path:
+    env_value = os.environ.get("SECLISTS_ROOT")
+    if env_value:
+        return Path(env_value).expanduser()
+    candidates = [
+        Path("/opt/recon-tools/seclists"),
+        Path("/usr/share/seclists"),
+        Path("/usr/share/wordlists/seclists"),
+        Path.home() / "seclists",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return Path("/opt/recon-tools/seclists")
+
+
+DEFAULT_SECLISTS_ROOT = _detect_seclists_root()
 
 def ensure_base_directories(force: bool = False) -> None:
     global _PROFILES_CACHE

@@ -369,7 +369,9 @@ def run_ffuf(
     
     # Use default wordlist if not specified
     if not wordlist:
-        wordlist = "/usr/share/seclists/Discovery/Web-Content/common.txt"
+        from recon_cli import config
+
+        wordlist = str(config.DEFAULT_SECLISTS_ROOT / "Discovery" / "Web-Content" / "common.txt")
         if not Path(wordlist).exists():
             wordlist = "/usr/share/wordlists/dirb/common.txt"
     
