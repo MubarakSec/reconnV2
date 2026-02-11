@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
@@ -46,6 +47,8 @@ class CloudAssetDiscoveryStage(Stage):
         runtime = context.runtime_config
         max_checks = int(getattr(runtime, "cloud_max_checks", 400))
         timeout = int(getattr(runtime, "cloud_timeout", 8))
+        max_duration = max(0, int(getattr(runtime, "cloud_max_duration", 1200)))
+        progress_every = max(1, int(getattr(runtime, "cloud_progress_every", 50)))
         limiter = context.get_rate_limiter(
             "cloud_asset",
             rps=float(getattr(runtime, "cloud_rps", 0)),
@@ -63,9 +66,31 @@ class CloudAssetDiscoveryStage(Stage):
         public_findings = 0
         exists_only = 0
         checked = 0
+        duration_cap_hit = False
+        stage_started = time.monotonic()
+
+        context.logger.info(
+            "Cloud asset discovery checks=%s duration_cap=%ss progress_every=%d",
+            max_checks if max_checks > 0 else "unlimited",
+            max_duration if max_duration else "unlimited",
+            progress_every,
+        )
 
         for provider, url, bucket in self._build_checks(buckets):
+            elapsed = time.monotonic() - stage_started
+            if max_duration and elapsed >= max_duration:
+                duration_cap_hit = True
+                context.logger.warning("Cloud discovery duration cap reached (%ss); stopping stage", max_duration)
+                break
             checked += 1
+            if checked % progress_every == 0:
+                context.logger.info(
+                    "Cloud discovery progress: checked=%d public=%d exists_only=%d elapsed=%.1fs",
+                    checked,
+                    public_findings,
+                    exists_only,
+                    elapsed,
+                )
             if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                 continue
             try:
@@ -138,6 +163,8 @@ class CloudAssetDiscoveryStage(Stage):
                 "checked": checked,
                 "public": public_findings,
                 "exists_only": exists_only,
+                "duration_cap_seconds": max_duration,
+                "duration_cap_hit": duration_cap_hit,
             }
         )
         context.manager.update_metadata(context.record)

@@ -174,13 +174,13 @@ class HttpProbeStage(Stage):
                     if appended and url_value:
                         seen_urls.add(url_value)
         else:
-            self._fallback_probe(context, hosts_path, seen_urls)
+            self._fallback_probe(context, hosts, seen_urls)
         self._probe_additional_paths(context, hosts, seen_urls)
         self._probe_soft_404(context, hosts)
         context.record.metadata.stats["http_urls"] = context.results.stats.get("type:url", 0)
         context.manager.update_metadata(context.record)
 
-    def _fallback_probe(self, context: PipelineContext, hosts_path: Path, seen_urls: Set[str]) -> None:
+    def _fallback_probe(self, context: PipelineContext, hosts: List[str], seen_urls: Set[str]) -> None:
         import http.client
         import ssl
 
@@ -199,95 +199,93 @@ class HttpProbeStage(Stage):
             )
 
         tracker = context.results
-        with hosts_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                host = line.strip()
-                if not host:
+        for host in hosts:
+            if not host:
+                continue
+            for scheme, port in (("http", 80), ("https", 443)):
+                url = f"{scheme}://{host}/"
+                if not context.url_allowed(url):
                     continue
-                for scheme, port in (("http", 80), ("https", 443)):
-                    url = f"{scheme}://{host}/"
-                    if not context.url_allowed(url):
-                        continue
-                    if url in seen_urls:
-                        continue
+                if url in seen_urls:
+                    continue
 
-                    # Apply rate limiting
+                # Apply rate limiting
+                if rate_limiter:
+                    rate_limiter.wait_for_slot(url)
+
+                conn = None
+                try:
+                    if scheme == "https":
+                        ssl_ctx = ssl.create_default_context()
+                        conn = http.client.HTTPSConnection(host, port=port, timeout=5, context=ssl_ctx)
+                    else:
+                        conn = http.client.HTTPConnection(host, port=port, timeout=5)
+                    headers = context.auth_headers({"User-Agent": "recon-cli"})
+                    cookie_header = context.auth_cookie_header()
+                    if cookie_header and "cookie" not in {k.lower() for k in headers}:
+                        headers["Cookie"] = cookie_header
+                    cache_entry = context.get_cache_entry(url)
+                    if cache_entry and not context.force:
+                        if cache_entry.get("etag"):
+                            headers["If-None-Match"] = cache_entry["etag"]
+                        if cache_entry.get("last_modified"):
+                            headers["If-Modified-Since"] = cache_entry["last_modified"]
+                    conn.request("GET", "/", headers=headers)
+                    resp = conn.getresponse()
+
+                    # Report response to rate limiter
                     if rate_limiter:
-                        rate_limiter.wait_for_slot(url)
+                        rate_limiter.on_response(url, resp.status)
 
-                    conn = None
-                    try:
-                        if scheme == "https":
-                            ssl_ctx = ssl.create_default_context()
-                            conn = http.client.HTTPSConnection(host, port=port, timeout=5, context=ssl_ctx)
-                        else:
-                            conn = http.client.HTTPConnection(host, port=port, timeout=5)
-                        headers = context.auth_headers({"User-Agent": "recon-cli"})
-                        cookie_header = context.auth_cookie_header()
-                        if cookie_header and "cookie" not in {k.lower() for k in headers}:
-                            headers["Cookie"] = cookie_header
-                        cache_entry = context.get_cache_entry(url)
-                        if cache_entry and not context.force:
-                            if cache_entry.get("etag"):
-                                headers["If-None-Match"] = cache_entry["etag"]
-                            if cache_entry.get("last_modified"):
-                                headers["If-Modified-Since"] = cache_entry["last_modified"]
-                        conn.request("GET", "/", headers=headers)
-                        resp = conn.getresponse()
-
-                        # Report response to rate limiter
-                        if rate_limiter:
-                            rate_limiter.on_response(url, resp.status)
-
-                        if resp.status == 304 and not context.force:
-                            break
-                        body = resp.read(2048) or b""
-                        raw_headers = resp.getheaders()
-                        headers_lower = {k.lower(): v for k, v in raw_headers}
-                        etag = headers_lower.get("etag")
-                        last_modified = headers_lower.get("last-modified")
-                        body_md5 = hashlib.md5(body).hexdigest()
-                        if context.should_skip_due_to_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5):
-                            context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
-                            break
-                        set_cookie_headers = [
-                            value for key, value in raw_headers if key.lower() == "set-cookie" and value
-                        ]
-                        header_values = [
-                            value for value in (headers_lower.get("x-powered-by"), headers_lower.get("server")) if value
-                        ]
-                        payload = {
-                            "type": "url",
-                            "source": "probe",
-                            "url": url,
-                            "hostname": host,
-                            "status_code": resp.status,
-                            "server": headers_lower.get("server"),
-                            "tls": scheme == "https",
-                            "content_type": headers_lower.get("content-type"),
-                            "length": len(body),
-                            "body_md5": body_md5,
-                            "etag": etag,
-                            "last_modified": last_modified,
-                        }
-                        tags = set(enrich_utils.infer_service_tags(url))
-                        if header_values:
-                            tags.update(enrich_utils.infer_tech_tags(header_values))
-                        tags.update(enrich_utils.infer_cookie_tags(set_cookie_headers))
-                        tags.update(enrich_utils.detect_waf_tags(payload.get("server")))
-                        if tags:
-                            payload["tags"] = sorted(tags)
+                    if resp.status == 304 and not context.force:
+                        break
+                    body = resp.read(2048) or b""
+                    raw_headers = resp.getheaders()
+                    headers_lower = {k.lower(): v for k, v in raw_headers}
+                    etag = headers_lower.get("etag")
+                    last_modified = headers_lower.get("last-modified")
+                    body_md5 = hashlib.md5(body).hexdigest()
+                    if context.should_skip_due_to_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5):
                         context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
-                        appended = tracker.append(payload)
-                        if appended:
-                            seen_urls.add(url)
+                        break
+                    set_cookie_headers = [
+                        value for key, value in raw_headers if key.lower() == "set-cookie" and value
+                    ]
+                    header_values = [
+                        value for value in (headers_lower.get("x-powered-by"), headers_lower.get("server")) if value
+                    ]
+                    payload = {
+                        "type": "url",
+                        "source": "probe",
+                        "url": url,
+                        "hostname": host,
+                        "status_code": resp.status,
+                        "server": headers_lower.get("server"),
+                        "tls": scheme == "https",
+                        "content_type": headers_lower.get("content-type"),
+                        "length": len(body),
+                        "body_md5": body_md5,
+                        "etag": etag,
+                        "last_modified": last_modified,
+                    }
+                    tags = set(enrich_utils.infer_service_tags(url))
+                    if header_values:
+                        tags.update(enrich_utils.infer_tech_tags(header_values))
+                    tags.update(enrich_utils.infer_cookie_tags(set_cookie_headers))
+                    tags.update(enrich_utils.detect_waf_tags(payload.get("server")))
+                    if tags:
+                        payload["tags"] = sorted(tags)
+                    context.update_cache(url, etag=etag, last_modified=last_modified, body_md5=body_md5)
+                    appended = tracker.append(payload)
+                    if appended:
+                        seen_urls.add(url)
+                except Exception:
+                    continue
+                finally:
+                    try:
+                        conn.close()
                     except Exception:
-                        continue
-                    finally:
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
+                        pass
 
     def _probe_additional_paths(self, context: PipelineContext, hosts: List[str], seen_urls: Set[str]) -> None:
         if not hosts:

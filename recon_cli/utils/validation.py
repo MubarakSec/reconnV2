@@ -58,6 +58,10 @@ def validate_target(value: str, allow_ip: bool = False) -> str:
     candidate = _coerce_hostname(value)
     if not candidate:
         raise ValueError("Target cannot be empty")
+    if candidate.startswith("*."):
+        candidate = candidate[2:]
+    elif candidate == "*":
+        raise ValueError("Wildcard target must include a domain (e.g., *.example.com)")
     if is_ip(candidate):
         if allow_ip:
             return candidate

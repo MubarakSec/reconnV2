@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import List
+import time
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -27,6 +27,7 @@ class PassiveEnumerationStage(Stage):
         artifacts = context.record.paths
         allow_ip = context.record.spec.allow_ip
         tool_timeout = context.runtime_config.tool_timeout
+        tracker = context.results
 
         logger.info("Starting passive enumeration for %d targets", len(targets))
         logger.debug("Tool timeout: %ds, Allow IP: %s", tool_timeout, allow_ip)
@@ -34,12 +35,12 @@ class PassiveEnumerationStage(Stage):
         subfinder_out = artifacts.artifact("subfinder.txt")
         amass_out = artifacts.artifact("amass.json")
         wayback_out = artifacts.artifact("waybackurls.txt")
+        wayback_tmp = artifacts.artifact("wayback_tmp.txt")
         passive_hosts_out = artifacts.artifact("passive_hosts.txt")
         targets_file = artifacts.artifact("targets.txt")
 
         subfinder_hosts: set[str] = set()
         amass_hosts: set[str] = set()
-        wayback_urls: List[str] = []
         seed_hosts: set[str] = set()
         for target in targets:
             if allow_ip and validation.is_ip(target):
@@ -117,24 +118,171 @@ class PassiveEnumerationStage(Stage):
         elif executor.available("gau"):
             wayback_cmd = "gau"
         if wayback_cmd:
-            aggregated: List[str] = []
+            wayback_targets: list[str] = []
+            seen_targets: set[str] = set()
             for target in targets:
-                try:
-                    completed = executor.run([wayback_cmd, target], capture_output=True, check=False, timeout=tool_timeout)
-                except CommandError:
-                    context.logger.warning("%s failed for %s", wayback_cmd, target)
+                if allow_ip and validation.is_ip(target):
                     continue
-                output = (completed.stdout or "") if hasattr(completed, "stdout") else ""
-                if output:
-                    aggregated.extend(line.strip() for line in output.splitlines() if line.strip())
-            if aggregated:
-                wayback_out.write_text("\n".join(aggregated) + "\n", encoding="utf-8")
-                wayback_urls.extend(aggregated)
+                if target in seen_targets:
+                    continue
+                seen_targets.add(target)
+                wayback_targets.append(target)
+
+            max_wayback_urls = max(0, int(getattr(context.runtime_config, "wayback_max_urls", 0) or 0))
+            max_wayback_per_target = max(
+                0, int(getattr(context.runtime_config, "wayback_max_per_target", 0) or 0)
+            )
+            fair_share = bool(getattr(context.runtime_config, "wayback_fair_share", True))
+            wayback_total = 0
+            wrote_any = False
+            wayback_targets_processed = 0
+            wayback_targets_skipped = 0
+            global_cap_hit = False
+
+            if wayback_targets:
+                with wayback_out.open("w", encoding="utf-8") as out_handle:
+                    for idx, target in enumerate(wayback_targets, 1):
+                        if max_wayback_urls and wayback_total >= max_wayback_urls:
+                            wayback_targets_skipped = len(wayback_targets) - idx + 1
+                            global_cap_hit = True
+                            logger.warning(
+                                "%s URL limit reached (%s); skipping remaining targets",
+                                wayback_cmd,
+                                max_wayback_urls,
+                            )
+                            break
+                        wayback_targets_processed += 1
+                        target_budget = max_wayback_per_target
+                        if fair_share and max_wayback_urls:
+                            remaining_targets = len(wayback_targets) - idx + 1
+                            remaining_budget = max(0, max_wayback_urls - wayback_total)
+                            if remaining_targets > 0 and remaining_budget > 0:
+                                fair_budget = max(1, (remaining_budget + remaining_targets - 1) // remaining_targets)
+                                if target_budget <= 0:
+                                    target_budget = fair_budget
+                                else:
+                                    target_budget = min(target_budget, fair_budget)
+                        if target_budget > 0:
+                            logger.info(
+                                "Running %s (%s/%s): %s [budget=%d URLs]",
+                                wayback_cmd,
+                                idx,
+                                len(wayback_targets),
+                                target,
+                                target_budget,
+                            )
+                        else:
+                            logger.info("Running %s (%s/%s): %s", wayback_cmd, idx, len(wayback_targets), target)
+                        start = time.monotonic()
+                        wayback_tmp.unlink(missing_ok=True)
+                        try:
+                            executor.run_to_file(
+                                [wayback_cmd, target],
+                                wayback_tmp,
+                                timeout=tool_timeout,
+                                redact=False,
+                            )
+                        except CommandError:
+                            context.logger.warning("%s failed for %s", wayback_cmd, target)
+                            continue
+                        elapsed = time.monotonic() - start
+
+                        if not wayback_tmp.exists():
+                            logger.debug("%s returned no output for %s", wayback_cmd, target)
+                            logger.info("%s finished for %s in %.1fs", wayback_cmd, target, elapsed)
+                            continue
+
+                        url_added = 0
+                        budget_reached = False
+                        with wayback_tmp.open("r", encoding="utf-8", errors="ignore") as handle:
+                            for line in handle:
+                                url = line.strip()
+                                if not url:
+                                    continue
+                                parsed = urlparse(url)
+                                if not parsed.scheme or not parsed.netloc:
+                                    continue
+                                out_handle.write(url + "\n")
+                                wrote_any = True
+                                host = parsed.hostname
+                                hostname = None
+                                if host:
+                                    try:
+                                        hostname = validation.normalize_hostname(host)
+                                    except ValueError:
+                                        hostname = None
+                                if not context.url_allowed(url):
+                                    continue
+                                payload = {
+                                    "type": "url",
+                                    "source": wayback_cmd or "waybackurls",
+                                    "url": url,
+                                    "hostname": hostname,
+                                }
+                                tracker.append(payload)
+                                wayback_total += 1
+                                url_added += 1
+                                out_handle.write(url + "\n")
+                                wrote_any = True
+                                if target_budget and url_added >= target_budget:
+                                    logger.warning(
+                                        "%s per-target URL budget reached for %s (%s); moving to next target",
+                                        wayback_cmd,
+                                        target,
+                                        target_budget,
+                                    )
+                                    budget_reached = True
+                                    break
+                                if max_wayback_urls and wayback_total >= max_wayback_urls:
+                                    logger.warning(
+                                        "%s URL limit reached (%s); stopping ingestion",
+                                        wayback_cmd,
+                                        max_wayback_urls,
+                                    )
+                                    global_cap_hit = True
+                                    break
+                        wayback_tmp.unlink(missing_ok=True)
+                        logger.info(
+                            "%s finished for %s in %.1fs (%d URLs%s)",
+                            wayback_cmd,
+                            target,
+                            elapsed,
+                            url_added,
+                            ", budget reached" if budget_reached else "",
+                        )
+                        if max_wayback_urls and wayback_total >= max_wayback_urls:
+                            wayback_targets_skipped = len(wayback_targets) - idx
+                            break
+
+                stats = context.record.metadata.stats.setdefault("wayback", {})
+                stats.update(
+                    {
+                        "tool": wayback_cmd,
+                        "targets_total": len(wayback_targets),
+                        "targets_processed": wayback_targets_processed,
+                        "targets_skipped": wayback_targets_skipped,
+                        "urls_ingested": wayback_total,
+                        "max_urls": max_wayback_urls,
+                        "max_per_target": max_wayback_per_target,
+                        "fair_share": fair_share,
+                        "global_cap_hit": bool(global_cap_hit or (max_wayback_urls and wayback_total >= max_wayback_urls)),
+                    }
+                )
+                context.manager.update_metadata(context.record)
+                logger.info(
+                    "%s summary: processed=%d skipped=%d ingested=%d",
+                    wayback_cmd,
+                    wayback_targets_processed,
+                    wayback_targets_skipped,
+                    wayback_total,
+                )
+
+            if not wrote_any and wayback_out.exists():
+                wayback_out.unlink(missing_ok=True)
         else:
             context.logger.warning("waybackurls/gau not available; skipping URL discovery")
             note_missing_tool(context, "waybackurls/gau")
 
-        tracker = context.results
         for hostname in sorted(subfinder_hosts):
             try:
                 normalized = validation.normalize_hostname(hostname)
@@ -157,25 +305,6 @@ class PassiveEnumerationStage(Stage):
                 "hostname": normalized,
             }
             tracker.append(payload)
-        for url in wayback_urls:
-            parsed = urlparse(url)
-            host = parsed.hostname
-            hostname = None
-            if host:
-                try:
-                    hostname = validation.normalize_hostname(host)
-                except ValueError:
-                    hostname = None
-            if not context.url_allowed(url):
-                continue
-            payload = {
-                "type": "url",
-                "source": wayback_cmd or "waybackurls",
-                "url": url,
-                "hostname": hostname,
-            }
-            tracker.append(payload)
-
         for hostname in sorted(seed_hosts):
             tracker.append(
                 {

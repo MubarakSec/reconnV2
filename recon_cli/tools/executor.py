@@ -203,22 +203,41 @@ class CommandExecutor:
             ... )
         """
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        completed = subprocess.run(
-            [str(part) for part in command],
-            cwd=str(cwd) if cwd else None,
-            env=dict(env) if env else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-        output = completed.stdout or ""
+        cmd_list = [str(part) for part in command]
+        command_str = " ".join(shlex.quote(part) for part in cmd_list)
+        message = redact_text(command_str) if redact else command_str
+        self.logger.info("Executing: %s", message)
+        try:
+            with output_path.open("w", encoding="utf-8") as handle:
+                completed = subprocess.run(
+                    cmd_list,
+                    cwd=str(cwd) if cwd else None,
+                    env=dict(env) if env else None,
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                    timeout=timeout,
+                )
+        except subprocess.TimeoutExpired as exc:
+            self.logger.error("Command timed out after %ss: %s", timeout, message)
+            raise CommandError(f"Command timeout after {timeout or 'unknown'}s") from exc
+        except FileNotFoundError as exc:
+            missing = redact_text(cmd_list[0]) if redact else cmd_list[0]
+            self.logger.error("Command not found: %s", missing)
+            raise CommandError(f"Command not found: {cmd_list[0]}") from exc
+
         if redact:
-            output = redact_text(output) or ""
-        completed.stdout = output
-        with output_path.open("w", encoding="utf-8") as handle:
-            handle.write(output)
+            tmp_path = output_path.with_suffix(f"{output_path.suffix}.redacted")
+            with output_path.open("r", encoding="utf-8", errors="ignore") as src, tmp_path.open(
+                "w", encoding="utf-8"
+            ) as dst:
+                for line in src:
+                    redacted = redact_text(line) if line else line
+                    dst.write(redacted or "")
+            tmp_path.replace(output_path)
+
+        completed.stdout = ""
         if completed.returncode != 0:
             self.logger.warning("Command exited with %s (non-zero)", completed.returncode)
         return completed

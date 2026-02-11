@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -16,6 +17,7 @@ class ResponseSig:
     status: int
     length: int
     title: str
+    server: Optional[str] = None
 
 
 class VHostDiscoveryStage(Stage):
@@ -37,6 +39,10 @@ class VHostDiscoveryStage(Stage):
         max_hosts = int(getattr(runtime, "vhost_max_hosts", 30))
         max_candidates = int(getattr(runtime, "vhost_max_candidates", 1500))
         timeout = int(getattr(runtime, "vhost_timeout", 8))
+        max_probes = max(0, int(getattr(runtime, "vhost_max_probes", 1000)))
+        max_duration = max(0, int(getattr(runtime, "vhost_max_duration", 1800)))
+        progress_every = max(1, int(getattr(runtime, "vhost_progress_every", 100)))
+        max_response_bytes = max(4096, int(getattr(runtime, "vhost_max_response_bytes", 65536)))
         limiter = context.get_rate_limiter(
             "vhost_discovery",
             rps=float(getattr(runtime, "vhost_rps", 0)),
@@ -55,35 +61,104 @@ class VHostDiscoveryStage(Stage):
         if max_candidates > 0:
             words = words[:max_candidates]
 
-        checked_hosts = 0
-        tested_candidates = 0
-        discovered = 0
+        selected_hosts = base_hosts[:max_hosts]
+        context.logger.info(
+            "VHost discovery on %d hosts (wordlist=%d, probe_cap=%s, duration_cap=%ss, progress_every=%d)",
+            len(selected_hosts),
+            len(words),
+            max_probes if max_probes else "unlimited",
+            max_duration if max_duration else "unlimited",
+            progress_every,
+        )
 
-        for host, base_url, score in base_hosts[:max_hosts]:
+        checked_hosts = 0
+        tested_probes = 0
+        discovered = 0
+        probe_cap_hit = False
+        duration_cap_hit = False
+        stage_started = time.monotonic()
+
+        for host_index, (host, base_url, score) in enumerate(selected_hosts, 1):
+            elapsed = time.monotonic() - stage_started
+            if max_duration and elapsed >= max_duration:
+                duration_cap_hit = True
+                context.logger.warning("VHost duration cap reached (%ss); stopping stage", max_duration)
+                break
+            if max_probes and tested_probes >= max_probes:
+                probe_cap_hit = True
+                context.logger.warning("VHost probe cap reached (%d); stopping stage", max_probes)
+                break
             checked_hosts += 1
             root = self._root_domain(host)
             candidates = self._build_candidates(words, root, host)
             if not candidates:
+                context.logger.debug("No vhost candidates generated for %s", host)
                 continue
+            if max_probes:
+                remaining_hosts = max(1, len(selected_hosts) - host_index + 1)
+                remaining_probes = max(0, max_probes - tested_probes)
+                host_budget = max(1, remaining_probes // remaining_hosts)
+                candidates = candidates[:host_budget]
 
-            baseline = self._fetch_sig(context, requests, base_url, timeout, {"User-Agent": "recon-cli vhost"})
+            context.logger.info(
+                "VHost host %d/%d: %s (candidates=%d)",
+                host_index,
+                len(selected_hosts),
+                host,
+                len(candidates),
+            )
+
+            baseline = self._fetch_sig(
+                context,
+                requests,
+                base_url,
+                timeout,
+                {"User-Agent": "recon-cli vhost"},
+                max_response_bytes=max_response_bytes,
+            )
             if baseline is None:
+                context.logger.debug("Baseline fetch failed for %s", host)
                 continue
-            baseline_sig, _ = baseline
+            baseline_sig = baseline
 
+            host_tested = 0
+            host_discovered = 0
             for candidate in candidates:
-                tested_candidates += 1
+                elapsed = time.monotonic() - stage_started
+                if max_duration and elapsed >= max_duration:
+                    duration_cap_hit = True
+                    break
+                if max_probes and tested_probes >= max_probes:
+                    probe_cap_hit = True
+                    break
+                tested_probes += 1
+                host_tested += 1
+                if tested_probes % progress_every == 0:
+                    context.logger.info(
+                        "VHost progress: probes=%d discovered=%d elapsed=%.1fs current_host=%s",
+                        tested_probes,
+                        discovered,
+                        elapsed,
+                        host,
+                    )
                 headers = {"User-Agent": "recon-cli vhost", "Host": candidate, "X-Forwarded-Host": candidate}
                 if limiter and not limiter.wait_for_slot(base_url, timeout=timeout):
                     continue
-                response = self._fetch_sig(context, requests, base_url, timeout, headers)
+                response = self._fetch_sig(
+                    context,
+                    requests,
+                    base_url,
+                    timeout,
+                    headers,
+                    max_response_bytes=max_response_bytes,
+                )
                 if response is None:
                     if limiter:
                         limiter.on_error(base_url)
                     continue
                 if limiter:
-                    limiter.on_response(base_url, response[1].status_code)
-                sig, resp = response
+                    limiter.on_response(base_url, response.status)
+                sig = response
                 if not self._is_interesting(baseline_sig, sig):
                     continue
 
@@ -124,20 +199,39 @@ class VHostDiscoveryStage(Stage):
                         "status_code": sig.status,
                         "title": sig.title,
                         "content_length": sig.length,
-                        "server": resp.headers.get("Server"),
+                        "server": sig.server,
                         "tags": ["vhost"],
                         "score": max(45, score),
                         "evidence_id": signal_id or None,
                     }
                     context.results.append(url_payload)
                 discovered += 1
+                host_discovered += 1
+
+            context.logger.info(
+                "VHost host done: %s tested=%d found=%d",
+                host,
+                host_tested,
+                host_discovered,
+            )
+            if probe_cap_hit:
+                context.logger.warning("VHost probe cap reached (%d); stopping stage", max_probes)
+                break
+            if duration_cap_hit:
+                context.logger.warning("VHost duration cap reached (%ss); stopping stage", max_duration)
+                break
 
         stats = context.record.metadata.stats.setdefault("vhost", {})
         stats.update(
             {
                 "checked_hosts": checked_hosts,
-                "tested_candidates": tested_candidates,
+                "tested_candidates": tested_probes,
                 "discovered": discovered,
+                "probe_cap": max_probes,
+                "probe_cap_hit": probe_cap_hit,
+                "duration_cap_seconds": max_duration,
+                "duration_cap_hit": duration_cap_hit,
+                "response_bytes_cap": max_response_bytes,
             }
         )
         context.manager.update_metadata(context.record)
@@ -226,8 +320,11 @@ class VHostDiscoveryStage(Stage):
         url: str,
         timeout: int,
         headers: Dict[str, str],
-    ) -> Optional[Tuple[ResponseSig, object]]:
+        *,
+        max_response_bytes: int,
+    ) -> Optional[ResponseSig]:
         session = context.auth_session(url)
+        resp = None
         try:
             if session:
                 resp = session.get(
@@ -236,6 +333,7 @@ class VHostDiscoveryStage(Stage):
                     allow_redirects=True,
                     verify=context.runtime_config.verify_tls,
                     headers=headers,
+                    stream=True,
                 )
             else:
                 resp = requests_mod.get(
@@ -244,14 +342,46 @@ class VHostDiscoveryStage(Stage):
                     allow_redirects=True,
                     verify=context.runtime_config.verify_tls,
                     headers=headers,
+                    stream=True,
                 )
+            body = b""
+            for chunk in resp.iter_content(chunk_size=4096):
+                if not chunk:
+                    continue
+                remaining = max_response_bytes - len(body)
+                if remaining <= 0:
+                    break
+                if len(chunk) > remaining:
+                    body += chunk[:remaining]
+                    break
+                body += chunk
+            encoding = resp.encoding or "utf-8"
+            try:
+                text = body.decode(encoding, errors="ignore")
+            except LookupError:
+                text = body.decode("utf-8", errors="ignore")
+            title_match = self.TITLE_RE.search(text)
+            title = title_match.group(1).strip() if title_match else ""
+            content_length = 0
+            raw_length = resp.headers.get("Content-Length")
+            if raw_length and raw_length.isdigit():
+                content_length = int(raw_length)
+            if content_length <= 0:
+                content_length = len(body)
+            return ResponseSig(
+                status=int(resp.status_code or 0),
+                length=content_length,
+                title=title,
+                server=resp.headers.get("Server"),
+            )
         except Exception:
             return None
-        text = resp.text or ""
-        title_match = self.TITLE_RE.search(text)
-        title = title_match.group(1).strip() if title_match else ""
-        sig = ResponseSig(status=int(resp.status_code or 0), length=len(text), title=title)
-        return sig, resp
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _is_interesting(base: ResponseSig, cand: ResponseSig) -> bool:

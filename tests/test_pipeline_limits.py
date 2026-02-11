@@ -1,9 +1,12 @@
 import json
+import subprocess
+from collections import Counter
 from pathlib import Path
 
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
+from recon_cli.pipeline.stage_http_probe import HttpProbeStage
 from recon_cli.pipeline.stages import CorrelationStage, PassiveEnumerationStage
 from recon_cli.utils.jsonl import read_jsonl
 
@@ -95,3 +98,86 @@ def test_correlation_skips_svg_when_graph_large(tmp_path):
     stats = record.metadata.stats.get("correlation", {})
     assert stats.get("graph_nodes", 0) > 1
     assert "graph_svg" not in stats
+
+
+def test_http_probe_fallback_respects_host_caps(monkeypatch, tmp_path):
+    overrides = {"max_probe_hosts": 2, "httpx_max_hosts": 2}
+    record = make_record(tmp_path, runtime_overrides=overrides)
+    manager = DummyManager()
+    dedupe_hosts = record.paths.artifact("dedupe_hosts.txt")
+    dedupe_hosts.write_text(
+        "\n".join(
+            [
+                "a.example.com",
+                "b.example.com",
+                "c.example.com",
+                "d.example.com",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    context = PipelineContext(record=record, manager=manager)
+
+    monkeypatch.setattr(
+        "recon_cli.tools.executor.CommandExecutor.available",
+        staticmethod(lambda command: command != "httpx"),
+    )
+
+    captured: dict = {}
+
+    def fake_fallback(self, _context, hosts, _seen_urls):
+        captured["hosts"] = list(hosts)
+
+    monkeypatch.setattr(HttpProbeStage, "_fallback_probe", fake_fallback)
+    monkeypatch.setattr(HttpProbeStage, "_probe_additional_paths", lambda *args, **kwargs: None)
+    monkeypatch.setattr(HttpProbeStage, "_probe_soft_404", lambda *args, **kwargs: None)
+
+    stage = HttpProbeStage()
+    stage.run(context)
+
+    assert captured["hosts"] == ["a.example.com", "b.example.com"]
+
+
+def test_passive_wayback_fair_share_prevents_target_starvation(monkeypatch, tmp_path):
+    overrides = {
+        "wayback_max_urls": 6,
+        "wayback_max_per_target": 0,
+        "wayback_fair_share": True,
+    }
+    record = make_record(tmp_path, runtime_overrides=overrides, target="a.example.com")
+    manager = DummyManager()
+    context = PipelineContext(record=record, manager=manager)
+    context.targets = ["a.example.com", "b.example.com", "c.example.com"]
+
+    monkeypatch.setattr(
+        "recon_cli.tools.executor.CommandExecutor.available",
+        staticmethod(lambda command: command == "waybackurls"),
+    )
+
+    def fake_run_to_file(self, command, output_path, **_kwargs):
+        target = str(command[-1])
+        urls = [f"https://{target}/path{i}" for i in range(10)]
+        output_path.write_text("\n".join(urls) + "\n", encoding="utf-8")
+        return subprocess.CompletedProcess([str(part) for part in command], 0, "", "")
+
+    monkeypatch.setattr(
+        "recon_cli.tools.executor.CommandExecutor.run_to_file",
+        fake_run_to_file,
+    )
+
+    stage = PassiveEnumerationStage()
+    stage.run(context)
+
+    entries = read_jsonl(record.paths.results_jsonl)
+    wayback_urls = [entry for entry in entries if entry.get("type") == "url" and entry.get("source") == "waybackurls"]
+    assert len(wayback_urls) == 6
+    counts = Counter(entry.get("hostname") for entry in wayback_urls)
+    assert counts["a.example.com"] == 2
+    assert counts["b.example.com"] == 2
+    assert counts["c.example.com"] == 2
+    stats = record.metadata.stats.get("wayback", {})
+    assert stats.get("targets_processed") == 3
+    assert stats.get("targets_skipped") == 0
+    assert stats.get("urls_ingested") == 6
+    assert stats.get("global_cap_hit") is True

@@ -18,3 +18,7 @@ def test_validate_target_ip_requires_flag():
 
 def test_validate_target_ip_allowed():
     assert validation.validate_target("http://127.0.0.1", allow_ip=True) == "127.0.0.1"
+
+
+def test_validate_target_strips_wildcard_prefix():
+    assert validation.validate_target("*.example.com") == "example.com"

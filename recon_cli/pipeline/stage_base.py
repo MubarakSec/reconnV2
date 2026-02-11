@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -55,6 +56,52 @@ class Stage(ABC):
     def after(self, context: PipelineContext) -> None:  # pragma: no cover - hook
         pass
 
+    def _run_with_heartbeat(self, context: PipelineContext) -> None:
+        heartbeat_seconds = int(getattr(context.runtime_config, "stage_heartbeat_seconds", 0) or 0)
+        sla_seconds = int(getattr(context.runtime_config, "stage_sla_seconds", 0) or 0)
+        if heartbeat_seconds <= 0:
+            self.before(context)
+            self.execute(context)
+            self.after(context)
+            return
+
+        logger = context.logger
+        started = time.monotonic()
+        done = threading.Event()
+        sla_alerted = threading.Event()
+        sla_alert_elapsed = {"seconds": 0}
+
+        def _heartbeat() -> None:
+            while not done.wait(timeout=heartbeat_seconds):
+                elapsed = int(time.monotonic() - started)
+                if sla_seconds > 0 and elapsed >= sla_seconds and not sla_alerted.is_set():
+                    sla_alert_elapsed["seconds"] = elapsed
+                    sla_alerted.set()
+                    logger.warning(
+                        "Stage %s exceeded SLA (%ss); still running (%ss elapsed)",
+                        self.name,
+                        sla_seconds,
+                        elapsed,
+                    )
+                logger.info("Stage %s heartbeat: still running (%ss elapsed)", self.name, elapsed)
+
+        thread = threading.Thread(target=_heartbeat, daemon=True, name=f"heartbeat-{self.name}")
+        thread.start()
+        try:
+            self.before(context)
+            self.execute(context)
+            self.after(context)
+        finally:
+            done.set()
+            thread.join()
+            if sla_alerted.is_set() and getattr(context, "record", None) and getattr(context, "manager", None):
+                stats = context.record.metadata.stats.setdefault("stage_runtime_alerts", {})
+                stats[self.name] = {
+                    "sla_seconds": sla_seconds,
+                    "alert_elapsed_seconds": int(sla_alert_elapsed["seconds"] or 0),
+                }
+                context.manager.update_metadata(context.record)
+
     def run(self, context: PipelineContext) -> bool:
         logger = context.logger
         if not self.is_enabled(context):
@@ -72,9 +119,7 @@ class Stage(ABC):
             context.manager.update_metadata(context.record)
             logger.info("Stage %s attempt %s/%s", self.name, attempt, attempts)
             try:
-                self.before(context)
-                self.execute(context)
-                self.after(context)
+                self._run_with_heartbeat(context)
                 context.checkpoint(self.name)
                 logger.info("Stage %s completed", self.name)
                 return True
