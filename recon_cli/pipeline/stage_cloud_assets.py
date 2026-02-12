@@ -59,8 +59,10 @@ class CloudAssetDiscoveryStage(Stage):
         if not buckets:
             context.logger.info("No cloud asset candidates generated")
             return
+        checks_plan = self._build_checks(buckets)
+        planned_checks = len(checks_plan)
         if max_checks > 0:
-            buckets = buckets[:max_checks]
+            planned_checks = min(planned_checks, max_checks)
 
         checks: List[CloudCheck] = []
         public_findings = 0
@@ -71,12 +73,14 @@ class CloudAssetDiscoveryStage(Stage):
 
         context.logger.info(
             "Cloud asset discovery checks=%s duration_cap=%ss progress_every=%d",
-            max_checks if max_checks > 0 else "unlimited",
+            planned_checks if max_checks > 0 else "unlimited",
             max_duration if max_duration else "unlimited",
             progress_every,
         )
 
-        for provider, url, bucket in self._build_checks(buckets):
+        for provider, url, bucket in checks_plan:
+            if max_checks > 0 and checked >= max_checks:
+                break
             elapsed = time.monotonic() - stage_started
             if max_duration and elapsed >= max_duration:
                 duration_cap_hit = True
@@ -153,9 +157,6 @@ class CloudAssetDiscoveryStage(Stage):
                     evidence={"status": status, "reason": reason, "bucket": bucket},
                 )
                 exists_only += 1
-
-            if max_checks > 0 and checked >= max_checks:
-                break
 
         stats = context.record.metadata.stats.setdefault("cloud_assets", {})
         stats.update(

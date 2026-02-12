@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
+import subprocess
 import time
 import threading
 from datetime import datetime, timedelta, timezone
@@ -71,6 +73,43 @@ def _load_job_or_exit(manager: JobManager, job_id: str) -> JobRecord:
         typer.echo(f"Job {job_id} not found", err=True)
         raise typer.Exit(code=3)
     return record
+
+
+def _read_job_lock_pid(record: JobRecord) -> Optional[int]:
+    lock_path = record.paths.root / ".lock"
+    if not lock_path.exists():
+        return None
+    try:
+        payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    pid = payload.get("pid")
+    if isinstance(pid, int) and pid > 0:
+        return pid
+    try:
+        pid_int = int(str(pid))
+    except Exception:
+        return None
+    return pid_int if pid_int > 0 else None
+
+
+def _terminate_process(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            return completed.returncode == 0
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except Exception:
+        return False
 
 
 def _auto_allow_ip(target_value: str) -> bool:
@@ -352,6 +391,79 @@ def requeue(job_id: str) -> None:
         typer.echo(f"Job {job_id} not found", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"Job {job_id} moved to queue")
+
+
+@app.command()
+def cancel(
+    job_id: str,
+    requeue: bool = typer.Option(True, "--requeue/--no-requeue", help="Requeue automatically after stop"),
+    wait: int = typer.Option(30, "--wait", min=0, help="Seconds to wait for graceful stop"),
+    hard: bool = typer.Option(
+        False,
+        "--hard",
+        help="Force-kill worker process if job does not stop gracefully (may stop other running jobs on same worker)",
+    ),
+) -> None:
+    """Request stop for a running job, then optionally requeue it."""
+    manager = JobManager()
+    record = _load_job_or_exit(manager, job_id)
+
+    if record.metadata.status != "running":
+        typer.echo(f"Job {job_id} is not running (status={record.metadata.status})")
+        if requeue and record.metadata.status in {"failed", "finished"}:
+            lifecycle = JobLifecycle(manager)
+            moved = lifecycle.requeue(job_id)
+            if moved:
+                typer.echo(f"Job {job_id} moved to queue")
+            else:
+                typer.echo(f"Unable to requeue {job_id}", err=True)
+        return
+
+    stop_path = record.paths.root / "stop.request"
+    fs.write_json(
+        stop_path,
+        {"requested_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "requested_by": "cli", "action": "cancel"},
+    )
+    typer.echo(f"Stop requested for job {job_id}")
+
+    deadline = time.time() + wait
+    while wait > 0 and time.time() < deadline:
+        current = manager.load_job(job_id)
+        if not current or current.metadata.status != "running":
+            break
+        time.sleep(1)
+
+    current = manager.load_job(job_id)
+    still_running = bool(current and current.metadata.status == "running")
+
+    if still_running and hard and current:
+        pid = _read_job_lock_pid(current)
+        if pid:
+            if _terminate_process(pid):
+                typer.echo(f"Hard stop sent to PID {pid}")
+                time.sleep(1)
+            else:
+                typer.echo(f"Failed to hard-stop PID {pid}", err=True)
+        else:
+            typer.echo("No worker PID found in lock file; cannot hard-stop", err=True)
+        current = manager.load_job(job_id)
+        still_running = bool(current and current.metadata.status == "running")
+
+    if still_running:
+        typer.echo(
+            "Job is still running. Wait more, or run again with --hard. Do not requeue until it fully stops.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if requeue:
+        lifecycle = JobLifecycle(manager)
+        moved = lifecycle.requeue(job_id)
+        if moved:
+            typer.echo(f"Job {job_id} moved to queue")
+        else:
+            typer.echo(f"Job {job_id} stopped but could not be requeued", err=True)
+            raise typer.Exit(code=1)
 
 
 @app.command()

@@ -97,6 +97,8 @@ class JobLifecycle:
             return None
         record = self.manager.load_job(job_id)
         if record:
+            stop_path = record.paths.root / "stop.request"
+            stop_path.unlink(missing_ok=True)
             record.metadata.status = "running"
             self.manager.update_metadata(record)
         return record
@@ -130,6 +132,8 @@ class JobLifecycle:
         self.manager.release_lock(job_id)
         record = self.manager.load_job(job_id)
         if record:
+            stop_path = record.paths.root / "stop.request"
+            stop_path.unlink(missing_ok=True)
             failed_stage = record.metadata.stage
             if failed_stage and failed_stage in record.metadata.checkpoints:
                 record.metadata.checkpoints.pop(failed_stage, None)

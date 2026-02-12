@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -74,6 +75,7 @@ class VHostDiscoveryStage(Stage):
         checked_hosts = 0
         tested_probes = 0
         discovered = 0
+        wildcard_filtered = 0
         probe_cap_hit = False
         duration_cap_hit = False
         stage_started = time.monotonic()
@@ -120,6 +122,19 @@ class VHostDiscoveryStage(Stage):
                 context.logger.debug("Baseline fetch failed for %s", host)
                 continue
             baseline_sig = baseline
+            wildcard_host = f"{uuid.uuid4().hex[:12]}.{root}"
+            wildcard_sig = self._fetch_sig(
+                context,
+                requests,
+                base_url,
+                timeout,
+                {
+                    "User-Agent": "recon-cli vhost",
+                    "Host": wildcard_host,
+                    "X-Forwarded-Host": wildcard_host,
+                },
+                max_response_bytes=max_response_bytes,
+            )
 
             host_tested = 0
             host_discovered = 0
@@ -160,6 +175,9 @@ class VHostDiscoveryStage(Stage):
                     limiter.on_response(base_url, response.status)
                 sig = response
                 if not self._is_interesting(baseline_sig, sig):
+                    continue
+                if wildcard_sig and not self._is_interesting(wildcard_sig, sig):
+                    wildcard_filtered += 1
                     continue
 
                 candidate_url = self._candidate_url(base_url, candidate)
@@ -227,6 +245,7 @@ class VHostDiscoveryStage(Stage):
                 "checked_hosts": checked_hosts,
                 "tested_candidates": tested_probes,
                 "discovered": discovered,
+                "wildcard_filtered": wildcard_filtered,
                 "probe_cap": max_probes,
                 "probe_cap_hit": probe_cap_hit,
                 "duration_cap_seconds": max_duration,

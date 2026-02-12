@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -171,6 +172,7 @@ def run_nuclei_batch(
     targets: List[str],
     artifact_dir: Path,
     timeout: int,
+    artifact_suffix: Optional[str] = None,
     templates: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
     request_timeout: Optional[int] = None,
@@ -182,8 +184,12 @@ def run_nuclei_batch(
         logger.info("nuclei not available; skipping batch")
         return ScannerExecution([], None, {"targets": len(targets)})
 
-    artifact_path = artifact_dir / f"nuclei_batch_{len(targets)}.json"
-    targets_path = artifact_dir / "nuclei_targets.txt"
+    if artifact_suffix is None:
+        digest = hashlib.sha1("\n".join(targets).encode("utf-8")).hexdigest()[:10]
+        artifact_suffix = digest
+    safe_suffix = "".join(ch for ch in str(artifact_suffix) if ch.isalnum() or ch in {"-", "_"}) or "batch"
+    artifact_path = artifact_dir / f"nuclei_batch_{len(targets)}_{safe_suffix}.json"
+    targets_path = artifact_dir / f"nuclei_targets_{len(targets)}_{safe_suffix}.txt"
     targets_path.write_text("\n".join(targets) + "\n", encoding="utf-8")
 
     resolved_templates: Optional[List[str]] = None

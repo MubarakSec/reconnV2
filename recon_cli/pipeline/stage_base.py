@@ -7,9 +7,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 from recon_cli.pipeline.context import PipelineContext
+from recon_cli.utils import time as time_utils
 
 
 class StageError(RuntimeError):
+    pass
+
+
+class StageStopRequested(RuntimeError):
     pass
 
 
@@ -56,23 +61,54 @@ class Stage(ABC):
     def after(self, context: PipelineContext) -> None:  # pragma: no cover - hook
         pass
 
+    @staticmethod
+    def _stop_requested(context: PipelineContext) -> bool:
+        checker = getattr(context, "stop_requested", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        return False
+
+    def _ensure_not_stopped(self, context: PipelineContext) -> None:
+        if self._stop_requested(context):
+            raise StageStopRequested(f"Stop requested while running stage {self.name}")
+
     def _run_with_heartbeat(self, context: PipelineContext) -> None:
         heartbeat_seconds = int(getattr(context.runtime_config, "stage_heartbeat_seconds", 0) or 0)
         sla_seconds = int(getattr(context.runtime_config, "stage_sla_seconds", 0) or 0)
         if heartbeat_seconds <= 0:
+            self._ensure_not_stopped(context)
             self.before(context)
             self.execute(context)
             self.after(context)
+            self._ensure_not_stopped(context)
             return
 
         logger = context.logger
         started = time.monotonic()
         done = threading.Event()
         sla_alerted = threading.Event()
+        stop_alerted = threading.Event()
         sla_alert_elapsed = {"seconds": 0}
+        heartbeat_stats = context.record.metadata.stats.setdefault("stage_heartbeats", {})
+        stage_heartbeat = heartbeat_stats.setdefault(self.name, {})
+        stage_heartbeat["last_started_at"] = time_utils.iso_now()
+        stage_heartbeat["sla_seconds"] = sla_seconds
+        stage_heartbeat["count"] = int(stage_heartbeat.get("count", 0))
+        context.manager.update_metadata(context.record)
 
         def _heartbeat() -> None:
-            while not done.wait(timeout=heartbeat_seconds):
+            check_interval = max(1, min(heartbeat_seconds, 2))
+            next_heartbeat = started + heartbeat_seconds
+            while not done.wait(timeout=check_interval):
+                if self._stop_requested(context) and not stop_alerted.is_set():
+                    stop_alerted.set()
+                    logger.warning("Stage %s received stop request; waiting for current operation to finish", self.name)
+                now = time.monotonic()
+                if now < next_heartbeat:
+                    continue
                 elapsed = int(time.monotonic() - started)
                 if sla_seconds > 0 and elapsed >= sla_seconds and not sla_alerted.is_set():
                     sla_alert_elapsed["seconds"] = elapsed
@@ -84,31 +120,63 @@ class Stage(ABC):
                         elapsed,
                     )
                 logger.info("Stage %s heartbeat: still running (%ss elapsed)", self.name, elapsed)
+                heartbeat_entry = context.record.metadata.stats.setdefault("stage_heartbeats", {}).setdefault(self.name, {})
+                heartbeat_entry["count"] = int(heartbeat_entry.get("count", 0)) + 1
+                heartbeat_entry["last_heartbeat_at"] = time_utils.iso_now()
+                heartbeat_entry["last_elapsed_seconds"] = elapsed
+                context.manager.update_metadata(context.record)
+                next_heartbeat = now + heartbeat_seconds
 
         thread = threading.Thread(target=_heartbeat, daemon=True, name=f"heartbeat-{self.name}")
         thread.start()
+        stage_error: Optional[Exception] = None
         try:
+            self._ensure_not_stopped(context)
             self.before(context)
             self.execute(context)
             self.after(context)
+            self._ensure_not_stopped(context)
+        except Exception as exc:
+            stage_error = exc
+            raise
         finally:
             done.set()
             thread.join()
+            final_elapsed = int(time.monotonic() - started)
+            heartbeat_entry = context.record.metadata.stats.setdefault("stage_heartbeats", {}).setdefault(self.name, {})
+            heartbeat_entry["last_finished_at"] = time_utils.iso_now()
+            heartbeat_entry["last_elapsed_seconds"] = final_elapsed
             if sla_alerted.is_set() and getattr(context, "record", None) and getattr(context, "manager", None):
                 stats = context.record.metadata.stats.setdefault("stage_runtime_alerts", {})
                 stats[self.name] = {
                     "sla_seconds": sla_seconds,
                     "alert_elapsed_seconds": int(sla_alert_elapsed["seconds"] or 0),
                 }
-                context.manager.update_metadata(context.record)
+            context.manager.update_metadata(context.record)
+            if stage_error is None and (stop_alerted.is_set() or self._stop_requested(context)):
+                raise StageStopRequested(f"Stop requested while running stage {self.name}")
+
+    def _note_skip(self, context: PipelineContext, reason: str) -> None:
+        stats = context.record.metadata.stats.setdefault("stage_skips", {})
+        entry = stats.setdefault(self.name, {})
+        entry["reason"] = reason
+        entry["count"] = int(entry.get("count", 0)) + 1
+        entry["last_skipped_at"] = time_utils.iso_now()
+        context.manager.update_metadata(context.record)
 
     def run(self, context: PipelineContext) -> bool:
         logger = context.logger
+        if self._stop_requested(context):
+            logger.warning("Stage %s skipped because stop was requested", self.name)
+            self._note_skip(context, "stop_requested")
+            raise StageStopRequested(f"Stop requested before stage {self.name}")
         if not self.is_enabled(context):
             logger.info("Stage %s disabled for this profile", self.name)
+            self._note_skip(context, "disabled")
             return False
         if not self.should_run(context):
             logger.info("Stage %s already checkpointed; skipping", self.name)
+            self._note_skip(context, "checkpointed")
             return False
         attempts = context.max_retries + 1
         backoff_base = max(0.1, float(context.runtime_config.retry_backoff_base))
@@ -123,6 +191,10 @@ class Stage(ABC):
                 context.checkpoint(self.name)
                 logger.info("Stage %s completed", self.name)
                 return True
+            except StageStopRequested as exc:
+                logger.warning("Stage %s stopped: %s", self.name, exc)
+                self._note_skip(context, "stop_requested")
+                raise
             except Exception as exc:  # pragma: no cover - runtime path
                 logger.exception("Stage %s failed: %s", self.name, exc)
                 if attempt >= attempts:

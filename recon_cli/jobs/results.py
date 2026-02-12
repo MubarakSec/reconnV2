@@ -42,6 +42,8 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("screenshot_path"))
     if ptype == "runtime_crawl":
         return (ptype, payload.get("url"))
+    if ptype == "idor_suspect":
+        return (ptype, payload.get("url"), payload.get("auth"), payload.get("source"))
     if ptype == "signal":
         return (
             ptype,

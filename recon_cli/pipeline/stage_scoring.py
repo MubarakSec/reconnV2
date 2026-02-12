@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Dict, List
+from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
@@ -19,6 +20,28 @@ class ScoringStage(Stage):
     SENSITIVE_QUERY_KEYS = {"password", "token", "secret", "key"}
     BACKUP_EXTENSIONS = {".sql", ".bak", ".zip", ".tar", ".gz"}
     ENV_BOOST_TAGS = {"env:dev", "env:staging", "env:test", "env:qa", "env:preprod"}
+    CONFIRMED_SIGNAL_TYPES = {
+        "ssrf_confirmed",
+        "xxe_confirmed",
+        "open_redirect_confirmed",
+        "lfi_confirmed",
+        "poc_validated",
+        "api_auth_weak",
+        "upload_dir_exposed",
+    }
+    HIGH_SIGNAL_TAGS = {
+        "ssrf:confirmed",
+        "xxe:confirmed",
+        "lfi:confirmed",
+        "redirect:confirmed",
+        "api:auth-weak",
+        "upload:exposed",
+        "waf-bypass-possible",
+        "secret-hit",
+    }
+    AUTH_SURFACE_CLUSTER_STATUSES = {401, 403, 404, 410}
+    AUTH_SURFACE_CLUSTER_THRESHOLD = 8
+    AUTH_SURFACE_REPETITIVE_CAP = 45
 
     def execute(self, context: PipelineContext) -> None:
         self.rules = getattr(self, "rules", rules_engine.load_rules())
@@ -44,6 +67,7 @@ class ScoringStage(Stage):
                 enrichment_map = {}
 
         soft_404_hosts = set(context.record.metadata.stats.get("soft_404", {}).get("hosts", []))
+        auth_cluster_sizes = self._build_auth_surface_clusters(items)
         updated: List[dict] = []
         for entry in items:
             ptype = entry.get("type")
@@ -101,8 +125,13 @@ class ScoringStage(Stage):
             score = int(entry.get("score", 0))
             tags = set(entry.get("tags", []))
             url = entry.get("url", "")
+            if not isinstance(url, str):
+                updated.append(entry)
+                continue
+            parsed_url = urlparse(url)
+            path = (parsed_url.path or "/").lower()
             lower_url = url.lower()
-            host = entry.get("hostname")
+            host = entry.get("hostname") or parsed_url.hostname
             url_signals = signals.get("by_url", {}).get(url, set())
             host_signals = signals.get("by_host", {}).get(host, set()) if host else set()
             host_enrichments = enrichment_map.get(host, []) if host else []
@@ -314,6 +343,14 @@ class ScoringStage(Stage):
                     score = max(score, 95)
                 server = entry.get("server")
                 score += enrich_utils.legacy_score(server)
+                cluster_size = auth_cluster_sizes.get((path, int(status_code or 0)), 0)
+                score = self._calibrate_risk_score(
+                    score,
+                    status_code,
+                    tags,
+                    url_signals,
+                    auth_cluster_size=cluster_size,
+                )
 
             rule_tags = rules_engine.apply_rules(entry, self.rules)
             if rule_tags:
@@ -342,3 +379,73 @@ class ScoringStage(Stage):
         )
         surface_stats["register"] = sum(1 for entry in updated if "surface:register" in entry.get("tags", []))
         context.manager.update_metadata(context.record)
+
+    def _calibrate_risk_score(
+        self,
+        score: int,
+        status_code: object,
+        tags: set[str],
+        url_signals: set[str],
+        auth_cluster_size: int = 0,
+    ) -> int:
+        status = int(status_code or 0)
+        has_high_signal = self._has_high_signal(tags, url_signals)
+
+        if status in {401, 403} and "auth-required" in tags and not has_high_signal:
+            tags.add("auth:challenge")
+            challenge_cap = 65
+            if "probe++" in tags:
+                challenge_cap = min(challenge_cap, 55)
+                tags.add("probe:challenge")
+            if "service:waf" in tags:
+                challenge_cap = min(challenge_cap, 50)
+            if "surface:login" in tags:
+                challenge_cap = min(challenge_cap, 60)
+            if "surface:admin" in tags and "surface:login" in tags:
+                challenge_cap = min(challenge_cap, 55)
+            score = min(score, challenge_cap)
+
+        if status == 410 and not has_high_signal:
+            tags.add("surface:retired")
+            score = min(score, 35)
+        elif status == 404 and not has_high_signal and tags.intersection({"surface:login", "surface:admin"}):
+            score = min(score, 40)
+        if (
+            auth_cluster_size >= self.AUTH_SURFACE_CLUSTER_THRESHOLD
+            and status in self.AUTH_SURFACE_CLUSTER_STATUSES
+            and tags.intersection({"surface:login", "surface:admin"})
+            and not has_high_signal
+        ):
+            tags.add("auth:repetitive")
+            score = min(score, self.AUTH_SURFACE_REPETITIVE_CAP)
+
+        return max(score, 0)
+
+    def _has_high_signal(self, tags: set[str], url_signals: set[str]) -> bool:
+        return bool(self.CONFIRMED_SIGNAL_TYPES.intersection(url_signals)) or bool(
+            self.HIGH_SIGNAL_TAGS.intersection(tags)
+        )
+
+    def _build_auth_surface_clusters(self, items: List[dict]) -> Dict[tuple[str, int], int]:
+        clusters: Dict[tuple[str, int], set[str]] = {}
+        for entry in items:
+            if entry.get("type") != "url":
+                continue
+            url = entry.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            status = int(entry.get("status_code") or 0)
+            if status not in self.AUTH_SURFACE_CLUSTER_STATUSES:
+                continue
+            parsed = urlparse(url)
+            path = (parsed.path or "/").lower()
+            if not any(token in path for token in self.ADMIN_PATTERNS):
+                continue
+            host = str(entry.get("hostname") or parsed.hostname or "").lower()
+            if not host:
+                continue
+            key = (path, status)
+            if key not in clusters:
+                clusters[key] = set()
+            clusters[key].add(host)
+        return {key: len(hosts) for key, hosts in clusters.items()}

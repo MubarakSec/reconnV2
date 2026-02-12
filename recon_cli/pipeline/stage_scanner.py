@@ -115,12 +115,14 @@ class ScannerStage(Stage):
                 if max_timeout < runtime.scanner_timeout:
                     max_timeout = runtime.scanner_timeout
                 batch_timeout = min(max_timeout, max(computed_timeout, runtime.scanner_timeout))
+                batch_run_id = batches_run + 1
                 result = scanner_integrations.run_nuclei_batch(
                     context.executor,
                     context.logger,
                     batch,
                     scanner_dir,
                     batch_timeout,
+                    artifact_suffix=f"run{batch_run_id}",
                     tags=nuclei_tags or None,
                     request_timeout=int(getattr(runtime, "nuclei_timeout", 10)),
                     retries=int(getattr(runtime, "nuclei_retries", 1)),
@@ -140,12 +142,14 @@ class ScannerStage(Stage):
                         if single_target not in retried_singles:
                             retried_singles.add(single_target)
                             single_timeout = int(getattr(runtime, "nuclei_single_timeout", batch_timeout))
+                            retry_run_id = batches_run + 1
                             retry_result = scanner_integrations.run_nuclei_batch(
                                 context.executor,
                                 context.logger,
                                 batch,
                                 scanner_dir,
                                 max(single_timeout, batch_timeout),
+                                artifact_suffix=f"run{retry_run_id}",
                                 tags=nuclei_tags or None,
                                 request_timeout=int(getattr(runtime, "nuclei_timeout", 10)),
                                 retries=int(getattr(runtime, "nuclei_retries", 1)),

@@ -59,6 +59,8 @@ class ExtendedValidationStage(Stage):
         retry_count = int(getattr(runtime, "retry_count", 1))
         retry_backoff_base = float(getattr(runtime, "retry_backoff_base", 1.0))
         retry_backoff_factor = float(getattr(runtime, "retry_backoff_factor", 2.0))
+        max_duration = max(0, int(getattr(runtime, "extended_validation_max_duration", 0) or 0))
+        max_total_probes = max(0, int(getattr(runtime, "extended_validation_max_probes", 0) or 0))
         limiter = context.get_rate_limiter(
             "extended_validation",
             rps=float(getattr(runtime, "oast_rps", 0)),
@@ -81,11 +83,43 @@ class ExtendedValidationStage(Stage):
         confirmed_keys: Set[Tuple[str, str]] = set()
         stats = context.record.metadata.stats.setdefault("extended_validation", {})
         baseline_cache: Dict[Tuple[str, str, str, str], Tuple[int, str]] = {}
+        started_at = time.monotonic()
+        duration_cap_hit = False
+        probe_cap_hit = False
+        stop_requested = False
+
+        def cap_reached() -> bool:
+            nonlocal duration_cap_hit, probe_cap_hit, stop_requested
+            if context.stop_requested():
+                if not stop_requested:
+                    context.logger.warning("extended validation stop requested; stopping stage work")
+                stop_requested = True
+                return True
+            elapsed = int(time.monotonic() - started_at)
+            if max_duration and elapsed >= max_duration:
+                if not duration_cap_hit:
+                    context.logger.warning(
+                        "extended validation max duration reached (%ss); stopping stage work",
+                        max_duration,
+                    )
+                duration_cap_hit = True
+                return True
+            if max_total_probes and len(probes) >= max_total_probes:
+                if not probe_cap_hit:
+                    context.logger.warning(
+                        "extended validation max probes reached (%s); stopping stage work",
+                        max_total_probes,
+                    )
+                probe_cap_hit = True
+                return True
+            return False
 
         # Redirect validation
-        if enable_redirect:
+        if enable_redirect and not cap_reached():
             redirect_candidates = candidates["redirect"][:redirect_max_urls]
             for entry in redirect_candidates:
+                if cap_reached():
+                    break
                 url = entry["url"]
                 if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                     continue
@@ -130,6 +164,8 @@ class ExtendedValidationStage(Stage):
                         "method": method,
                     }
                 )
+                if cap_reached():
+                    break
                 if resp.status_code in {301, 302, 303, 307, 308} and self._is_open_redirect(url, location, payload):
                     confirm_key = ("open_redirect", url)
                     if confirm_key in confirmed_keys:
@@ -162,9 +198,11 @@ class ExtendedValidationStage(Stage):
                         findings += 1
 
         # LFI validation
-        if enable_lfi:
+        if enable_lfi and not cap_reached():
             lfi_candidates = candidates["lfi"][:lfi_max_urls]
             for entry in lfi_candidates:
+                if cap_reached():
+                    break
                 url = entry["url"]
                 baseline_key = (
                     url,
@@ -188,6 +226,8 @@ class ExtendedValidationStage(Stage):
                     baseline_cache[baseline_key] = (baseline_status, baseline_body)
                 baseline_has_sig = bool(baseline_body and self._looks_like_lfi(baseline_body))
                 for payload in ("../../../../etc/passwd", "..\\..\\..\\windows\\win.ini"):
+                    if cap_reached():
+                        break
                     if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                         continue
                     test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
@@ -228,6 +268,8 @@ class ExtendedValidationStage(Stage):
                             "method": method,
                         }
                     )
+                    if cap_reached():
+                        break
                     if baseline_has_sig:
                         continue
                     if resp.status_code < 400 and len(body) > 200 and self._looks_like_lfi(body):
@@ -265,7 +307,7 @@ class ExtendedValidationStage(Stage):
         # OAST validation (SSRF / XXE)
         oast_tokens: Dict[str, Dict[str, object]] = {}
         interactions: List[Dict[str, object]] = []
-        if enable_oast and oast_backend == "interactsh":
+        if enable_oast and oast_backend == "interactsh" and not cap_reached():
             oast_output = artifacts_dir / "interactsh.json"
             oast_domain_override = getattr(runtime, "oast_domain", None)
             session = InteractshSession(
@@ -284,6 +326,8 @@ class ExtendedValidationStage(Stage):
                     ssrf_candidates = candidates["ssrf"][:oast_max_targets]
                     per_host_counts: Dict[str, int] = defaultdict(int)
                     for entry in ssrf_candidates:
+                        if cap_reached():
+                            break
                         url = entry["url"]
                         host = urlparse(url).hostname or ""
                         if host and per_host_counts[host] >= oast_max_per_host:
@@ -339,9 +383,13 @@ class ExtendedValidationStage(Stage):
                                 "method": method,
                             }
                         )
+                        if cap_reached():
+                            break
 
                     xxe_candidates = candidates["xxe"][:oast_max_targets]
                     for entry in xxe_candidates:
+                        if cap_reached():
+                            break
                         url = entry["url"]
                         host = urlparse(url).hostname or ""
                         if host and per_host_counts[host] >= oast_max_per_host:
@@ -398,10 +446,14 @@ class ExtendedValidationStage(Stage):
                                 "status": resp.status_code,
                             }
                         )
+                        if cap_reached():
+                            break
 
-                    if enable_header:
+                    if enable_header and not cap_reached():
                         header_candidates = self._select_header_candidates(candidates, header_max_urls)
                         for url in header_candidates:
+                            if cap_reached():
+                                break
                             token = self._token()
                             oast_url = session.make_url(token)
                             if not oast_url:
@@ -449,8 +501,10 @@ class ExtendedValidationStage(Stage):
                                     "status": resp.status_code,
                                 }
                             )
+                            if cap_reached():
+                                break
 
-                    if oast_tokens:
+                    if oast_tokens and not cap_reached():
                         collected = session.collect_interactions(list(oast_tokens.keys()))
                         interactions = [interaction.raw for interaction in collected]
                         for interaction in collected:
@@ -522,10 +576,17 @@ class ExtendedValidationStage(Stage):
             ),
             encoding="utf-8",
         )
+        elapsed_seconds = int(time.monotonic() - started_at)
         stats.update(
             {
                 "probes": len(probes),
                 "findings": findings,
+                "elapsed_seconds": elapsed_seconds,
+                "max_duration_seconds": max_duration,
+                "duration_cap_hit": duration_cap_hit,
+                "max_total_probes": max_total_probes,
+                "probe_cap_hit": probe_cap_hit,
+                "stop_requested": stop_requested,
                 "artifact": str(artifact_path.relative_to(context.record.paths.root)),
             }
         )

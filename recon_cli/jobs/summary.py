@@ -123,6 +123,20 @@ def generate_summary(context) -> None:
             return True
         return False
 
+    def _priority_rank(value: object) -> int:
+        order = {"noise": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+        if not isinstance(value, str):
+            return -1
+        return order.get(value.lower(), -1)
+
+    def _ranking_key(entry: dict) -> tuple[int, int, int, int]:
+        tags_raw = entry.get("tags", [])
+        tags = {str(tag).lower() for tag in tags_raw} if isinstance(tags_raw, list) else set()
+        confirmed = 1 if _is_confirmed(entry) else 0
+        non_repetitive = 0 if "auth:repetitive" in tags else 1
+        score = int(entry.get("score", 0) or 0)
+        return (confirmed, non_repetitive, score, _priority_rank(entry.get("priority")))
+
     for entry in iter_jsonl(results_path):
         etype = entry.get("type", "unknown")
         counts[etype] += 1
@@ -167,9 +181,9 @@ def generate_summary(context) -> None:
             top_candidates.append(payload)
             top_findings.append(payload)
 
-    top_candidates.sort(key=lambda item: item.get("score", 0), reverse=True)
-    top_urls.sort(key=lambda item: item.get("score", 0), reverse=True)
-    top_findings.sort(key=lambda item: item.get("score", 0), reverse=True)
+    top_candidates.sort(key=_ranking_key, reverse=True)
+    top_urls.sort(key=_ranking_key, reverse=True)
+    top_findings.sort(key=_ranking_key, reverse=True)
 
     lines = []
     lines.append(f"Job ID       : {metadata.job_id}")
@@ -178,6 +192,12 @@ def generate_summary(context) -> None:
     lines.append(f"Queued       : {metadata.queued_at}")
     lines.append(f"Started      : {metadata.started_at}")
     lines.append(f"Finished     : {metadata.finished_at}")
+    started_dt = _parse_iso(metadata.started_at)
+    finished_dt = _parse_iso(metadata.finished_at)
+    if started_dt and finished_dt:
+        wall_clock = (finished_dt - started_dt).total_seconds()
+        if wall_clock >= 0:
+            lines.append(f"Wall Clock   : {wall_clock:.1f}s")
     lines.append(f"Summary Src  : {summary_source}")
     lines.append("")
     lines.append("== Totals ==")
@@ -215,7 +235,7 @@ def generate_summary(context) -> None:
         if durations:
             lines.append("")
             lines.append("== Stage Timings ==")
-            lines.append(f"Total: {total_duration:.1f}s")
+            lines.append(f"Total: {total_duration:.1f}s (stage progress window)")
             for stage, duration, status in sorted(durations, key=lambda item: item[1], reverse=True)[:10]:
                 lines.append(f"{stage:20} {duration:6.1f}s ({status})")
     if STAGE_HEALTH_SIGNALS:
@@ -435,7 +455,7 @@ def generate_summary(context) -> None:
         payload = entry | {"score": score, "priority": priority}
         big_findings.append(payload)
 
-    big_findings.sort(key=lambda item: item.get("score", 0), reverse=True)
+    big_findings.sort(key=_ranking_key, reverse=True)
     big_lines.append(f"Findings >= 60: {len(big_findings)}")
     for entry in big_findings:
         confirmed = _is_confirmed(entry)
@@ -465,7 +485,7 @@ def generate_summary(context) -> None:
         priority = entry.get("priority") or "unknown"
         payload = entry | {"score": score, "priority": priority}
         confirmed_entries.append(payload)
-    confirmed_entries.sort(key=lambda item: item.get("score", 0), reverse=True)
+    confirmed_entries.sort(key=_ranking_key, reverse=True)
     confirmed_lines.append(f"Confirmed findings: {len(confirmed_entries)}")
     for entry in confirmed_entries:
         label = _format_finding_label(entry)

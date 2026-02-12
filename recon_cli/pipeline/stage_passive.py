@@ -202,8 +202,6 @@ class PassiveEnumerationStage(Stage):
                                 parsed = urlparse(url)
                                 if not parsed.scheme or not parsed.netloc:
                                     continue
-                                out_handle.write(url + "\n")
-                                wrote_any = True
                                 host = parsed.hostname
                                 hostname = None
                                 if host:

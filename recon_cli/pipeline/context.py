@@ -12,7 +12,7 @@ from recon_cli import config
 from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.jobs.results import ResultsTracker
 from recon_cli.tools.executor import CommandExecutor
-from recon_cli.utils import fs
+from recon_cli.utils import fs, time as time_utils
 from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.logging import build_file_logger, silence_logger
 
@@ -40,6 +40,7 @@ class PipelineContext:
     _data_store: Dict[str, object] = field(init=False, default_factory=dict)
     _rate_limiters: Dict[str, object] = field(init=False, default_factory=dict)
     _auth_manager: object = field(init=False, default=None)
+    _stop_request_path: Optional[Path] = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if self.record is None:
@@ -50,6 +51,7 @@ class PipelineContext:
                 self.results_file = self.work_dir / "results.jsonl"
             base_dir = self.work_dir or Path.cwd()
             self._cache_path = base_dir / "cache.json"
+            self._stop_request_path = None
             return
         if self.manager is None:
             self.manager = JobManager()
@@ -62,6 +64,7 @@ class PipelineContext:
             base_config = base_config.clone(**overrides)
         self.runtime_config = base_config
         self._cache_path = self.record.paths.root / "cache.json"
+        self._stop_request_path = self.record.paths.root / "stop.request"
         raw_cache = fs.read_json(self._cache_path, default={})
         self._delta_cache = {}
         if isinstance(raw_cache, dict):
@@ -353,6 +356,35 @@ class PipelineContext:
         self.record.metadata.mark_finished(status=status)
         self.record.metadata.attempts = self.stage_attempts
         self.manager.update_metadata(self.record)
+
+    def stop_requested(self) -> bool:
+        if self._stop_request_path is None:
+            return False
+        try:
+            return self._stop_request_path.exists()
+        except Exception:
+            return False
+
+    def request_stop(self, reason: str = "user_request") -> bool:
+        if self._stop_request_path is None:
+            return False
+        payload = {
+            "requested_at": time_utils.iso_now(),
+            "reason": reason,
+        }
+        try:
+            fs.write_json(self._stop_request_path, payload)
+        except Exception:
+            return False
+        return True
+
+    def clear_stop_request(self) -> None:
+        if self._stop_request_path is None:
+            return
+        try:
+            self._stop_request_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def close(self) -> None:
         if self._cache_dirty:

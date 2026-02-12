@@ -105,3 +105,43 @@ def test_vhost_probe_cap_enforced(monkeypatch, tmp_path: Path):
     assert stats.get("tested_candidates") == 3
     assert stats.get("probe_cap") == 3
     assert stats.get("tested_candidates") <= stats.get("probe_cap")
+
+
+def test_vhost_filters_wildcard_like_candidates(monkeypatch, tmp_path: Path):
+    wordlist = tmp_path / "vhost.txt"
+    wordlist.write_text("admin\ntest\ndev\n", encoding="utf-8")
+
+    record = _make_record(
+        tmp_path,
+        {
+            "enable_vhost": True,
+            "vhost_wordlist": str(wordlist),
+            "vhost_max_hosts": 1,
+            "vhost_max_candidates": 3,
+            "vhost_max_probes": 10,
+            "vhost_progress_every": 1,
+            "vhost_timeout": 1,
+            "vhost_rps": 0,
+            "vhost_per_host_rps": 0,
+        },
+    )
+    _write_base_url(record.paths.results_jsonl)
+    context = PipelineContext(record=record, manager=DummyManager())
+
+    def fake_get(url, timeout=None, allow_redirects=None, verify=None, headers=None, stream=None):
+        host_header = (headers or {}).get("Host")
+        if not host_header:
+            return _FakeResponse(200, "<html><title>Base</title></html>", {"Content-Length": "1000"})
+        return _FakeResponse(200, "<html><title>Catch-All</title></html>", {"Content-Length": "2000", "Server": "nginx"})
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    stage = VHostDiscoveryStage()
+    stage.run(context)
+
+    stats = record.metadata.stats.get("vhost", {})
+    assert stats.get("tested_candidates") == 3
+    assert stats.get("discovered") == 0
+    assert stats.get("wildcard_filtered") == 3

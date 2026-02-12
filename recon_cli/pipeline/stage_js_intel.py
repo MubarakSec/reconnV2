@@ -62,16 +62,39 @@ class JSIntelligenceStage(Stage):
             context.logger.warning("js intelligence requires requests; skipping")
             return
         items = read_jsonl(context.record.paths.results_jsonl)
-        js_urls = []
+        js_urls: List[str] = []
+        direct_js_urls: List[str] = []
+        runtime_js_urls: List[str] = []
         for entry in items:
-            if entry.get("type") != "url":
-                continue
-            url = entry.get("url")
-            if not url or not isinstance(url, str):
-                continue
-            if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
-                if entry.get("status_code") in {200, 302}:
-                    js_urls.append(url)
+            etype = entry.get("type")
+            if etype == "url":
+                url = entry.get("url")
+                if not url or not isinstance(url, str):
+                    continue
+                if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
+                    if entry.get("status_code") in {200, 302}:
+                        direct_js_urls.append(url)
+                        js_urls.append(url)
+            elif etype == "runtime_crawl":
+                js_files = entry.get("javascript_files") or []
+                if not isinstance(js_files, list):
+                    continue
+                for js_url in js_files:
+                    if not isinstance(js_url, str) or not js_url:
+                        continue
+                    if js_url.startswith(("http://", "https://")):
+                        runtime_js_urls.append(js_url)
+
+        if runtime_js_urls:
+            js_urls.extend(runtime_js_urls)
+
+        js_urls = list(dict.fromkeys(js_urls))
+        if runtime_js_urls:
+            context.logger.info(
+                "JS intelligence candidates: %s direct + %s from runtime crawl",
+                len(set(direct_js_urls)),
+                len(set(runtime_js_urls)),
+            )
         if not js_urls:
             context.logger.info("No JS URLs for intelligence stage")
             return
@@ -85,7 +108,7 @@ class JSIntelligenceStage(Stage):
             per_host=float(getattr(runtime, "js_intel_per_host_rps", 0)),
         )
         signaled_hosts: set[str] = set()
-        js_urls = list(dict.fromkeys(js_urls))[:max_files]
+        js_urls = js_urls[:max_files]
         artifacts: List[Dict[str, object]] = []
         discovered_urls: List[str] = []
         for js_url in js_urls:
