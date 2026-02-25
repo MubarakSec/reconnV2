@@ -332,10 +332,22 @@ class Histogram:
         with self._lock:
             return self._sum
     
-    def get_buckets(self) -> Dict[float, int]:
-        """البيانات بالـ buckets"""
+    def _get_buckets_internal(self) -> Dict[float, int]:
         with self._lock:
             return dict(self._bucket_counts)
+
+    def get_buckets(self) -> Dict[str, int]:
+        """البيانات بالـ buckets"""
+        with self._lock:
+            formatted: Dict[str, int] = {}
+            for bucket, value in self._bucket_counts.items():
+                key = "+Inf" if bucket == float("inf") else str(bucket)
+                formatted[key] = value
+            return formatted
+
+    def get_stats(self) -> Dict[str, float]:
+        with self._lock:
+            return {"count": float(self._count), "sum": self._sum}
     
     def _observe_labeled(self, label_values: Tuple, value: float) -> None:
         with self._lock:
@@ -360,6 +372,11 @@ class _LabeledHistogram:
     
     def time(self) -> "_HistogramTimer":
         return _HistogramTimer(self)
+
+    def get_stats(self) -> Dict[str, float]:
+        with self._histogram._lock:
+            data = self._histogram._labeled_data[self._label_values]
+            return {"count": float(data["count"]), "sum": float(data["sum"])}
 
 
 class _HistogramTimer:
@@ -410,6 +427,9 @@ class Summary:
         self._sum = 0.0
         self._count = 0
         self._max_samples = 10000
+        self._labeled_data: Dict[Tuple, Dict[str, Any]] = defaultdict(
+            lambda: {"values": [], "sum": 0.0, "count": 0}
+        )
         self._lock = threading.Lock()
     
     def observe(self, value: float) -> None:
@@ -439,6 +459,59 @@ class Summary:
     def get_sample_sum(self) -> float:
         with self._lock:
             return self._sum
+
+    def labels(self, **kwargs) -> "_LabeledSummary":
+        label_values = tuple(kwargs.get(name, "") for name in self.label_names)
+        return _LabeledSummary(self, label_values)
+
+    def _observe_labeled(self, label_values: Tuple, value: float) -> None:
+        with self._lock:
+            data = self._labeled_data[label_values]
+            data["sum"] += value
+            data["count"] += 1
+            values = data["values"]
+            values.append(value)
+            if len(values) > self._max_samples:
+                data["values"] = values[-self._max_samples:]
+
+    def _get_stats_labeled(self, label_values: Tuple) -> Dict[str, float]:
+        with self._lock:
+            data = self._labeled_data[label_values]
+            return {"count": float(data["count"]), "sum": float(data["sum"])}
+
+    def _get_quantile_labeled(self, label_values: Tuple, quantile: float) -> float:
+        with self._lock:
+            values = self._labeled_data[label_values]["values"]
+            if not values:
+                return 0.0
+            sorted_values = sorted(values)
+            idx = int(quantile * len(sorted_values))
+            return sorted_values[min(idx, len(sorted_values) - 1)]
+
+    def get_stats(self) -> Dict[str, float]:
+        with self._lock:
+            return {"count": float(self._count), "sum": self._sum}
+
+    def get_quantiles(self) -> Dict[str, float]:
+        return {str(q): self.get_quantile(q) for q in self._quantiles}
+
+
+class _LabeledSummary:
+    def __init__(self, summary: Summary, label_values: Tuple):
+        self._summary = summary
+        self._label_values = label_values
+
+    def observe(self, value: float) -> None:
+        self._summary._observe_labeled(self._label_values, value)
+
+    def get_stats(self) -> Dict[str, float]:
+        return self._summary._get_stats_labeled(self._label_values)
+
+    def get_quantiles(self) -> Dict[str, float]:
+        return {
+            str(q): self._summary._get_quantile_labeled(self._label_values, q)
+            for q in self._summary._quantiles
+        }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -511,6 +584,29 @@ class MetricsRegistry:
             if name not in self._metrics:
                 self._metrics[name] = Summary(name, description, quantiles, labels)
             return self._metrics[name]
+
+    def register(self, metric: Union[Counter, Gauge, Histogram, Summary]) -> None:
+        with self._lock:
+            self._metrics[metric.name] = metric
+
+    def get(self, name: str) -> Optional[Union[Counter, Gauge, Histogram, Summary]]:
+        with self._lock:
+            return self._metrics.get(name)
+
+    def unregister(self, name: str) -> bool:
+        with self._lock:
+            if name in self._metrics:
+                del self._metrics[name]
+                return True
+            return False
+
+    def get_all(self) -> Dict[str, Union[Counter, Gauge, Histogram, Summary]]:
+        with self._lock:
+            return dict(self._metrics)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._metrics.clear()
     
     def export(self) -> str:
         """تصدير بتنسيق Prometheus"""
@@ -545,7 +641,7 @@ class MetricsRegistry:
                         lines.append(f"{name}{{{labels_str}}} {value}")
                 
                 elif isinstance(metric, Histogram):
-                    buckets = metric.get_buckets()
+                    buckets = metric._get_buckets_internal()
                     cumulative = 0
                     
                     for bucket, count in sorted(buckets.items()):
@@ -591,7 +687,7 @@ class MetricsRegistry:
                 elif isinstance(metric, Histogram):
                     data[name] = {
                         "type": "histogram",
-                        "buckets": metric.get_buckets(),
+                        "buckets": metric._get_buckets_internal(),
                         "sum": metric.get_sample_sum(),
                         "count": metric.get_sample_count(),
                     }
@@ -879,3 +975,12 @@ def track_inprogress(gauge: Gauge) -> Callable:
                 return func(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def get_metrics() -> ReconMetrics:
+    return metrics
+
+
+def export_prometheus(reg: Optional[MetricsRegistry] = None) -> str:
+    target = reg or registry
+    return target.export()

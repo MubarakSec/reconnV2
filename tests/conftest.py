@@ -23,10 +23,99 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# Disable joblib multiprocessing in restricted test environments to avoid
+# semaphore permission warnings; tests do not rely on process-based backends.
+os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
+
 # Ensure local package imports work when running pytest without PYTHONPATH.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+
+def _install_testclient_compat() -> None:
+    """
+    Provide a stable TestClient implementation backed by httpx ASGI transport.
+
+    In this execution environment, anyio's blocking portal can stall, which
+    causes fastapi/starlette TestClient requests to hang indefinitely.
+    """
+    try:
+        import httpx
+        import fastapi.testclient as fastapi_testclient
+    except Exception:
+        return
+
+    class _CompatTestClient:
+        __test__ = False
+
+        def __init__(
+            self,
+            app: Any,
+            base_url: str = "http://testserver",
+            headers: Optional[Dict[str, str]] = None,
+            follow_redirects: bool = True,
+            **_: Any,
+        ) -> None:
+            self.app = app
+            self.base_url = base_url
+            self.headers = dict(headers or {})
+            self.follow_redirects = follow_redirects
+
+        async def _request_async(self, method: str, url: str, **kwargs: Any) -> Any:
+            transport = httpx.ASGITransport(app=self.app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url=self.base_url,
+                follow_redirects=self.follow_redirects,
+            ) as client:
+                return await client.request(method, url, **kwargs)
+
+        def request(self, method: str, url: str, **kwargs: Any) -> Any:
+            req_headers = kwargs.pop("headers", None) or {}
+            merged_headers = dict(self.headers)
+            merged_headers.update(req_headers)
+            kwargs["headers"] = merged_headers
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(self._request_async(method, url, **kwargs))
+            finally:
+                loop.close()
+
+        def get(self, url: str, **kwargs: Any) -> Any:
+            return self.request("GET", url, **kwargs)
+
+        def post(self, url: str, **kwargs: Any) -> Any:
+            return self.request("POST", url, **kwargs)
+
+        def put(self, url: str, **kwargs: Any) -> Any:
+            return self.request("PUT", url, **kwargs)
+
+        def patch(self, url: str, **kwargs: Any) -> Any:
+            return self.request("PATCH", url, **kwargs)
+
+        def delete(self, url: str, **kwargs: Any) -> Any:
+            return self.request("DELETE", url, **kwargs)
+
+        def options(self, url: str, **kwargs: Any) -> Any:
+            return self.request("OPTIONS", url, **kwargs)
+
+        def websocket_connect(self, *_: Any, **__: Any) -> Any:
+            raise RuntimeError("WebSocket test client is not available in compat mode")
+
+        def close(self) -> None:
+            return None
+
+        def __enter__(self) -> "_CompatTestClient":
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            self.close()
+
+    fastapi_testclient.TestClient = _CompatTestClient
+
+
+_install_testclient_compat()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -57,7 +146,9 @@ def pytest_configure(config):
 def event_loop():
     """Event loop للاختبارات الـ async"""
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     yield loop
+    asyncio.set_event_loop(None)
     loop.close()
 
 

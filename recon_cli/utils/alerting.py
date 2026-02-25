@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from enum import Enum
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
@@ -54,11 +54,42 @@ class AlertSeverity(Enum):
     INFO = "info"          # معلومات
 
 
+class AlertLevel(IntEnum):
+    DEBUG = 10
+    INFO = 20
+    WARNING = 30
+    ERROR = 40
+    CRITICAL = 50
+
+
 class AlertStatus(Enum):
     """حالة التنبيه"""
     FIRING = "firing"       # نشط
     RESOLVED = "resolved"   # تم حله
     SILENCED = "silenced"   # مكتوم
+
+
+def _severity_to_level(severity: AlertSeverity) -> AlertLevel:
+    mapping = {
+        AlertSeverity.CRITICAL: AlertLevel.CRITICAL,
+        AlertSeverity.HIGH: AlertLevel.ERROR,
+        AlertSeverity.MEDIUM: AlertLevel.WARNING,
+        AlertSeverity.LOW: AlertLevel.INFO,
+        AlertSeverity.INFO: AlertLevel.INFO,
+    }
+    return mapping.get(severity, AlertLevel.INFO)
+
+
+def _level_to_severity(level: AlertLevel) -> AlertSeverity:
+    if level >= AlertLevel.CRITICAL:
+        return AlertSeverity.CRITICAL
+    if level >= AlertLevel.ERROR:
+        return AlertSeverity.HIGH
+    if level >= AlertLevel.WARNING:
+        return AlertSeverity.MEDIUM
+    if level >= AlertLevel.INFO:
+        return AlertSeverity.INFO
+    return AlertSeverity.INFO
 
 
 class AlertChannel(Enum):
@@ -77,9 +108,11 @@ class Alert:
     
     id: str = ""
     name: str = ""
+    title: str = ""
     message: str = ""
-    
+
     severity: AlertSeverity = AlertSeverity.INFO
+    level: Optional[AlertLevel] = None
     status: AlertStatus = AlertStatus.FIRING
     
     rule_name: str = ""
@@ -88,6 +121,7 @@ class Alert:
     labels: Dict[str, str] = field(default_factory=dict)
     annotations: Dict[str, str] = field(default_factory=dict)
     context: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
     
     fired_at: datetime = field(default_factory=datetime.now)
     resolved_at: Optional[datetime] = None
@@ -97,6 +131,16 @@ class Alert:
     notification_count: int = 0
     
     def __post_init__(self):
+        if self.title and not self.name:
+            self.name = self.title
+        if self.name and not self.title:
+            self.title = self.name
+        if self.metadata and not self.context:
+            self.context = dict(self.metadata)
+        elif self.context and not self.metadata:
+            self.metadata = dict(self.context)
+        self.severity = _level_to_severity(self.level) if self.level is not None else self.severity
+        self.level = _severity_to_level(self.severity)
         if not self.id:
             self.id = self._generate_id()
     
@@ -124,17 +168,24 @@ class Alert:
         return {
             "id": self.id,
             "name": self.name,
+            "title": self.title,
             "message": self.message,
             "severity": self.severity.value,
+            "level": int(self.level or AlertLevel.INFO),
             "status": self.status.value,
             "rule_name": self.rule_name,
             "source": self.source,
             "labels": self.labels,
             "annotations": self.annotations,
+            "metadata": self.metadata,
             "fired_at": self.fired_at.isoformat(),
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
             "duration_seconds": self.duration.total_seconds(),
         }
+
+    @property
+    def timestamp(self) -> datetime:
+        return self.fired_at
 
 
 @dataclass
@@ -157,6 +208,7 @@ class AlertRule:
     condition: Callable[[Dict[str, Any]], bool]
     message: Union[str, Callable[[Dict[str, Any]], str]]
     severity: AlertSeverity = AlertSeverity.MEDIUM
+    alert_level: Optional[AlertLevel] = None
     
     # Throttling
     cooldown_seconds: int = 300  # 5 minutes between alerts
@@ -172,22 +224,38 @@ class AlertRule:
     # State
     last_fired: Optional[datetime] = None
     fire_count: int = 0
+
+    def __post_init__(self) -> None:
+        if self.alert_level is None:
+            self.alert_level = _severity_to_level(self.severity)
+        self.severity = _level_to_severity(self.alert_level)
+
+    def matches(self, context: Dict[str, Any]) -> bool:
+        try:
+            return bool(self.condition(context))
+        except Exception:
+            return False
+
+    def should_fire(self) -> bool:
+        if not self.enabled:
+            return False
+        if self.last_fired is None:
+            return True
+        elapsed = (datetime.now() - self.last_fired).total_seconds()
+        return elapsed >= self.cooldown_seconds
+
+    def record_fire(self) -> None:
+        self.last_fired = datetime.now()
+        self.fire_count += 1
     
     def evaluate(self, context: Dict[str, Any]) -> Optional[Alert]:
         """تقييم القاعدة"""
-        if not self.enabled:
+        if not self.should_fire():
             return None
         
-        # Check cooldown
-        if self.last_fired:
-            elapsed = (datetime.now() - self.last_fired).total_seconds()
-            if elapsed < self.cooldown_seconds:
-                return None
-        
         try:
-            if self.condition(context):
-                self.last_fired = datetime.now()
-                self.fire_count += 1
+            if self.matches(context):
+                self.record_fire()
                 
                 # Get message
                 if callable(self.message):
@@ -197,11 +265,14 @@ class AlertRule:
                 
                 return Alert(
                     name=self.name,
+                    title=self.name,
                     message=message,
                     severity=self.severity,
+                    level=self.alert_level or AlertLevel.INFO,
                     rule_name=self.name,
                     labels=self.labels.copy(),
                     context=context,
+                    metadata=context,
                 )
         except Exception as e:
             logger.error("Rule evaluation error (%s): %s", self.name, e)
@@ -271,6 +342,16 @@ class EmailChannel(NotificationChannel):
         self.from_addr = from_addr
         self.to_addrs = to_addrs
         self.use_tls = use_tls
+
+    def format_email(self, alert: Alert) -> tuple[str, str]:
+        subject = f"[{alert.severity.value.upper()}] {alert.name}"
+        body = (
+            f"Alert: {alert.name}\n"
+            f"Severity: {alert.severity.value}\n"
+            f"Message: {alert.message}\n"
+            f"Time: {alert.fired_at.isoformat()}\n"
+        )
+        return subject, body
     
     async def send(self, alert: Alert) -> bool:
         try:
@@ -341,26 +422,29 @@ class SlackChannel(NotificationChannel):
     def __init__(self, webhook_url: str, channel: str = "#alerts"):
         self.webhook_url = webhook_url
         self.channel = channel
+
+    def format_payload(self, alert: Alert) -> Dict[str, Any]:
+        return {
+            "channel": self.channel,
+            "username": "ReconnV2 Alerts",
+            "icon_emoji": ":warning:",
+            "attachments": [{
+                "color": self.SEVERITY_COLORS.get(alert.severity, "#6c757d"),
+                "title": f"[{alert.severity.value.upper()}] {alert.name}",
+                "text": alert.message,
+                "fields": [
+                    {"title": k, "value": v, "short": True}
+                    for k, v in alert.labels.items()
+                ],
+                "footer": f"Fired at {alert.fired_at.isoformat()}",
+            }],
+        }
     
     async def send(self, alert: Alert) -> bool:
         try:
             import aiohttp
             
-            payload = {
-                "channel": self.channel,
-                "username": "ReconnV2 Alerts",
-                "icon_emoji": ":warning:",
-                "attachments": [{
-                    "color": self.SEVERITY_COLORS.get(alert.severity, "#6c757d"),
-                    "title": f"[{alert.severity.value.upper()}] {alert.name}",
-                    "text": alert.message,
-                    "fields": [
-                        {"title": k, "value": v, "short": True}
-                        for k, v in alert.labels.items()
-                    ],
-                    "footer": f"Fired at {alert.fired_at.isoformat()}",
-                }],
-            }
+            payload = self.format_payload(alert)
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.webhook_url, json=payload) as resp:
@@ -492,12 +576,23 @@ class WebhookChannel(NotificationChannel):
             import aiohttp
             
             async with aiohttp.ClientSession() as session:
-                async with session.request(
-                    self.method,
-                    self.url,
-                    json=alert.to_dict(),
-                    headers=self.headers,
-                ) as resp:
+                method_name = self.method.lower()
+                request_func = getattr(session, method_name, None)
+                if request_func is None:
+                    request_func = session.request
+                    req = request_func(
+                        self.method,
+                        self.url,
+                        json=alert.to_dict(),
+                        headers=self.headers,
+                    )
+                else:
+                    req = request_func(
+                        self.url,
+                        json=alert.to_dict(),
+                        headers=self.headers,
+                    )
+                async with req as resp:
                     return resp.status < 400
                     
         except ImportError:
@@ -773,8 +868,86 @@ class AlertManager:
     يتيح اختبار وإرسال الإشعارات.
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        min_level: AlertLevel = AlertLevel.DEBUG,
+        rate_limit_per_minute: Optional[int] = None,
+        dedupe_window_seconds: int = 0,
+    ):
         self.alerter = Alerter()
+        self.min_level = min_level
+        self.rate_limit_per_minute = rate_limit_per_minute
+        self.dedupe_window_seconds = dedupe_window_seconds
+        self.channels: Dict[str, Any] = {}
+        self.rules: List[AlertRule] = []
+        self._sent_timestamps: List[float] = []
+        self._dedupe_cache: Dict[str, float] = {}
+
+    def add_channel(self, name: str, channel: Any) -> None:
+        self.channels[name] = channel
+
+    def add_rule(self, rule: AlertRule) -> None:
+        self.rules.append(rule)
+
+    def _should_rate_limit(self) -> bool:
+        if not self.rate_limit_per_minute or self.rate_limit_per_minute <= 0:
+            return False
+        now = time.time()
+        window_start = now - 60.0
+        self._sent_timestamps = [ts for ts in self._sent_timestamps if ts >= window_start]
+        return len(self._sent_timestamps) >= self.rate_limit_per_minute
+
+    def _record_sent(self) -> None:
+        self._sent_timestamps.append(time.time())
+
+    def _is_duplicate(self, alert: Alert) -> bool:
+        if self.dedupe_window_seconds <= 0:
+            return False
+        key = f"{alert.title}|{alert.message}|{alert.level}"
+        now = time.time()
+        previous = self._dedupe_cache.get(key)
+        self._dedupe_cache[key] = now
+        if previous is None:
+            return False
+        return (now - previous) < self.dedupe_window_seconds
+
+    async def send_alert(self, alert: Alert) -> Dict[str, bool]:
+        if alert.level < self.min_level:
+            return {}
+        if self._should_rate_limit():
+            return {}
+        if self._is_duplicate(alert):
+            return {}
+
+        results: Dict[str, bool] = {}
+        for name, channel in self.channels.items():
+            try:
+                result = await channel.send(alert)
+                results[name] = bool(result)
+            except Exception:
+                results[name] = False
+        if results:
+            self._record_sent()
+        return results
+
+    async def check_rules(self, metrics: Dict[str, Any]) -> List[Alert]:
+        fired: List[Alert] = []
+        for rule in self.rules:
+            if not rule.matches(metrics):
+                continue
+            if not rule.should_fire():
+                continue
+            rule.record_fire()
+            message = rule.message(metrics) if callable(rule.message) else rule.message
+            alert = Alert(
+                title=rule.name,
+                message=str(message),
+                level=rule.alert_level or AlertLevel.INFO,
+                metadata=metrics,
+            )
+            await self.send_alert(alert)
+            fired.append(alert)
+        return fired
     
     async def send_test(self, channel: str, config: Dict[str, Any]) -> bool:
         """إرسال رسالة تجريبية"""

@@ -23,6 +23,24 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate 2>/dev/null
 fi
 
+# Resolve Python executable
+if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+else
+    echo -e "${RED}[!] Python غير متوفر. ثبّت Python 3 أولاً.${NC}"
+    exit 1
+fi
+
+pause_screen() {
+    echo ""
+    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
+    read -r
+}
+
 # Banner
 show_banner() {
     clear
@@ -45,27 +63,32 @@ EOF
 
 # Main menu
 main_menu() {
-    echo -e "${WHITE}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${WHITE}║          القائمة الرئيسية             ║${NC}"
-    echo -e "${WHITE}╠═══════════════════════════════════════╣${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[1]${NC} 🔍 فحص سريع (Quick Scan)          ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[2]${NC} 🎯 فحص سلبي (Passive Scan)        ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[3]${NC} 🚀 فحص شامل (Full Scan)           ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[4]${NC} 🔬 فحص عميق (Deep Scan)           ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[5]${NC} 🐛 فحص Bug Bounty (محسّن)         ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[6]${NC} 🕵️  فحص خفي (Stealth)              ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[7]${NC} 📱 فحص API فقط                    ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${GREEN}[8]${NC} 🔧 فحص WordPress                  ${WHITE}║${NC}"
-    echo -e "${WHITE}╠═══════════════════════════════════════╣${NC}"
-    echo -e "${WHITE}║${NC} ${YELLOW}[9]${NC} 📋 عرض المهام                      ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${YELLOW}[10]${NC} 📊 حالة مهمة                      ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${YELLOW}[11]${NC} 📄 تصدير النتائج                  ${WHITE}║${NC}"
-    echo -e "${WHITE}╠═══════════════════════════════════════╣${NC}"
-    echo -e "${WHITE}║${NC} ${CYAN}[12]${NC} ⚙️  فحص النظام (Doctor)            ${WHITE}║${NC}"
-    echo -e "${WHITE}║${NC} ${CYAN}[13]${NC} 🗑️  تنظيف المهام القديمة            ${WHITE}║${NC}"
-    echo -e "${WHITE}╠═══════════════════════════════════════╣${NC}"
-    echo -e "${WHITE}║${NC} ${RED}[0]${NC}  ❌ خروج                           ${WHITE}║${NC}"
-    echo -e "${WHITE}╚═══════════════════════════════════════╝${NC}"
+    echo -e "${WHITE}╔═══════════════════════════════════════════════╗${NC}"
+    echo -e "${WHITE}║               القائمة الرئيسية                ║${NC}"
+    echo -e "${WHITE}╠═══════════════════════════════════════════════╣${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[1]${NC}  🔍 فحص سريع (Quick Scan)            ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[2]${NC}  🎯 فحص سلبي (Passive Scan)          ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[3]${NC}  🚀 فحص شامل (Full Scan)             ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[4]${NC}  🔬 فحص عميق (Deep Scan)             ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[5]${NC}  🐛 فحص Bug Bounty                  ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[6]${NC}  🕵️  فحص خفي (Stealth)               ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[7]${NC}  📱 فحص API فقط                      ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${GREEN}[8]${NC}  🔧 فحص WordPress                    ${WHITE}║${NC}"
+    echo -e "${WHITE}╠═══════════════════════════════════════════════╣${NC}"
+    echo -e "${WHITE}║${NC} ${YELLOW}[9]${NC}  📋 عرض المهام                        ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${YELLOW}[10]${NC} 📊 حالة مهمة                        ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${YELLOW}[11]${NC} 📄 تصدير النتائج                    ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${YELLOW}[12]${NC} 🧾 توليد تقرير                      ${WHITE}║${NC}"
+    echo -e "${WHITE}╠═══════════════════════════════════════════════╣${NC}"
+    echo -e "${WHITE}║${NC} ${CYAN}[13]${NC} ⚙️  فحص النظام (Doctor)              ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${CYAN}[14]${NC} 🗑️  تنظيف المهام القديمة              ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${CYAN}[15]${NC} 🧙 معالج الإعداد (Wizard)             ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${CYAN}[16]${NC} 🖥️  الوضع التفاعلي (Interactive)      ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${CYAN}[17]${NC} 🧩 إعداد الإكمال التلقائي             ${WHITE}║${NC}"
+    echo -e "${WHITE}║${NC} ${CYAN}[18]${NC} 🧱 عرض Schema JSON                  ${WHITE}║${NC}"
+    echo -e "${WHITE}╠═══════════════════════════════════════════════╣${NC}"
+    echo -e "${WHITE}║${NC} ${RED}[0]${NC}  ❌ خروج                             ${WHITE}║${NC}"
+    echo -e "${WHITE}╚═══════════════════════════════════════════════╝${NC}"
     echo ""
     echo -ne "${MAGENTA}اختر: ${NC}"
 }
@@ -186,7 +209,7 @@ run_scan() {
     fi
     echo ""
 
-    CMD=(python -m recon_cli scan "${target_args[@]}" --profile "$profile" --inline)
+    CMD=("$PYTHON_BIN" -m recon_cli scan "${target_args[@]}" --profile "$profile" --inline)
     if [ -n "$allow_ip_flag" ]; then
         CMD+=("$allow_ip_flag")
     fi
@@ -201,10 +224,14 @@ run_scan() {
         "${CMD[@]}"
     fi
 
-    echo ""
-    echo -e "${GREEN}[✓] انتهى الفحص${NC}"
-    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
-    read
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}[✓] انتهى الفحص بنجاح${NC}"
+    else
+        echo ""
+        echo -e "${RED}[!] فشل تنفيذ الفحص${NC}"
+    fi
+    pause_screen
 }
 
 # Prompt for auth settings
@@ -311,10 +338,8 @@ list_jobs() {
     echo ""
     echo -e "${BLUE}[*] المهام:${NC}"
     echo ""
-    python -m recon_cli list-jobs
-    echo ""
-    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
-    read
+    "$PYTHON_BIN" -m recon_cli list-jobs
+    pause_screen
 }
 
 # Show job status
@@ -328,10 +353,8 @@ job_status() {
         return
     fi
     
-    python -m recon_cli status "$JOB_ID"
-    echo ""
-    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
-    read
+    "$PYTHON_BIN" -m recon_cli status "$JOB_ID"
+    pause_screen
 }
 
 # Export results
@@ -345,11 +368,31 @@ export_results() {
         return
     fi
     
+    echo -ne "${CYAN}صيغة التصدير [jsonl|txt|zip] (الافتراضي: jsonl): ${NC}"
+    read -r EXPORT_FORMAT
+    EXPORT_FORMAT=${EXPORT_FORMAT:-jsonl}
+
     echo -e "${BLUE}[*] التصدير...${NC}"
-    python -m recon_cli export "$JOB_ID"
+    "$PYTHON_BIN" -m recon_cli export "$JOB_ID" --format "$EXPORT_FORMAT"
+    pause_screen
+}
+
+# Generate report
+generate_report() {
     echo ""
-    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
-    read
+    echo -ne "${CYAN}أدخل رقم المهمة: ${NC}"
+    read -r JOB_ID
+    if [ -z "$JOB_ID" ]; then
+        echo -e "${RED}[!] رقم المهمة مطلوب${NC}"
+        return
+    fi
+
+    echo -ne "${CYAN}صيغة التقرير [html|json|csv|markdown|xml|pdf] (الافتراضي: html): ${NC}"
+    read -r REPORT_FORMAT
+    REPORT_FORMAT=${REPORT_FORMAT:-html}
+
+    "$PYTHON_BIN" -m recon_cli report "$JOB_ID" --format "$REPORT_FORMAT"
+    pause_screen
 }
 
 # Doctor check
@@ -357,10 +400,8 @@ run_doctor() {
     echo ""
     echo -e "${BLUE}[*] فحص النظام...${NC}"
     echo ""
-    python -m recon_cli doctor
-    echo ""
-    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
-    read
+    "$PYTHON_BIN" -m recon_cli doctor
+    pause_screen
 }
 
 # Prune old jobs
@@ -371,10 +412,42 @@ prune_jobs() {
     DAYS=${DAYS:-7}
     
     echo -e "${BLUE}[*] تنظيف المهام...${NC}"
-    python -m recon_cli prune --days $DAYS
+    "$PYTHON_BIN" -m recon_cli prune --days "$DAYS"
+    pause_screen
+}
+
+run_wizard() {
     echo ""
-    echo -ne "${YELLOW}اضغط Enter للمتابعة...${NC}"
-    read
+    "$PYTHON_BIN" -m recon_cli wizard
+    pause_screen
+}
+
+run_interactive() {
+    echo ""
+    "$PYTHON_BIN" -m recon_cli interactive
+    pause_screen
+}
+
+setup_completions() {
+    echo ""
+    echo -ne "${CYAN}الشل [bash|zsh|fish|powershell] (الافتراضي: bash): ${NC}"
+    read -r SHELL_NAME
+    SHELL_NAME=${SHELL_NAME:-bash}
+
+    echo -ne "${CYAN}تثبيت الإكمال تلقائيًا؟ [y/N]: ${NC}"
+    read -r INSTALL_COMPLETIONS
+    if [[ "$INSTALL_COMPLETIONS" =~ ^[Yy]$ ]]; then
+        "$PYTHON_BIN" -m recon_cli completions --shell "$SHELL_NAME" --install
+    else
+        "$PYTHON_BIN" -m recon_cli completions --shell "$SHELL_NAME"
+    fi
+    pause_screen
+}
+
+show_schema() {
+    echo ""
+    "$PYTHON_BIN" -m recon_cli schema --format json
+    pause_screen
 }
 
 # Main loop
@@ -396,8 +469,13 @@ main() {
             9) list_jobs ;;
             10) job_status ;;
             11) export_results ;;
-            12) run_doctor ;;
-            13) prune_jobs ;;
+            12) generate_report ;;
+            13) run_doctor ;;
+            14) prune_jobs ;;
+            15) run_wizard ;;
+            16) run_interactive ;;
+            17) setup_completions ;;
+            18) show_schema ;;
             0|q|Q)
                 echo -e "\n${GREEN}مع السلامة! 👋${NC}\n"
                 exit 0

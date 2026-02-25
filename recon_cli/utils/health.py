@@ -14,13 +14,14 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import platform
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -35,11 +36,15 @@ except ImportError:
 #                     Health Check Types
 # ═══════════════════════════════════════════════════════════
 
-class HealthStatus(Enum):
+class HealthStatus(IntEnum):
     """حالة الصحة"""
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    UNHEALTHY = "unhealthy"
+    HEALTHY = 0
+    DEGRADED = 1
+    UNHEALTHY = 2
+
+
+def _status_name(status: "HealthStatus") -> str:
+    return status.name.lower()
 
 
 @dataclass
@@ -47,19 +52,33 @@ class HealthCheck:
     """فحص صحة"""
     
     name: str
-    status: HealthStatus
+    status: HealthStatus = HealthStatus.HEALTHY
     message: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    checked_at: datetime = field(default_factory=datetime.now)
+    timeout: float = 5.0
     duration_ms: float = 0.0
     details: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.metadata and not self.details:
+            self.details = dict(self.metadata)
+        elif self.details and not self.metadata:
+            self.metadata = dict(self.details)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "status": self.status.value,
+            "status": _status_name(self.status),
             "message": self.message,
             "duration_ms": self.duration_ms,
+            "metadata": self.metadata,
             "details": self.details,
+            "checked_at": self.checked_at.isoformat(),
         }
+
+    async def check(self) -> "HealthCheck":
+        return self
 
 
 @dataclass
@@ -74,7 +93,7 @@ class HealthReport:
     
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "status": self.status.value,
+            "status": _status_name(self.status),
             "checks": [c.to_dict() for c in self.checks],
             "timestamp": self.timestamp.isoformat(),
             "version": self.version,
@@ -517,3 +536,205 @@ async def get_system_status(checker: HealthChecker) -> SystemStatus:
         pass
     
     return status
+
+
+# Backward-compatible API used by unit tests.
+HealthComponent = HealthCheck
+
+
+class DatabaseHealthCheck(HealthCheck):
+    def __init__(self, name: str, connection_string: str = ":memory:", timeout: float = 1.0):
+        super().__init__(name=name)
+        self.connection_string = connection_string
+        self.timeout = timeout
+
+    async def check(self) -> HealthComponent:
+        start = time.perf_counter()
+        try:
+            import sqlite3
+
+            conn = sqlite3.connect(self.connection_string)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            finally:
+                conn.close()
+            status = HealthStatus.HEALTHY
+            message = "Database reachable"
+        except Exception as exc:
+            status = HealthStatus.UNHEALTHY
+            message = str(exc)
+        return HealthComponent(
+            name=self.name,
+            status=status,
+            message=message,
+            duration_ms=(time.perf_counter() - start) * 1000,
+        )
+
+
+class DiskHealthCheck(HealthCheck):
+    def __init__(
+        self,
+        name: str,
+        path: str = "/",
+        warning_threshold: float = 80.0,
+        critical_threshold: float = 90.0,
+    ):
+        super().__init__(name=name)
+        self.path = path
+        self.warning_threshold = warning_threshold
+        self.critical_threshold = critical_threshold
+
+    async def check(self) -> HealthComponent:
+        start = time.perf_counter()
+        try:
+            import shutil
+
+            total, used, free = shutil.disk_usage(self.path)
+            usage_percent = (used / total) * 100 if total else 0.0
+            if usage_percent >= self.critical_threshold:
+                status = HealthStatus.UNHEALTHY
+            elif usage_percent >= self.warning_threshold:
+                status = HealthStatus.DEGRADED
+            else:
+                status = HealthStatus.HEALTHY
+            message = f"Disk usage: {usage_percent:.1f}%"
+            metadata = {"total": total, "used": used, "free": free, "usage_percent": usage_percent}
+        except Exception as exc:
+            status = HealthStatus.UNHEALTHY
+            message = str(exc)
+            metadata = {}
+        return HealthComponent(
+            name=self.name,
+            status=status,
+            message=message,
+            metadata=metadata,
+            duration_ms=(time.perf_counter() - start) * 1000,
+        )
+
+
+class MemoryHealthCheck(HealthCheck):
+    def __init__(
+        self,
+        name: str,
+        warning_threshold: float = 80.0,
+        critical_threshold: float = 90.0,
+    ):
+        super().__init__(name=name)
+        self.warning_threshold = warning_threshold
+        self.critical_threshold = critical_threshold
+
+    async def check(self) -> HealthComponent:
+        start = time.perf_counter()
+        try:
+            import psutil
+
+            memory = psutil.virtual_memory()
+            usage_percent = float(getattr(memory, "percent", 0.0))
+            if usage_percent >= self.critical_threshold:
+                status = HealthStatus.UNHEALTHY
+            elif usage_percent >= self.warning_threshold:
+                status = HealthStatus.DEGRADED
+            else:
+                status = HealthStatus.HEALTHY
+            message = f"Memory usage: {usage_percent:.1f}%"
+            metadata = {
+                "total": getattr(memory, "total", 0),
+                "available": getattr(memory, "available", 0),
+                "usage_percent": usage_percent,
+            }
+        except ImportError:
+            status = HealthStatus.DEGRADED
+            message = "psutil not installed"
+            metadata = {}
+        except Exception as exc:
+            status = HealthStatus.UNHEALTHY
+            message = str(exc)
+            metadata = {}
+        return HealthComponent(
+            name=self.name,
+            status=status,
+            message=message,
+            metadata=metadata,
+            duration_ms=(time.perf_counter() - start) * 1000,
+        )
+
+
+class ExternalServiceHealthCheck(HealthCheck):
+    def __init__(self, name: str, url: str, timeout: float = 5.0):
+        super().__init__(name=name)
+        self.url = url
+        self.timeout = timeout
+
+    async def check(self) -> HealthComponent:
+        start = time.perf_counter()
+        status = HealthStatus.UNHEALTHY
+        message = "Service check failed"
+        metadata = {"url": self.url}
+        try:
+            import aiohttp
+
+            async with aiohttp.ClientSession() as session:
+                req = session.get(self.url, timeout=self.timeout)
+                if inspect.isawaitable(req):
+                    req = await req
+                async with req as resp:
+                    status = HealthStatus.HEALTHY if resp.status < 400 else HealthStatus.UNHEALTHY
+                    message = f"HTTP {resp.status}"
+        except ImportError:
+            status = HealthStatus.DEGRADED
+            message = "aiohttp not installed"
+        except Exception as exc:
+            status = HealthStatus.UNHEALTHY
+            message = str(exc)
+        return HealthComponent(
+            name=self.name,
+            status=status,
+            message=message,
+            metadata=metadata,
+            duration_ms=(time.perf_counter() - start) * 1000,
+        )
+
+
+class HealthRegistry:
+    def __init__(self):
+        self.checks: Dict[str, HealthCheck] = {}
+
+    def register(self, check: HealthCheck) -> None:
+        self.checks[check.name] = check
+
+    def unregister(self, name: str) -> bool:
+        return self.checks.pop(name, None) is not None
+
+    async def check_all(self) -> List[HealthComponent]:
+        results: List[HealthComponent] = []
+        for check in self.checks.values():
+            results.append(await check.check())
+        return results
+
+    async def get_overall_status(self) -> HealthStatus:
+        results = await self.check_all()
+        if any(item.status == HealthStatus.UNHEALTHY for item in results):
+            return HealthStatus.UNHEALTHY
+        if any(item.status == HealthStatus.DEGRADED for item in results):
+            return HealthStatus.DEGRADED
+        return HealthStatus.HEALTHY
+
+    async def to_dict(self) -> Dict[str, Any]:
+        results = await self.check_all()
+        status = await self.get_overall_status()
+        return {
+            "status": _status_name(status),
+            "components": [item.to_dict() for item in results],
+        }
+
+
+_HEALTH_REGISTRY: Optional[HealthRegistry] = None
+
+
+def get_health() -> HealthRegistry:
+    global _HEALTH_REGISTRY
+    if _HEALTH_REGISTRY is None:
+        _HEALTH_REGISTRY = HealthRegistry()
+    return _HEALTH_REGISTRY

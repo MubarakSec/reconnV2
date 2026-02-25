@@ -443,3 +443,32 @@ class TestCircuitBreakerConcurrency:
         await asyncio.gather(*[protected_func(i) for i in range(20)])
         
         assert len(results) == 20
+
+
+# ═══════════════════════════════════════════════════════════
+#                  Compatibility Edge Cases
+# ═══════════════════════════════════════════════════════════
+
+class TestCircuitBreakerCompatibility:
+    """اختبارات توافق إضافية"""
+
+    def test_recovery_timeout_alias_sets_open_timeout(self):
+        """recovery_timeout القديم يعمل كمرادف"""
+        breaker = CircuitBreaker("test", recovery_timeout=0.25)
+        assert breaker.recovery_timeout == pytest.approx(0.25)
+        assert breaker.config.open_timeout == pytest.approx(0.25)
+
+    def test_protect_sync_rejects_when_open_and_tracks_rejections(self):
+        """protect_sync يرفض الطلبات عندما تكون الدائرة مفتوحة"""
+        breaker = CircuitBreaker("test", failure_threshold=1, recovery_timeout=60)
+        breaker.record_failure()  # Open circuit
+
+        @breaker.protect_sync
+        def protected():
+            return "ok"
+
+        with pytest.raises(CircuitOpenError):
+            protected()
+
+        stats = breaker.get_stats()
+        assert stats["rejected_calls"] >= 1

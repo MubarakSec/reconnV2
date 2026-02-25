@@ -18,9 +18,11 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, replace
+from typing import Any, AsyncIterator, Dict, List, Optional, Set
 from urllib.parse import urlparse
 import logging
 
@@ -66,6 +68,20 @@ class HTTPClientConfig:
 
 
 @dataclass
+class RetryConfig:
+    """Backward-compatible retry configuration."""
+
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 30.0
+    exponential_base: float = 2.0
+
+    def get_delay(self, attempt: int) -> float:
+        delay = self.base_delay * (self.exponential_base ** attempt)
+        return min(delay, self.max_delay)
+
+
+@dataclass
 class HTTPResponse:
     """نتيجة طلب HTTP"""
     url: str
@@ -99,27 +115,77 @@ class HTTPResponse:
 class RateLimiter:
     """Rate limiter بسيط للـ async requests"""
     
-    def __init__(self, rate: float):
+    def __init__(
+        self,
+        rate: Optional[float] = None,
+        requests_per_second: Optional[float] = None,
+        burst_size: int = 1,
+    ):
         """
         Args:
             rate: الطلبات في الثانية
         """
-        self.rate = rate
-        self.min_interval = 1.0 / rate if rate > 0 else 0
-        self._last_request: Dict[str, float] = {}
+        effective_rate = requests_per_second if requests_per_second is not None else rate
+        self.rate = float(effective_rate or 0.0)
+        self.burst_size = max(1, int(burst_size))
         self._lock = asyncio.Lock()
+        self._host_tokens: Dict[str, float] = {}
+        self._host_updated: Dict[str, float] = {}
     
     async def acquire(self, host: str = "") -> None:
         """انتظار حتى يُسمح بالطلب"""
         async with self._lock:
             now = time.monotonic()
-            last = self._last_request.get(host, 0)
-            wait_time = self.min_interval - (now - last)
-            
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-            
-            self._last_request[host] = time.monotonic()
+            tokens = self._host_tokens.get(host, float(self.burst_size))
+            last = self._host_updated.get(host, now)
+
+            if self.rate > 0:
+                elapsed = max(0.0, now - last)
+                tokens = min(float(self.burst_size), tokens + (elapsed * self.rate))
+                if tokens < 1.0:
+                    wait_time = (1.0 - tokens) / self.rate
+                    await asyncio.sleep(wait_time)
+                    now = time.monotonic()
+                    elapsed = max(0.0, now - last)
+                    tokens = min(float(self.burst_size), tokens + (elapsed * self.rate))
+            tokens = max(0.0, tokens - 1.0)
+            self._host_tokens[host] = tokens
+            self._host_updated[host] = time.monotonic()
+
+
+class ConnectionPool:
+    """Simple reusable aiohttp session pool used by compatibility tests."""
+
+    def __init__(self, max_connections: int = 10, timeout: float = 30.0):
+        if not AIOHTTP_AVAILABLE:
+            raise ImportError("aiohttp not installed. Run: pip install aiohttp")
+        self.max_connections = int(max_connections)
+        self.timeout = float(timeout)
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._lock = asyncio.Lock()
+
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        async with self._lock:
+            if self._session is None or getattr(self._session, "closed", False):
+                self._session = aiohttp.ClientSession(
+                    connector=TCPConnector(limit=self.max_connections),
+                    timeout=ClientTimeout(total=self.timeout),
+                )
+            return self._session
+
+    @asynccontextmanager
+    async def get_session(self) -> AsyncIterator[aiohttp.ClientSession]:
+        session = await self._ensure_session()
+        try:
+            yield session
+        finally:
+            # Kept open for reuse until close() is called.
+            return
+
+    async def close(self) -> None:
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
 
 
 class AsyncHTTPClient:
@@ -143,11 +209,34 @@ class AsyncHTTPClient:
         ...     responses = await client.get_many(urls)
     """
     
-    def __init__(self, config: Optional[HTTPClientConfig] = None):
+    def __init__(
+        self,
+        config: Optional[HTTPClientConfig] = None,
+        *,
+        timeout: Optional[float] = None,
+        max_connections: Optional[int] = None,
+        rate_limit: Optional[float] = None,
+        retry_config: Optional[RetryConfig] = None,
+    ):
         if not AIOHTTP_AVAILABLE:
             raise ImportError("aiohttp not installed. Run: pip install aiohttp")
-        
-        self.config = config or HTTPClientConfig()
+
+        base_config = replace(config) if config else HTTPClientConfig()
+        if timeout is not None:
+            timeout = float(timeout)
+            base_config.total_timeout = timeout
+            base_config.connect_timeout = min(base_config.connect_timeout, timeout)
+            base_config.read_timeout = min(base_config.read_timeout, timeout)
+        if max_connections is not None:
+            base_config.max_concurrent = int(max_connections)
+        if rate_limit is not None:
+            base_config.requests_per_second = float(rate_limit)
+        if retry_config is not None:
+            base_config.max_retries = int(retry_config.max_retries)
+            base_config.retry_delay = float(retry_config.base_delay)
+            base_config.retry_multiplier = float(retry_config.exponential_base)
+
+        self.config = base_config
         self._session: Optional[aiohttp.ClientSession] = None
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._host_semaphores: Dict[str, asyncio.Semaphore] = {}
@@ -252,6 +341,37 @@ class AsyncHTTPClient:
         Returns:
             HTTPResponse مع النتيجة
         """
+        return await self._request(
+            method="GET",
+            url=url,
+            headers=headers,
+            follow_redirects=follow_redirects,
+        )
+
+    async def post(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        follow_redirects: bool = True,
+        **request_kwargs: Any,
+    ) -> HTTPResponse:
+        """تنفيذ طلب POST."""
+        return await self._request(
+            method="POST",
+            url=url,
+            headers=headers,
+            follow_redirects=follow_redirects,
+            **request_kwargs,
+        )
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        follow_redirects: bool = True,
+        **request_kwargs: Any,
+    ) -> HTTPResponse:
         if not self._session:
             await self.start()
         
@@ -261,22 +381,36 @@ class AsyncHTTPClient:
         async with self._semaphore:
             async with host_sem:
                 await self._rate_limiter.acquire(host)
-                return await self._request_with_retry(url, headers, follow_redirects)
+                return await self._request_with_retry(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    follow_redirects=follow_redirects,
+                    **request_kwargs,
+                )
     
     async def _request_with_retry(
         self,
+        method: str,
         url: str,
         headers: Optional[Dict[str, str]],
         follow_redirects: bool,
+        **request_kwargs: Any,
     ) -> HTTPResponse:
         """تنفيذ طلب مع retry"""
-        last_error = None
+        last_error: Optional[Exception] = None
         
         for attempt in range(self.config.max_retries + 1):
             try:
-                return await self._do_request(url, headers, follow_redirects)
+                return await self._do_request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    follow_redirects=follow_redirects,
+                    **request_kwargs,
+                )
             except Exception as e:
-                last_error = str(e)
+                last_error = e
                 self._stats["retries"] += 1
                 
                 if attempt < self.config.max_retries:
@@ -285,48 +419,82 @@ class AsyncHTTPClient:
                     await asyncio.sleep(delay)
         
         self._stats["failures"] += 1
-        return HTTPResponse(
-            url=url,
-            status=0,
-            headers={},
-            body="",
-            elapsed=0,
-            error=last_error,
-        )
+        if last_error is None:
+            raise RuntimeError("Request failed with unknown error")
+        raise last_error
     
     async def _do_request(
         self,
+        method: str,
         url: str,
         headers: Optional[Dict[str, str]],
         follow_redirects: bool,
+        **request_kwargs: Any,
     ) -> HTTPResponse:
         """تنفيذ طلب واحد"""
         start_time = time.monotonic()
         self._stats["requests"] += 1
         
         try:
-            async with self._session.get(
+            request_method = getattr(self._session, method.lower(), None)
+            if request_method is None:
+                request_method = self._session.request
+
+            request_result = request_method(
                 url,
                 headers=headers,
                 allow_redirects=follow_redirects,
-            ) as response:
-                body = await response.text()
-                elapsed = time.monotonic() - start_time
-                self._stats["total_time"] += elapsed
-                self._stats["successes"] += 1
-                
-                return HTTPResponse(
-                    url=str(response.url),
-                    status=response.status,
-                    headers=dict(response.headers),
-                    body=body,
-                    elapsed=elapsed,
-                )
+                **request_kwargs,
+            )
+
+            response_cm = request_result
+            if not hasattr(response_cm, "__aenter__") and inspect.isawaitable(request_result):
+                response_cm = await request_result
+
+            if hasattr(response_cm, "__aenter__"):
+                async with response_cm as response:
+                    return await self._build_response(url, response, start_time)
+
+            return await self._build_response(url, response_cm, start_time)
         except asyncio.TimeoutError:
             raise Exception(f"Timeout after {self.config.total_timeout}s")
-        except aiohttp.ClientError as e:
-            raise Exception(f"Client error: {e}")
+        except Exception as e:
+            if AIOHTTP_AVAILABLE and isinstance(e, aiohttp.ClientError):
+                raise Exception(f"Client error: {e}")
+            raise
+
+    async def _build_response(self, url: str, response: Any, start_time: float) -> HTTPResponse:
+        body = ""
+        if hasattr(response, "text"):
+            text_result = response.text()
+            if inspect.isawaitable(text_result):
+                body = await text_result
+            else:
+                body = str(text_result)
+
+        elapsed = time.monotonic() - start_time
+        self._stats["total_time"] += elapsed
+        self._stats["successes"] += 1
+
+        return HTTPResponse(
+            url=str(getattr(response, "url", url)),
+            status=int(getattr(response, "status", 0)),
+            headers=dict(getattr(response, "headers", {}) or {}),
+            body=body,
+            elapsed=elapsed,
+        )
     
+    async def head(self, url: str) -> HTTPResponse:
+        """تنفيذ طلب HEAD"""
+        try:
+            return await self._request(
+                method="HEAD",
+                url=url,
+                follow_redirects=True,
+            )
+        except Exception as e:
+            raise Exception(f"Client error: {e}")
+
     async def get_many(
         self,
         urls: List[str],
@@ -381,39 +549,6 @@ class AsyncHTTPClient:
                 processed.append(result)
         
         return processed
-    
-    async def head(self, url: str) -> HTTPResponse:
-        """تنفيذ طلب HEAD"""
-        if not self._session:
-            await self.start()
-        
-        host = self._get_host(url)
-        host_sem = self._get_host_semaphore(host)
-        start_time = time.monotonic()
-        
-        async with self._semaphore:
-            async with host_sem:
-                await self._rate_limiter.acquire(host)
-                
-                try:
-                    async with self._session.head(url, allow_redirects=True) as response:
-                        elapsed = time.monotonic() - start_time
-                        return HTTPResponse(
-                            url=str(response.url),
-                            status=response.status,
-                            headers=dict(response.headers),
-                            body="",
-                            elapsed=elapsed,
-                        )
-                except Exception as e:
-                    return HTTPResponse(
-                        url=url,
-                        status=0,
-                        headers={},
-                        body="",
-                        elapsed=0,
-                        error=str(e),
-                    )
     
     def get_stats(self) -> Dict[str, Any]:
         """إحصائيات العميل"""

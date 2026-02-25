@@ -174,12 +174,15 @@ class TestJobsAPI:
     
     def test_delete_job(self, api_client: TestClient):
         """حذف مهمة"""
-        with patch("recon_cli.jobs.lifecycle.JobLifecycle.delete_job") as mock_delete:
-            mock_delete.return_value = True
-            
-            response = api_client.delete("/api/jobs/job-123")
-            
-            assert response.status_code in [200, 204, 404]
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {"user_id": 1, "permissions": ["write"]}
+            with patch("recon_cli.jobs.lifecycle.JobLifecycle.delete_job") as mock_delete:
+                mock_delete.return_value = True
+                response = api_client.delete(
+                    "/api/jobs/job-123",
+                    headers={"X-API-Key": "test-api-key"},
+                )
+                assert response.status_code in [200, 204, 404]
 
 
 # ═══════════════════════════════════════════════════════════

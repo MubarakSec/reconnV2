@@ -181,7 +181,17 @@ class AsyncSecretsScanner:
         if not self._client:
             raise RuntimeError("Scanner not started. Use 'async with' context.")
         
-        response = await self._client.get(url)
+        try:
+            response = await self._client.get(url)
+        except Exception as exc:
+            self._stats["errors"] += 1
+            return ScanResult(
+                url=url,
+                matches=[],
+                status=0,
+                error=str(exc),
+                scan_time=0.0,
+            )
         
         if response.error:
             self._stats["errors"] += 1

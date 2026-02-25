@@ -6,7 +6,7 @@ import uuid
 
 try:
     from fastapi import FastAPI, Request, HTTPException
-    from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     import uvicorn
@@ -575,7 +575,13 @@ if WEB_AVAILABLE:
         path = record.paths.root / filename
         if not path.exists():
             raise HTTPException(status_code=404, detail="Output file missing")
-        return FileResponse(path, media_type=mime, filename=filename)
+        # Use in-process reads for predictable behavior in constrained runtimes.
+        content = path.read_bytes()
+        return Response(
+            content=content,
+            media_type=mime,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     
     # ========================================================================
     # SETTINGS PAGE

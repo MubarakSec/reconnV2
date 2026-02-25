@@ -1,4 +1,5 @@
 import time
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,54 @@ def test_parallel_pipeline_failure_marks_error(tmp_path: Path):
         runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"])
 
     assert record.metadata.error
+
+
+def test_parallel_pipeline_supports_async_stage(tmp_path: Path):
+    events = []
+
+    class DedupeStage(Stage):
+        name = "dedupe_canonicalize"
+
+        def execute(self, context):
+            events.append(("dedupe_start", time.time()))
+            time.sleep(0.02)
+            events.append(("dedupe_end", time.time()))
+
+    class AsyncDnsStage(Stage):
+        name = "dns_resolve"
+
+        async def run_async(self, context):
+            events.append(("dns_start", time.time()))
+            await asyncio.sleep(0.05)
+            events.append(("dns_end", time.time()))
+            return True
+
+    class HttpStage(Stage):
+        name = "http_probe"
+
+        def execute(self, context):
+            events.append(("http_start", time.time()))
+            time.sleep(0.05)
+            events.append(("http_end", time.time()))
+
+    record = make_record(
+        tmp_path,
+        {
+            "parallel_stages": True,
+            "max_parallel_stages": 2,
+            "retry_count": 0,
+        },
+    )
+    context = PipelineContext(record=record, manager=DummyManager(), force=False)
+    runner = PipelineRunner(stages=[DedupeStage(), AsyncDnsStage(), HttpStage()])
+
+    runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"])
+
+    dedupe_end = _timestamp(events, "dedupe_end")
+    dns_start = _timestamp(events, "dns_start")
+    http_start = _timestamp(events, "http_start")
+    assert dedupe_end is not None
+    assert dns_start is not None
+    assert http_start is not None
+    assert dns_start >= dedupe_end
+    assert http_start >= dedupe_end

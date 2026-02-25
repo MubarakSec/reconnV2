@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterable, Optional, Sequence
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import threading
 from pathlib import Path
 
@@ -124,14 +125,14 @@ class PipelineRunner:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.run(self._run_parallel(context, stages))
+            self._run_parallel_threaded(context, stages)
             return
 
         error_holder: list[Exception] = []
 
         def _runner() -> None:
             try:
-                asyncio.run(self._run_parallel(context, stages))
+                self._run_parallel_threaded(context, stages)
             except Exception as exc:
                 error_holder.append(exc)
 
@@ -140,6 +141,96 @@ class PipelineRunner:
         thread.join()
         if error_holder:
             raise error_holder[0]
+
+    @staticmethod
+    def _run_stage_threaded(stage: Stage, context: PipelineContext) -> bool:
+        if hasattr(stage, "run_async"):
+            result = asyncio.run(stage.run_async(context))
+            return bool(result)
+        result = stage.run(context)
+        if asyncio.iscoroutine(result):
+            result = asyncio.run(result)
+        return bool(result)
+
+    def _run_parallel_threaded(self, context: PipelineContext, stages: Sequence[Stage]) -> None:
+        stage_list = list(stages)
+        stage_map = {stage.name: stage for stage in stage_list}
+        stage_order = [stage.name for stage in stage_list]
+
+        progress = []
+        progress_map = {}
+        for stage in stage_list:
+            entry = {"stage": stage.name, "status": "pending"}
+            progress.append(entry)
+            progress_map[stage.name] = entry
+        context.record.metadata.stats["stage_progress"] = progress
+        context.record.metadata.stats["parallel_execution"] = True
+        context.manager.update_metadata(context.record)
+
+        dependency_map = {name: set(deps) for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()}
+        previous = None
+        for name in stage_order:
+            if name not in dependency_map:
+                dependency_map[name] = set()
+                if previous:
+                    dependency_map[name].add(previous)
+            previous = name
+
+        resolver = DependencyResolver(dependency_map)
+        execution_order = resolver.resolve(stage_order)
+        context.record.metadata.stats["parallel_groups"] = len(execution_order)
+        context.manager.update_metadata(context.record)
+
+        max_parallel = int(getattr(context.runtime_config, "max_parallel_stages", 4) or 4)
+        max_parallel = max(1, max_parallel)
+
+        with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+            for group in execution_order:
+                for i in range(0, len(group), max_parallel):
+                    batch = group[i:i + max_parallel]
+                    now = time_utils.iso_now()
+                    for name in batch:
+                        entry = progress_map.get(name)
+                        if entry is None:
+                            continue
+                        entry["status"] = "running"
+                        entry["started_at"] = now
+                    context.manager.update_metadata(context.record)
+
+                    future_map = {
+                        executor.submit(self._run_stage_threaded, stage_map[name], context): name
+                        for name in batch
+                    }
+                    results_by_name: dict[str, object] = {}
+                    errors: list[Exception] = []
+                    for future, name in future_map.items():
+                        try:
+                            results_by_name[name] = future.result()
+                        except Exception as exc:
+                            results_by_name[name] = exc
+                            errors.append(exc)
+
+                    finished_at = time_utils.iso_now()
+                    for name in batch:
+                        entry = progress_map.get(name)
+                        if entry is None:
+                            continue
+                        result = results_by_name.get(name)
+                        entry["finished_at"] = finished_at
+                        if isinstance(result, Exception):
+                            entry["status"] = "failed"
+                            entry["error"] = str(result)
+                        else:
+                            entry["status"] = "completed" if bool(result) else "skipped"
+                    context.manager.update_metadata(context.record)
+
+                    if errors:
+                        message = str(errors[0])
+                        context.mark_error(message)
+                        raise errors[0]
+
+        context.mark_finished()
+        summary.generate_summary(context)
 
     async def _run_parallel(self, context: PipelineContext, stages: Sequence[Stage]) -> None:
         stage_list = list(stages)

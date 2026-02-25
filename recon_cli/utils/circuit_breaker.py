@@ -19,10 +19,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, Type, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,11 @@ class CircuitStats:
         return self.successful_calls / self.total_calls
 
 
-class CircuitOpenError(Exception):
+class CircuitBreakerError(Exception):
+    """Generic circuit breaker error."""
+
+
+class CircuitOpenError(CircuitBreakerError):
     """خطأ: الـ Circuit مفتوح"""
     
     def __init__(self, name: str, retry_after: float):
@@ -130,6 +134,8 @@ class CircuitBreaker:
             config: الإعدادات
             **kwargs: إعدادات مباشرة
         """
+        if "recovery_timeout" in kwargs and "open_timeout" not in kwargs:
+            kwargs["open_timeout"] = kwargs.pop("recovery_timeout")
         self.name = name
         self.config = config or CircuitBreakerConfig(**kwargs)
         
@@ -159,6 +165,26 @@ class CircuitBreaker:
     @property
     def stats(self) -> CircuitStats:
         return self._stats
+
+    @property
+    def failure_threshold(self) -> int:
+        return self.config.failure_threshold
+
+    @property
+    def success_threshold(self) -> int:
+        return self.config.success_threshold
+
+    @property
+    def recovery_timeout(self) -> float:
+        return self.config.open_timeout
+
+    @property
+    def success_count(self) -> int:
+        return self._stats.successful_calls
+
+    @property
+    def failure_count(self) -> int:
+        return self._stats.failed_calls
     
     def _should_open(self) -> bool:
         """هل يجب فتح الـ circuit"""
@@ -229,6 +255,43 @@ class CircuitBreaker:
         elif new_state == CircuitState.CLOSED:
             self._stats.consecutive_failures = 0
             self._stats.consecutive_successes = 0
+
+    def allow_request(self) -> bool:
+        """Synchronous state gate used by legacy callers/tests."""
+        if self._state == CircuitState.OPEN:
+            if self._should_attempt_reset():
+                self._transition_to(CircuitState.HALF_OPEN)
+                return True
+            self._stats.rejected_calls += 1
+            return False
+        return True
+
+    def record_success(self) -> None:
+        self._record_success()
+        if self._state == CircuitState.HALF_OPEN and self._should_close():
+            self._transition_to(CircuitState.CLOSED)
+
+    def record_failure(self) -> None:
+        self._record_failure()
+        if self._state == CircuitState.HALF_OPEN:
+            self._transition_to(CircuitState.OPEN)
+        elif self._state == CircuitState.CLOSED and self._should_open():
+            self._transition_to(CircuitState.OPEN)
+
+    def get_stats(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "state": self._state.value,
+            "total_calls": self._stats.total_calls,
+            "success_count": self._stats.successful_calls,
+            "failure_count": self._stats.failed_calls,
+            "rejected_calls": self._stats.rejected_calls,
+            "failure_rate": self._stats.failure_rate,
+            "success_rate": self._stats.success_rate,
+            "state_changes": self._stats.state_changes,
+            "last_failure_time": self._stats.last_failure_time,
+            "last_success_time": self._stats.last_success_time,
+        }
     
     async def _before_call(self) -> None:
         """قبل الاتصال"""
@@ -247,11 +310,7 @@ class CircuitBreaker:
     async def _after_success(self) -> None:
         """بعد النجاح"""
         async with self._lock:
-            self._record_success()
-            
-            if self._state == CircuitState.HALF_OPEN:
-                if self._should_close():
-                    self._transition_to(CircuitState.CLOSED)
+            self.record_success()
     
     async def _after_failure(self, error: Exception) -> None:
         """بعد الفشل"""
@@ -260,13 +319,7 @@ class CircuitBreaker:
             return
         
         async with self._lock:
-            self._record_failure()
-            
-            if self._state == CircuitState.HALF_OPEN:
-                self._transition_to(CircuitState.OPEN)
-            elif self._state == CircuitState.CLOSED:
-                if self._should_open():
-                    self._transition_to(CircuitState.OPEN)
+            self.record_failure()
     
     async def __aenter__(self) -> "CircuitBreaker":
         await self._before_call()
@@ -302,19 +355,23 @@ class CircuitBreaker:
                 async with self:
                     return await func(*args, **kwargs)
             return async_wrapper
-        else:
-            @wraps(func)
-            def sync_wrapper(*args, **kwargs) -> T:
-                # For sync functions, we can't use async context manager
-                # Just call directly with try/except
-                try:
-                    result = func(*args, **kwargs)
-                    self._record_success()
-                    return result
-                except Exception as e:
-                    self._record_failure()
-                    raise
-            return sync_wrapper
+        return self.protect_sync(func)
+
+    def protect_sync(self, func: Callable[[Any], T]) -> Callable[[Any], T]:
+        """Decorator لحماية sync function."""
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            if not self.allow_request():
+                retry_after = max(0.0, self.config.open_timeout - (time.time() - self._opened_at))
+                raise CircuitOpenError(self.name, retry_after)
+            try:
+                result = func(*args, **kwargs)
+            except Exception:
+                self.record_failure()
+                raise
+            self.record_success()
+            return result
+        return wrapper
     
     def reset(self) -> None:
         """إعادة تعيين الـ circuit"""

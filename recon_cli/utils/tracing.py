@@ -729,3 +729,360 @@ def configure_tracer(
         auto_flush=auto_flush,
     )
     return tracer
+
+
+# ---------------------------------------------------------------------------
+# Compatibility API used by unit tests.
+# ---------------------------------------------------------------------------
+
+import random
+
+
+@dataclass
+class SpanContext:
+    trace_id: str
+    span_id: str
+
+    def to_dict(self) -> Dict[str, str]:
+        return {"trace_id": self.trace_id, "span_id": self.span_id}
+
+    @classmethod
+    def from_headers(cls, headers: Dict[str, str]) -> "SpanContext":
+        lowered = {str(k).lower(): str(v) for k, v in headers.items()}
+        return cls(
+            trace_id=lowered.get("x-trace-id", lowered.get("traceparent", uuid.uuid4().hex)),
+            span_id=lowered.get("x-span-id", uuid.uuid4().hex[:16]),
+        )
+
+
+@dataclass
+class TracingConfig:
+    enabled: bool = True
+    sample_rate: float = 1.0
+    export_endpoint: str = ""
+    service_name: str = "recon-cli"
+
+
+class Span:
+    def __init__(
+        self,
+        name: str,
+        trace_id: str,
+        parent_id: Optional[str] = None,
+        span_id: Optional[str] = None,
+        parent_span_id: Optional[str] = None,
+    ):
+        self.name = name
+        self.trace_id = trace_id
+        self.span_id = span_id or uuid.uuid4().hex[:16]
+        self.parent_id = parent_id or parent_span_id
+        self.start_time = time.time()
+        self.end_time: Optional[float] = None
+        self.tags: Dict[str, Any] = {}
+        self.logs: List[Dict[str, Any]] = []
+        self.error: Optional[Exception] = None
+        self.has_error: bool = False
+        self.finished: bool = False
+
+    def start(self) -> None:
+        self.start_time = time.time()
+
+    def finish(self) -> None:
+        if not self.finished:
+            self.end_time = time.time()
+            self.finished = True
+
+    def end(self) -> None:
+        self.finish()
+
+    def set_tag(self, key: str, value: Any) -> "Span":
+        self.tags[key] = value
+        return self
+
+    def set_attribute(self, key: str, value: Any) -> "Span":
+        return self.set_tag(key, value)
+
+    def log(self, message: str, fields: Optional[Dict[str, Any]] = None) -> "Span":
+        self.logs.append(
+            {"timestamp": datetime.now().isoformat(), "message": message, "fields": fields or {}}
+        )
+        return self
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> "Span":
+        return self.log(name, attributes)
+
+    def set_error(self, exc: Exception) -> "Span":
+        self.error = Exception(f"{type(exc).__name__}: {exc}")
+        self.has_error = True
+        return self
+
+    def record_exception(self, exc: Exception) -> "Span":
+        return self.set_error(exc)
+
+    @property
+    def duration_ms(self) -> float:
+        end = self.end_time if self.end_time is not None else time.time()
+        return (end - self.start_time) * 1000
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "trace_id": self.trace_id,
+            "span_id": self.span_id,
+            "parent_id": self.parent_id,
+            "duration_ms": self.duration_ms,
+            "tags": self.tags,
+            "logs": self.logs,
+            "has_error": self.has_error,
+            "error": str(self.error) if self.error else None,
+        }
+
+    def __enter__(self) -> "Span":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc, _tb) -> None:
+        if exc is not None:
+            self.set_error(exc)
+        self.finish()
+
+
+class Trace:
+    def __init__(
+        self,
+        name: str = "",
+        trace_id: Optional[str] = None,
+        sampled: bool = True,
+        parent_id: Optional[str] = None,
+    ):
+        self.name = name
+        self.trace_id = trace_id or uuid.uuid4().hex
+        self.sampled = sampled
+        self.started_at = time.time()
+        self.ended_at: Optional[float] = None
+        self.finished = False
+        self.spans: List[Span] = []
+        self._stack: List[Span] = []
+        self.root_span: Optional[Span] = None
+        if name:
+            self.root_span = self.create_span(name, parent_id=parent_id)
+            self.root_span.start()
+            self._stack.append(self.root_span)
+
+    def create_span(self, name: str, parent_id: Optional[str] = None) -> Span:
+        resolved_parent = parent_id
+        if resolved_parent is None and self._stack:
+            resolved_parent = self._stack[-1].span_id
+        span = Span(name=name, trace_id=self.trace_id, parent_id=resolved_parent)
+        self.spans.append(span)
+        return span
+
+    @contextmanager
+    def span(self, name: str) -> Generator[Span, None, None]:
+        span = self.create_span(name)
+        span.start()
+        self._stack.append(span)
+        try:
+            yield span
+        except Exception as exc:
+            span.set_error(exc)
+            raise
+        finally:
+            span.finish()
+            if self._stack and self._stack[-1] is span:
+                self._stack.pop()
+
+    def current_span(self) -> Optional[Span]:
+        return self._stack[-1] if self._stack else None
+
+    def finish(self) -> None:
+        if self.finished:
+            return
+        self.ended_at = time.time()
+        self.finished = True
+        for span in self.spans:
+            if not span.finished:
+                span.finish()
+
+    def end(self) -> None:
+        self.finish()
+
+    @property
+    def duration_ms(self) -> float:
+        end = self.ended_at if self.ended_at is not None else time.time()
+        return (end - self.started_at) * 1000
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "trace_id": self.trace_id,
+            "name": self.name,
+            "sampled": self.sampled,
+            "duration_ms": self.duration_ms,
+            "spans": [span.to_dict() for span in self.spans],
+        }
+
+
+class Tracer:
+    def __init__(
+        self,
+        service_name: str = "recon-cli",
+        config: Optional[TracingConfig] = None,
+        **_kwargs: Any,
+    ):
+        self.config = config or TracingConfig(service_name=service_name)
+        self.service_name = self.config.service_name or service_name
+        self._active_trace: Optional[Trace] = None
+        self._active_spans: List[Span] = []
+        self._pending_traces: List[Trace] = []
+
+    def _should_sample(self) -> bool:
+        if not self.config.enabled:
+            return False
+        rate = max(0.0, min(1.0, float(self.config.sample_rate)))
+        return random.random() < rate
+
+    def start_trace(self, name: str, parent_context: Optional[Dict[str, Any]] = None) -> Trace:
+        trace_id = None
+        parent_id = None
+        if parent_context:
+            trace_id = parent_context.get("trace_id")
+            parent_id = parent_context.get("span_id") or parent_context.get("parent_span_id")
+        trace = Trace(name=name, trace_id=trace_id, sampled=self._should_sample(), parent_id=parent_id)
+        self._active_trace = trace
+        self._active_spans = [trace.root_span] if trace.root_span else []
+        self._pending_traces.append(trace)
+        return trace
+
+    @contextmanager
+    def trace(self, name: str) -> Generator[Span, None, None]:
+        if self._active_trace and self.active_span is not None:
+            span = self.start_span(name)
+            try:
+                yield span
+            finally:
+                span.finish()
+                self._pop_span(span)
+            return
+        trace = self.start_trace(name)
+        root = trace.root_span or self.start_span(name)
+        try:
+            yield root
+        finally:
+            trace.finish()
+            self._active_trace = None
+            self._active_spans = []
+
+    def start_span(self, name: str) -> Span:
+        if self._active_trace is None:
+            orphan = Span(name=name, trace_id=uuid.uuid4().hex)
+            orphan.start()
+            return orphan
+        span = self._active_trace.create_span(name)
+        span.start()
+        self._active_spans.append(span)
+        return span
+
+    @property
+    def active_span(self) -> Optional[Span]:
+        return self._active_spans[-1] if self._active_spans else None
+
+    def _pop_span(self, span: Span) -> None:
+        if self._active_spans and self._active_spans[-1] is span:
+            self._active_spans.pop()
+
+    def inject(self, headers: Dict[str, str]) -> None:
+        if self._active_trace:
+            headers["x-trace-id"] = self._active_trace.trace_id
+        if self.active_span:
+            headers["x-span-id"] = self.active_span.span_id
+
+    def extract(self, headers: Dict[str, str]) -> SpanContext:
+        return SpanContext.from_headers(headers)
+
+    async def flush(self) -> None:
+        if not self._pending_traces:
+            return
+        if not self.config.export_endpoint:
+            self._pending_traces.clear()
+            return
+        try:
+            import aiohttp
+        except ImportError:
+            return
+        async with aiohttp.ClientSession() as session:
+            for trace in list(self._pending_traces):
+                try:
+                    async with session.post(self.config.export_endpoint, json=trace.to_dict()) as _resp:
+                        pass
+                except Exception:
+                    continue
+        self._pending_traces.clear()
+
+
+_GLOBAL_TRACER: Tracer = Tracer()
+
+
+def get_tracer(config: Optional[TracingConfig] = None) -> Tracer:
+    global _GLOBAL_TRACER
+    if config is not None:
+        service = config.service_name or _GLOBAL_TRACER.service_name
+        _GLOBAL_TRACER = Tracer(service_name=service, config=config)
+    return _GLOBAL_TRACER
+
+
+def trace_async(name: Optional[str] = None) -> Callable:
+    def decorator(func: Callable[[Any], T]) -> Callable[[Any], T]:
+        op_name = name or func.__name__
+
+        async def wrapper(*args, **kwargs) -> T:
+            tracer = get_tracer()
+            created_trace = False
+            if tracer._active_trace is None:
+                tracer.start_trace(op_name)
+                created_trace = True
+            span = tracer.start_span(op_name)
+            try:
+                return await func(*args, **kwargs)
+            except Exception as exc:
+                span.set_error(exc)
+                raise
+            finally:
+                span.finish()
+                tracer._pop_span(span)
+                if created_trace and tracer._active_trace is not None:
+                    tracer._active_trace.finish()
+                    tracer._active_trace = None
+                    tracer._active_spans = []
+
+        return wrapper
+
+    return decorator
+
+
+def trace_sync(name: Optional[str] = None) -> Callable:
+    def decorator(func: Callable[[Any], T]) -> Callable[[Any], T]:
+        op_name = name or func.__name__
+
+        def wrapper(*args, **kwargs) -> T:
+            tracer = get_tracer()
+            created_trace = False
+            if tracer._active_trace is None:
+                tracer.start_trace(op_name)
+                created_trace = True
+            span = tracer.start_span(op_name)
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                span.set_error(exc)
+                raise
+            finally:
+                span.finish()
+                tracer._pop_span(span)
+                if created_trace and tracer._active_trace is not None:
+                    tracer._active_trace.finish()
+                    tracer._active_trace = None
+                    tracer._active_spans = []
+
+        return wrapper
+
+    return decorator

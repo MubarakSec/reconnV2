@@ -33,7 +33,6 @@ except ImportError:
 
 pytestmark = [
     pytest.mark.skipif(not HAS_ASYNC_HTTP, reason="async_http not available"),
-    pytest.mark.asyncio,
 ]
 
 
@@ -386,3 +385,51 @@ class TestHTTPErrorHandling:
             async with AsyncHTTPClient() as client:
                 result = await client.get("https://example.com")
                 assert result.status == 429
+
+
+# ═══════════════════════════════════════════════════════════
+#                  Compatibility Edge Cases
+# ═══════════════════════════════════════════════════════════
+
+class TestAsyncHTTPCompatibility:
+    """اختبارات توافق إضافية"""
+
+    @pytest.mark.asyncio
+    async def test_constructor_keyword_aliases_map_to_config(self):
+        """kwargs القديمة تُطبّق على إعدادات العميل"""
+        retry = RetryConfig(
+            max_retries=4,
+            base_delay=0.2,
+            exponential_base=3,
+        )
+        client = AsyncHTTPClient(
+            timeout=2.0,
+            max_connections=7,
+            rate_limit=9,
+            retry_config=retry,
+        )
+
+        assert client.config.total_timeout == 2.0
+        assert client.config.max_concurrent == 7
+        assert client.config.requests_per_second == 9
+        assert client.config.max_retries == 4
+        assert client.config.retry_delay == 0.2
+        assert client.config.retry_multiplier == 3
+
+    @pytest.mark.asyncio
+    async def test_get_many_converts_request_exception_to_error_response(self):
+        """get_many يعيد HTTPResponse.error عند فشل الطلب"""
+        with patch("aiohttp.ClientSession") as mock_session:
+            session_instance = AsyncMock()
+            session_instance.get = AsyncMock(side_effect=asyncio.TimeoutError())
+            session_instance.close = AsyncMock()
+            mock_session.return_value = session_instance
+
+            async with AsyncHTTPClient(
+                retry_config=RetryConfig(max_retries=0, base_delay=0.01)
+            ) as client:
+                results = await client.get_many(["https://example.com"])
+
+        assert len(results) == 1
+        assert results[0].status == 0
+        assert "Timeout" in (results[0].error or "")

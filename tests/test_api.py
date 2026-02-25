@@ -62,6 +62,25 @@ class TestAPIJobs:
         response = client.get("/api/jobs/nonexistent_job_id")
         assert response.status_code == 404
 
+    def test_delete_requires_api_key(self):
+        """Delete endpoint requires API key."""
+        client = TestClient(app)
+        response = client.delete("/api/jobs/job-123")
+        assert response.status_code == 401
+
+    def test_delete_rejects_path_traversal_job_id(self):
+        """Encoded traversal job_id is rejected before deletion."""
+        client = TestClient(app)
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {"user_id": 1, "permissions": ["write"]}
+            with patch("recon_cli.jobs.lifecycle.JobLifecycle.delete_job") as mock_delete:
+                response = client.delete(
+                    "/api/jobs/%2E%2E",
+                    headers={"X-API-Key": "test-api-key"},
+                )
+                assert response.status_code == 400
+                mock_delete.assert_not_called()
+
 
 class TestAPIScan:
     """Tests for /api/scan endpoint."""

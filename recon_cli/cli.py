@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -118,6 +119,15 @@ def _auto_allow_ip(target_value: str) -> bool:
     except Exception:
         candidate = target_value
     return validation.is_ip(candidate)
+
+
+def _run_async_command(coro):
+    """Run coroutine in an isolated loop without mutating global loop state."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @app.command()
@@ -690,13 +700,13 @@ def projects() -> None:
 @app.command()
 def schema(fmt: str = typer.Option("json", "--format", help="Output format: json")) -> None:
     """Emit machine-readable schema for automation clients."""
-    from recon_cli import api
+    from recon_cli.api import schema_json
 
     fmt = fmt.lower()
     if fmt != "json":
         typer.echo(f"Unsupported format: {fmt}", err=True)
         raise typer.Exit(code=1)
-    typer.echo(api.schema_json())
+    typer.echo(schema_json())
 
 
 @app.command("cache-stats")
@@ -942,7 +952,7 @@ def interactive_mode() -> None:
         rich_print("Type 'help' for available commands, 'quit' to exit.\n")
         
         mode = InteractiveMode()
-        mode.run()
+        _run_async_command(mode.run())
     except ImportError as e:
         typer.secho(f"Interactive mode not available: {e}", fg=typer.colors.RED)
     except KeyboardInterrupt:
@@ -958,7 +968,7 @@ def scan_wizard() -> None:
         rich_print("[bold cyan]🧙 Scan Configuration Wizard[/bold cyan]\n")
         
         wizard = ScanWizard()
-        result = wizard.run()
+        result = _run_async_command(wizard.run())
         
         if result.completed:
             rich_print("\n[bold green]✅ Wizard completed![/bold green]")
@@ -990,7 +1000,12 @@ def setup_completions(
 ) -> None:
     """Generate or install shell completions."""
     try:
-        from recon_cli.completions import CompletionGenerator, CompletionInstaller, Shell
+        from recon_cli.completions import (
+            CompletionGenerator,
+            CompletionInstaller,
+            RECON_COMMANDS,
+            Shell,
+        )
         
         # Auto-detect shell if not specified
         if not shell:
@@ -1002,11 +1017,11 @@ def setup_completions(
                 shell = "fish"
             elif os.name == "nt":
                 shell = "powershell"
-            else:
-                shell = "bash"
+        else:
+            shell = "bash"
         
         shell_enum = Shell(shell.lower())
-        generator = CompletionGenerator()
+        generator = CompletionGenerator(RECON_COMMANDS)
         
         if show or not install:
             script = generator.generate(shell_enum)
@@ -1016,11 +1031,11 @@ def setup_completions(
         
         if install:
             installer = CompletionInstaller()
-            success, message = installer.install(shell_enum)
-            if success:
-                typer.secho(f"✅ {message}", fg=typer.colors.GREEN)
-            else:
-                typer.secho(f"❌ {message}", fg=typer.colors.RED)
+            installed_path = installer.install(shell_enum)
+            typer.secho(f"✅ Installed completion script at: {installed_path}", fg=typer.colors.GREEN)
+            source_command = installer.get_source_command(shell_enum)
+            if source_command:
+                typer.echo(source_command)
                 
     except ImportError as e:
         typer.secho(f"Completions module not available: {e}", fg=typer.colors.RED)

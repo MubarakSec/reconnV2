@@ -216,6 +216,18 @@ def create_app() -> "FastAPI":
         if not validated:
             raise HTTPException(status_code=401, detail="Invalid API key")
         return validated
+
+    async def _require_authenticate(x_api_key: Optional[str]) -> Dict[str, Any]:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="X-API-Key is required")
+        validated = await _maybe_authenticate(x_api_key)
+        if not validated:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        return validated
+
+    def _validate_job_id_or_400(job_id: str) -> None:
+        if not JobManager.is_safe_job_id(job_id):
+            raise HTTPException(status_code=400, detail="Invalid job_id")
     
     # ───────────────────────────────────────────────────────
     #                      Endpoints
@@ -316,7 +328,7 @@ def create_app() -> "FastAPI":
             "name": "ReconnV2",
             "description": "Advanced Security Reconnaissance Pipeline",
             "build_date": "2026-02-01",
-            "python_required": ">=3.10",
+            "python_required": ">=3.10,<3.13",
             "docs_url": "/docs",
         }
 
@@ -391,6 +403,7 @@ def create_app() -> "FastAPI":
     @app.get("/api/jobs/{job_id}", response_model=JobResponse)
     async def get_job(job_id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
         """الحصول على معلومات مهمة"""
+        _validate_job_id_or_400(job_id)
         await _maybe_authenticate(x_api_key)
         lifecycle = JobLifecycle(manager=app.state.manager)
         record = lifecycle.get_job(job_id)
@@ -419,6 +432,7 @@ def create_app() -> "FastAPI":
         x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """الحصول على نتائج المهمة"""
+        _validate_job_id_or_400(job_id)
         await _maybe_authenticate(x_api_key)
         results_manager = JobResults(manager=app.state.manager)
         results = results_manager.get_results(job_id, limit=limit, result_type=result_type)
@@ -432,6 +446,7 @@ def create_app() -> "FastAPI":
         x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """الحصول على ملخص المهمة"""
+        _validate_job_id_or_400(job_id)
         await _maybe_authenticate(x_api_key)
         summary_manager = JobSummary(manager=app.state.manager)
         summary_data = summary_manager.get_summary(job_id)
@@ -445,6 +460,7 @@ def create_app() -> "FastAPI":
         x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """الحصول على سجلات المهمة"""
+        _validate_job_id_or_400(job_id)
         await _maybe_authenticate(x_api_key)
         record = app.state.manager.load_job(job_id)
         if not record:
@@ -522,6 +538,7 @@ def create_app() -> "FastAPI":
     @app.post("/api/jobs/{job_id}/requeue")
     async def requeue_job(job_id: str):
         """إعادة تشغيل مهمة"""
+        _validate_job_id_or_400(job_id)
         job_dir = _find_job_dir(job_id)
         
         if not job_dir:
@@ -538,7 +555,8 @@ def create_app() -> "FastAPI":
     @app.delete("/api/jobs/{job_id}")
     async def delete_job(job_id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
         """حذف مهمة"""
-        await _maybe_authenticate(x_api_key)
+        _validate_job_id_or_400(job_id)
+        await _require_authenticate(x_api_key)
         lifecycle = JobLifecycle(manager=app.state.manager)
         removed = lifecycle.delete_job(job_id)
         if not removed:
@@ -548,6 +566,7 @@ def create_app() -> "FastAPI":
     @app.get("/api/jobs/{job_id}/report")
     async def get_job_report(job_id: str):
         """الحصول على تقرير HTML"""
+        _validate_job_id_or_400(job_id)
         job_dir = _find_job_dir(job_id)
         
         if not job_dir:
@@ -577,10 +596,17 @@ app = create_app() if FASTAPI_AVAILABLE else None
 
 def _find_job_dir(job_id: str) -> Optional[Path]:
     """البحث عن مجلد المهمة"""
+    if not JobManager.is_safe_job_id(job_id):
+        return None
     for status_dir in [config.QUEUED_JOBS, config.RUNNING_JOBS, 
                        config.FINISHED_JOBS, config.FAILED_JOBS]:
-        candidate = status_dir / job_id
-        if candidate.exists():
+        try:
+            base = status_dir.resolve()
+            candidate = (status_dir / job_id).resolve()
+            candidate.relative_to(base)
+        except Exception:
+            continue
+        if candidate.exists() and candidate.is_dir():
             return candidate
     return None
 
