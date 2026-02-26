@@ -6,3 +6,11 @@ __pycache__/
 .idea/
 m-arabi.com_20260204_055203_7663/
 recon_cli.egg-info/
+.venv/
+*.egg-info/
+jobs/queued/
+jobs/running/
+jobs/finished/
+jobs/failed/
+cache/
+learning/
