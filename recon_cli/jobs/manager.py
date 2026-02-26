@@ -6,6 +6,7 @@ import secrets
 import shutil
 import json
 import os
+import errno
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -36,6 +37,18 @@ class JobManager:
                 lock = threading.Lock()
                 cls._record_locks[job_id] = lock
             return lock
+
+    @staticmethod
+    def is_safe_job_id(job_id: str) -> bool:
+        if not job_id:
+            return False
+        if any(sep in job_id for sep in ("/", "\\", "\x00")):
+            return False
+        if job_id in {".", ".."}:
+            return False
+        if len(Path(job_id).parts) != 1:
+            return False
+        return re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", job_id) is not None
 
     def __init__(self, home: Path | None = None) -> None:
         self.home = home or config.RECON_HOME
@@ -74,13 +87,48 @@ class JobManager:
             return False
         lock_path = self._lock_path(root)
         if lock_path.exists():
-            return False
+            try:
+                payload = json.loads(lock_path.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+            pid = payload.get("pid")
+            stale_lock = False
+            if isinstance(pid, int) and pid > 0:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    stale_lock = True
+                except PermissionError:
+                    stale_lock = False
+                except OSError:
+                    stale_lock = False
+            if stale_lock:
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+            else:
+                return False
         payload = {
             "owner": owner or "worker",
             "pid": os.getpid(),
             "timestamp": time_utils.iso_now(),
         }
-        lock_path.write_text(json.dumps(payload), encoding="utf-8")
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                return False
+            raise
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload))
+        except Exception:
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+            raise
         return True
 
     def release_lock(self, job_id: str) -> None:
@@ -268,6 +316,8 @@ class JobManager:
             pass
 
     def _find_job_dir(self, job_id: str) -> Optional[Path]:
+        if not self.is_safe_job_id(job_id):
+            return None
         search_locations = [
             config.QUEUED_JOBS,
             config.RUNNING_JOBS,
@@ -275,7 +325,10 @@ class JobManager:
             config.FAILED_JOBS,
         ]
         for location in search_locations:
-            candidate = location / job_id
+            location_resolved = location.resolve()
+            candidate = (location / job_id).resolve()
+            if location_resolved not in candidate.parents:
+                continue
             if candidate.exists():
                 return candidate
         return None

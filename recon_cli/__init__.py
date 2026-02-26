@@ -16,72 +16,39 @@ This package provides comprehensive tools for security reconnaissance:
 Version: 0.2.0
 """
 
+from importlib import import_module
+
 __version__ = "0.2.0"
 __author__ = "Recon Team"
 __license__ = "MIT"
 
-# Core modules
-from . import config
-from . import cli
-from . import api
-from . import jobs
-from . import pipeline
-from . import tools
-from . import utils
-from . import secrets
-from . import scanners
-
-# Plugins subpackage (separate from plugins.py module)
-from . import plugins as plugins_pkg
-
-# Additional feature modules
-from . import active
-from . import correlation
-from . import crawl
-from . import db
-from . import learning
-from . import takeover
-from . import web
-
-# New modules from improvements
-from . import exceptions
-
-# Phase 8 modules
-try:
-    from . import cli_wizard
-except ImportError:
-    cli_wizard = None  # type: ignore
-
-try:
-    from . import completions
-except ImportError:
-    completions = None  # type: ignore
-
-try:
-    from . import reports
-except ImportError:
-    reports = None  # type: ignore
-
-# Optional modules that have extra dependencies
-try:
-    from . import settings
-except ImportError:
-    settings = None  # type: ignore
-
-try:
-    from . import scheduler
-except ImportError:
-    scheduler = None  # type: ignore
-
-try:
-    from . import inventory
-except ImportError:
-    inventory = None  # type: ignore
-
-try:
-    from . import users
-except ImportError:
-    users = None  # type: ignore
+_LAZY_SUBMODULES = {
+    "active",
+    "api",
+    "cli",
+    "cli_wizard",
+    "completions",
+    "config",
+    "correlation",
+    "crawl",
+    "db",
+    "exceptions",
+    "inventory",
+    "jobs",
+    "learning",
+    "pipeline",
+    "plugins",
+    "reports",
+    "scanners",
+    "scheduler",
+    "secrets",
+    "settings",
+    "takeover",
+    "tools",
+    "users",
+    "utils",
+    "web",
+}
 
 __all__ = [
     "__version__",
@@ -97,6 +64,7 @@ __all__ = [
     "utils",
     "secrets",
     "scanners",
+    "plugins",
     "plugins_pkg",
     # Feature modules
     "active",
@@ -119,4 +87,9 @@ __all__ = [
 ]
 
 
-
+def __getattr__(name: str):
+    if name == "plugins_pkg":
+        return import_module(".plugins", __name__)
+    if name in _LAZY_SUBMODULES:
+        return import_module(f".{name}", __name__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

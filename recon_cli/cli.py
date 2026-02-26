@@ -6,6 +6,7 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 import time
 import threading
 from datetime import datetime, timedelta, timezone
@@ -477,15 +478,24 @@ def cancel(
 
 
 @app.command()
-def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate default configs/resolvers")) -> None:
+def doctor(
+    fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate default configs/resolvers"),
+    fix_deps: bool = typer.Option(
+        False,
+        "--fix-deps",
+        help="Attempt to install missing dependencies (python packages, playwright browsers, interactsh-client)",
+    ),
+) -> None:
     """Run quick environment & source sanity checks."""
     config.ensure_base_directories(force=fix)
+    import importlib.util
     import io
-    import tokenize
     import subprocess
+    import tokenize
 
     source_root = Path(__file__).resolve().parent
     issues: list[str] = []
+    warnings: list[str] = []
 
     for py_file in source_root.rglob("*.py"):
         with py_file.open("r", encoding="utf-8") as handle:
@@ -529,18 +539,145 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
         ("waybackurls", ["-h"], "install via go install github.com/tomnomnom/waybackurls@latest"),
         ("gau", ["-h"], "install via go install github.com/lc/gau/v2/cmd/gau@latest"),
     ]
-    tool_results: list[tuple[str, str, str]] = []
-    for tool, version_args, hint in tool_checks:
-        if not CommandExecutor.available(tool):
-            tool_results.append((tool, "missing", ""))
-            if tool not in {"waybackurls", "gau"}:
-                typer.echo(f"[warn] tool '{tool}' not found in PATH ({hint})")
-            continue
-        version = _version_line(tool, version_args)
-        tool_results.append((tool, "ok", version))
+    def _collect_tool_health(*, emit_warnings: bool) -> tuple[list[tuple[str, str, str]], list[str], list[str]]:
+        tool_results: list[tuple[str, str, str]] = []
+        local_warnings: list[str] = []
+        missing_tools: list[str] = []
+        for tool, version_args, hint in tool_checks:
+            if not CommandExecutor.available(tool):
+                tool_results.append((tool, "missing", ""))
+                missing_tools.append(tool)
+                local_warnings.append(f"tool:{tool}")
+                if emit_warnings and tool not in {"waybackurls", "gau"}:
+                    typer.echo(f"[warn] tool '{tool}' not found in PATH ({hint})")
+                continue
+            version = _version_line(tool, version_args)
+            tool_results.append((tool, "ok", version))
 
-    if not (CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")):
-        typer.echo("[warn] tool 'waybackurls' or 'gau' not found in PATH (install via go install github.com/tomnomnom/waybackurls@latest or go install github.com/lc/gau/v2/cmd/gau@latest)")
+        if not (CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")):
+            local_warnings.append("tool:waybackurls-or-gau")
+            if emit_warnings:
+                typer.echo(
+                    "[warn] tool 'waybackurls' or 'gau' not found in PATH "
+                    "(install via go install github.com/tomnomnom/waybackurls@latest "
+                    "or go install github.com/lc/gau/v2/cmd/gau@latest)"
+                )
+        return tool_results, local_warnings, missing_tools
+
+    python_dep_checks = [
+        ("dnspython", "dns", "pip install dnspython"),
+        ("playwright", "playwright", "pip install playwright"),
+    ]
+    def _collect_python_health(
+        *, emit_warnings: bool
+    ) -> tuple[list[tuple[str, str, str]], str, str, list[str], list[str]]:
+        python_results: list[tuple[str, str, str]] = []
+        local_warnings: list[str] = []
+        missing_python: list[str] = []
+        for label, module_name, hint in python_dep_checks:
+            if importlib.util.find_spec(module_name) is None:
+                python_results.append((label, "missing", ""))
+                missing_python.append(label)
+                local_warnings.append(f"python:{label}")
+                if emit_warnings:
+                    typer.echo(f"[warn] Python package '{label}' not available ({hint})")
+            else:
+                python_results.append((label, "ok", ""))
+
+        browser_status = "unknown"
+        browser_detail = ""
+        if any(label == "playwright" and status == "ok" for label, status, _ in python_results):
+            try:
+                from playwright.sync_api import sync_playwright
+
+                with sync_playwright() as playwright:
+                    chromium_path = Path(playwright.chromium.executable_path)
+                if chromium_path.exists():
+                    browser_status = "ok"
+                    browser_detail = str(chromium_path)
+                else:
+                    browser_status = "missing"
+                    browser_detail = "playwright install chromium"
+                    local_warnings.append("python:playwright-browsers")
+                    if emit_warnings:
+                        typer.echo("[warn] Playwright browsers not installed (run: playwright install chromium)")
+            except Exception as exc:
+                browser_status = "missing"
+                browser_detail = str(exc).splitlines()[0]
+                local_warnings.append("python:playwright-browsers")
+                if emit_warnings:
+                    typer.echo("[warn] Playwright browser check failed (run: playwright install chromium)")
+        return python_results, browser_status, browser_detail, local_warnings, missing_python
+
+    tool_results, tool_warnings, missing_tools = _collect_tool_health(emit_warnings=not fix_deps)
+    python_results, browser_status, browser_detail, python_warnings, missing_python = _collect_python_health(
+        emit_warnings=not fix_deps
+    )
+    warnings = tool_warnings + python_warnings
+
+    if fix_deps:
+        typer.echo("")
+        typer.echo("== Dependency Fix Attempts ==")
+        attempted = False
+
+        for package_label in missing_python:
+            package_name = "dnspython" if package_label == "dnspython" else "playwright"
+            attempted = True
+            typer.echo(f"[fix] Installing python package: {package_name}")
+            install = subprocess.run(
+                [sys.executable, "-m", "pip", "install", package_name],
+                capture_output=True,
+                text=True,
+                timeout=900,
+                check=False,
+            )
+            if install.returncode == 0:
+                typer.echo(f"[fix] Installed: {package_name}")
+            else:
+                typer.echo(f"[warn] Failed to install {package_name}")
+
+        if "interactsh-client" in missing_tools:
+            attempted = True
+            if not CommandExecutor.available("go"):
+                typer.echo("[warn] 'go' not found; cannot auto-install interactsh-client")
+            else:
+                typer.echo("[fix] Installing interactsh-client via go install")
+                install = subprocess.run(
+                    ["go", "install", "github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                    check=False,
+                )
+                if install.returncode == 0:
+                    typer.echo("[fix] Installed: interactsh-client")
+                else:
+                    typer.echo("[warn] Failed to install interactsh-client")
+
+        if browser_status != "ok":
+            attempted = True
+            if importlib.util.find_spec("playwright") is None:
+                typer.echo("[warn] Playwright module missing; cannot install browsers yet")
+            else:
+                typer.echo("[fix] Installing Playwright Chromium browser")
+                install = subprocess.run(
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                    check=False,
+                )
+                if install.returncode == 0:
+                    typer.echo("[fix] Installed: playwright chromium browser")
+                else:
+                    typer.echo("[warn] Failed to install Playwright Chromium browser")
+
+        if not attempted:
+            typer.echo("[fix] No missing dependencies detected")
+
+        tool_results, tool_warnings, _ = _collect_tool_health(emit_warnings=True)
+        python_results, browser_status, browser_detail, python_warnings, _ = _collect_python_health(emit_warnings=True)
+        warnings = tool_warnings + python_warnings
 
     typer.echo("")
     typer.echo("== Tool Health ==")
@@ -550,6 +687,16 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
         else:
             suffix = f" ({version})" if version else ""
             typer.echo(f"{tool:12} : ok{suffix}")
+
+    typer.echo("")
+    typer.echo("== Python Dependency Health ==")
+    for label, status, _ in python_results:
+        typer.echo(f"{label:12} : {status}")
+    if browser_status == "ok":
+        typer.echo(f"{'playwright-browsers':20} : ok ({browser_detail})")
+    else:
+        suffix = f" ({browser_detail})" if browser_detail else ""
+        typer.echo(f"{'playwright-browsers':20} : missing{suffix}")
 
     try:
         __import__("recon_cli.pipeline.stage_idor")
@@ -561,6 +708,10 @@ def doctor(fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate 
         for issue in issues:
             typer.echo(f"[fail] {issue}")
         raise typer.Exit(code=1)
+
+    if warnings:
+        typer.secho(f"Doctor completed with {len(warnings)} warning(s)", fg=typer.colors.YELLOW)
+        return
 
     typer.secho("All checks passed", fg=typer.colors.GREEN)
 

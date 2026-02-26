@@ -1,0 +1,79 @@
+# ReconnV2 Bug Bounty Hardening Roadmap
+
+## Phase 1: Noise Reduction and Signal Quality
+- [ ] Add global deduplication across stages (host, path, param, vuln fingerprint).
+- [ ] Add confidence scoring per finding (`low`, `medium`, `high`, `verified`).
+- [ ] Add `--verified-only` output mode.
+- [ ] Add `--proof-required` mode to suppress unverified high-risk claims.
+- [ ] Add result quality metrics (noise ratio, duplicate ratio, verified ratio).
+- [ ] Add tests for dedupe collisions and confidence classification edge cases.
+- [ ] **Done when:** repeated runs produce stable, low-noise findings with measurable improvement.
+
+## Phase 2: Exploitable Finding Output
+- [ ] For each high/critical finding, generate reproducible request/response artifacts.
+- [ ] Attach PoC steps (exact command + expected success condition).
+- [ ] Include affected asset context (host, endpoint, auth requirement, environment).
+- [ ] Add impact hypothesis template (why it matters from bounty perspective).
+- [ ] Add structured export format for triage (`finding_id`, `severity`, `proof`, `repro_cmd`).
+- [ ] Add tests to ensure artifact generation for every verified high/critical finding.
+- [ ] **Done when:** a hunter can reproduce top findings directly from output without extra digging.
+
+## Phase 3: Vulnerability-Class Validation Stages
+- [ ] Add dedicated SSRF validator (outbound callback + internal target checks).
+- [ ] Add dedicated IDOR validator (object ownership/access control checks).
+- [ ] Add auth-bypass validator (forced-browse and privilege-boundary checks).
+- [ ] Add open-redirect validator (redirect chain and sink confirmation).
+- [ ] Add subdomain takeover validator hardening (fingerprint + DNS state + claimability).
+- [ ] Add secret exposure validator (live token sanity checks with safe guards).
+- [ ] Add tests per validator with real/false-positive fixtures.
+- [ ] **Done when:** each supported vuln class has explicit confirmation logic, not just detection.
+
+## Phase 4: Bounty-Centric Prioritization
+- [ ] Add risk score formula: severity + exposure + exploitability + business context.
+- [ ] Prioritize sensitive asset types (`auth`, `admin`, `api`, `payment`, `account`).
+- [ ] Add internet exposure weighting (publicly reachable > internal-only).
+- [ ] Add recency/novelty weighting to surface newly introduced risks.
+- [ ] Add “top targets first” queue mode for high-value attack surface.
+- [ ] Add tests that validate ranking determinism and priority ordering.
+- [ ] **Done when:** top-ranked issues consistently match what a skilled hunter would triage first.
+
+## Phase 5: Attack Surface Depth
+- [ ] Improve JS endpoint extraction (dynamic routes, API patterns, hidden parameters).
+- [ ] Improve API discovery (OpenAPI/GraphQL/gRPC/websocket path enrichment).
+- [ ] Expand parameter mining and candidate mutation strategy.
+- [ ] Improve auth-aware crawling with session continuity and role awareness.
+- [ ] Correlate passive + active intel into attack paths (entrypoint -> vulnerable sink).
+- [ ] Add benchmarks to compare discovered unique actionable surfaces before/after.
+- [ ] **Done when:** scans reveal deeper, exploitable paths instead of just broad asset lists.
+
+## Phase 6: Hunter Mode Reporting
+- [ ] Add `hunter-mode` report preset (verified-only, high signal, PoC-focused).
+- [ ] Output “Top 10 Actionable Bugs” with proof links and rerun commands.
+- [ ] Add one-click rerun command per finding (stage-scoped replay).
+- [ ] Add concise submission-ready summaries per finding.
+- [ ] Add report sections for duplicates/out-of-scope filtering hints.
+- [ ] Add end-to-end tests for hunter-mode report generation.
+- [ ] **Done when:** output is directly usable for triage and bug bounty submission workflow.
+
+## Cross-Cutting Hardening
+- [ ] Standardize timeout/retry/circuit-breaker defaults per tool class.
+- [ ] Add strict input validation for all web/API mutation endpoints.
+- [ ] Add sensitive data redaction checks in logs/reports/artifacts.
+- [ ] Add safe-failure behavior (partial results + clear error taxonomy).
+- [ ] Add dependency health checks in `doctor` for all critical scanners/modules.
+- [ ] Add CI gates: quality thresholds + regression suites for false positives.
+
+## Execution Plan
+- [ ] Week 1: Phase 1 + initial metrics dashboard.
+- [ ] Week 2: Phase 2 + artifact schemas.
+- [ ] Week 3: Phase 3 validators (SSRF/IDOR/auth bypass first).
+- [ ] Week 4: Phase 4 prioritization + ranking tests.
+- [ ] Week 5: Phase 5 discovery depth improvements.
+- [ ] Week 6: Phase 6 hunter-mode reporting + release checklist.
+
+## Release Readiness Checklist
+- [ ] All new features covered by unit/integration tests.
+- [ ] Full suite passes (`pytest`) in project venv.
+- [ ] No sensitive leakage in logs/reports under test fixtures.
+- [ ] Documentation updated (`README`, examples, flags, report fields).
+- [ ] Backward compatibility verified for existing CLI/web API flows.

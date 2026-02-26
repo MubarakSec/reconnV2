@@ -147,6 +147,8 @@ class CommandExecutor:
                 timeout=timeout,
                 capture_output=capture_output,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=check,
             )
         except subprocess.TimeoutExpired as exc:
@@ -216,6 +218,8 @@ class CommandExecutor:
                     stdout=handle,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     check=False,
                     timeout=timeout,
                 )

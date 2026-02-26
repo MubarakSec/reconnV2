@@ -22,7 +22,7 @@ try:
     from fastapi.testclient import TestClient
     from recon_cli.api.app import create_app
     HAS_API = True
-except ImportError:
+except (ImportError, RuntimeError):
     HAS_API = False
 
 

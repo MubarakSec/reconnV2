@@ -55,6 +55,7 @@ def test_stage_overrides_group_disables():
 
 def test_outputs_api_downloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
     from recon_cli.jobs.manager import JobManager
     from recon_cli.web.app import app as fastapi_app
@@ -91,8 +92,21 @@ def test_outputs_api_downloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert resp.status_code == 404
 
 
+def test_outputs_api_rejects_invalid_job_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.get("/api/jobs/%2E%2E/outputs/results")
+    assert resp.status_code == 400
+
+
 def test_scan_api_targets_and_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
     from recon_cli.jobs.manager import JobManager
     from recon_cli.web.app import app as fastapi_app
@@ -138,3 +152,43 @@ def test_scan_api_targets_and_overrides(tmp_path: Path, monkeypatch: pytest.Monk
     resolver_content = resolver_path.read_text(encoding="utf-8")
     assert "1.1.1.1" in resolver_content
     assert record.spec.stages == ["web", "vulnerabilities"]
+
+
+def test_scan_api_rejects_invalid_scan_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post(
+        "/api/scan",
+        json={"target": "example.com", "profile": "passive", "scanMode": "invalid"},
+    )
+    assert resp.status_code == 400
+    assert "Invalid scanMode" in resp.json().get("detail", "")
+
+
+def test_save_settings_api_rejects_non_object_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post("/api/settings", json=["not", "an", "object"])
+    assert resp.status_code == 400
+
+
+def test_retry_api_rejects_invalid_job_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post("/api/jobs/%2E%2E/retry")
+    assert resp.status_code == 400

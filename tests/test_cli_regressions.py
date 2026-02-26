@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -65,3 +67,50 @@ def test_wizard_command_executes_async_run(monkeypatch):
     monkeypatch.setattr("recon_cli.cli_wizard.ScanWizard", _FakeScanWizard)
     cli.scan_wizard()
     assert called["run"] == 1
+
+
+def test_doctor_reports_python_dependency_section():
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code in {0, 1}
+    assert "interactsh-client" in result.stdout
+    assert "== Python Dependency Health ==" in result.stdout
+    assert "dnspython" in result.stdout
+    assert "playwright" in result.stdout
+
+
+def test_doctor_fix_deps_attempts_installs(monkeypatch):
+    runner = CliRunner()
+    state = {"dns": False, "playwright": False}
+    calls: list[list[str]] = []
+
+    def _fake_find_spec(name: str):
+        if name == "dns":
+            return object() if state["dns"] else None
+        if name == "playwright":
+            return object() if state["playwright"] else None
+        return object()
+
+    def _fake_available(tool: str) -> bool:
+        if tool in {"interactsh-client", "go"}:
+            return False
+        return True
+
+    def _fake_run(cmd, **kwargs):
+        cmd_list = [str(part) for part in cmd]
+        calls.append(cmd_list)
+        if len(cmd_list) >= 5 and cmd_list[:4] == [sys.executable, "-m", "pip", "install"]:
+            if cmd_list[4] == "dnspython":
+                state["dns"] = True
+            elif cmd_list[4] == "playwright":
+                state["playwright"] = True
+        return subprocess.CompletedProcess(cmd_list, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("importlib.util.find_spec", _fake_find_spec)
+    monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(_fake_available))
+    monkeypatch.setattr("subprocess.run", _fake_run)
+
+    result = runner.invoke(cli.app, ["doctor", "--fix-deps"])
+    assert result.exit_code == 0
+    assert "== Dependency Fix Attempts ==" in result.stdout
+    assert any(cmd[:4] == [sys.executable, "-m", "pip", "install"] for cmd in calls)

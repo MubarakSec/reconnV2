@@ -6,7 +6,7 @@ import uuid
 
 try:
     from fastapi import FastAPI, Request, HTTPException
-    from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
+    from fastapi.responses import HTMLResponse, Response
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     import uvicorn
@@ -18,6 +18,13 @@ from recon_cli import config
 from recon_cli.jobs.manager import JobManager
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.reporting import categorize_results, is_finding
+
+MAX_WEB_TARGETS = 1000
+MAX_TARGET_LENGTH = 2048
+MAX_SETTINGS_BYTES = 262_144
+MAX_OUTPUT_DOWNLOAD_BYTES = 25 * 1024 * 1024
+ALLOWED_SCAN_MODES = {"queued", "immediate"}
+ALLOWED_NOTIFICATION_CHANNELS = {"telegram", "slack", "discord", "email"}
 
 # Paths
 WEB_DIR = Path(__file__).parent
@@ -39,6 +46,10 @@ if WEB_AVAILABLE:
     # Mount static files if directory exists
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    def _validate_job_id_or_400(job_id: str) -> None:
+        if not JobManager.is_safe_job_id(job_id):
+            raise HTTPException(status_code=400, detail="Invalid job_id")
 
 
 def get_job_stats() -> Dict[str, int]:
@@ -235,6 +246,7 @@ if WEB_AVAILABLE:
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     async def job_detail(request: Request, job_id: str):
         """Job detail page."""
+        _validate_job_id_or_400(job_id)
         manager = JobManager()
         record = manager.load_job(job_id)
         
@@ -265,7 +277,8 @@ if WEB_AVAILABLE:
     async def job_report(request: Request, job_id: str):
         """Generate and return HTML report."""
         from recon_cli.utils.reporter import generate_html_report
-        
+
+        _validate_job_id_or_400(job_id)
         manager = JobManager()
         record = manager.load_job(job_id)
         
@@ -351,6 +364,8 @@ if WEB_AVAILABLE:
     @app.get("/api/charts/{chart_type}")
     async def chart_api(chart_type: str, job_id: Optional[str] = None):
         """Get chart data for dashboard."""
+        if job_id is not None:
+            _validate_job_id_or_400(job_id)
         try:
             from recon_cli.web.charts import ChartGenerator
             
@@ -410,6 +425,7 @@ if WEB_AVAILABLE:
         executive: bool = False,
     ):
         """Generate report in specified format."""
+        _validate_job_id_or_400(job_id)
         try:
             from recon_cli.reports import ReportGenerator, ReportConfig, ReportFormat
             from recon_cli.reports.executive import ExecutiveSummaryGenerator
@@ -441,7 +457,10 @@ if WEB_AVAILABLE:
                 summary = gen.generate(job_data)
                 return summary.to_dict()
             else:
-                report_format = ReportFormat(format.lower())
+                try:
+                    report_format = ReportFormat(format.lower())
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=f"Unsupported report format: {format}") from exc
                 config = ReportConfig()
                 generator = ReportGenerator(config)
                 content = await generator.generate(job_data, format=report_format)
@@ -463,6 +482,8 @@ if WEB_AVAILABLE:
         """Start a new scan from web interface."""
         try:
             data = await request.json()
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=400, detail="Invalid request payload")
             targets = _normalize_targets(data)
             profile = data.get("profile", "passive")
             scan_mode = data.get("scanMode", "queued")
@@ -471,6 +492,15 @@ if WEB_AVAILABLE:
 
             if not targets:
                 raise HTTPException(status_code=400, detail="Target is required")
+            if len(targets) > MAX_WEB_TARGETS:
+                raise HTTPException(status_code=400, detail=f"Too many targets (max {MAX_WEB_TARGETS})")
+            if any(len(target) > MAX_TARGET_LENGTH for target in targets):
+                raise HTTPException(status_code=400, detail=f"Target too long (max {MAX_TARGET_LENGTH} chars)")
+            if scan_mode not in ALLOWED_SCAN_MODES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid scanMode '{scan_mode}'. Allowed: {', '.join(sorted(ALLOWED_SCAN_MODES))}",
+                )
 
             if passive_only:
                 profile = "passive"
@@ -529,11 +559,11 @@ if WEB_AVAILABLE:
             if scan_mode == "immediate":
                 try:
                     run_pipeline(record, manager)
-                except Exception as exc:
+                except Exception:
                     return {
                         "success": False,
                         "job_id": record.spec.job_id,
-                        "message": f"Failed to start scan immediately: {exc}",
+                        "message": "Failed to start scan immediately",
                     }
                 return {
                     "success": True,
@@ -546,8 +576,10 @@ if WEB_AVAILABLE:
                     "job_id": record.spec.job_id,
                     "message": f"Scan queued for {targets[0]}",
                 }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to create scan job") from exc
 
     # ========================================================================
     # OUTPUTS API - Download job outputs
@@ -556,6 +588,7 @@ if WEB_AVAILABLE:
     @app.get("/api/jobs/{job_id}/outputs/{output_name}")
     async def outputs_api(job_id: str, output_name: str):
         """Download job output files (results, confirmed, bigger, jsonl)."""
+        _validate_job_id_or_400(job_id)
         manager = JobManager()
         record = manager.load_job(job_id)
         if not record:
@@ -575,7 +608,11 @@ if WEB_AVAILABLE:
         path = record.paths.root / filename
         if not path.exists():
             raise HTTPException(status_code=404, detail="Output file missing")
-        # Use in-process reads for predictable behavior in constrained runtimes.
+        if path.stat().st_size > MAX_OUTPUT_DOWNLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Output too large for web download (max {MAX_OUTPUT_DOWNLOAD_BYTES} bytes)",
+            )
         content = path.read_bytes()
         return Response(
             content=content,
@@ -623,19 +660,33 @@ if WEB_AVAILABLE:
         """Save settings."""
         try:
             data = await request.json()
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=400, detail="Settings payload must be a JSON object")
+            serialized = json.dumps(data, indent=2)
+            if len(serialized.encode("utf-8")) > MAX_SETTINGS_BYTES:
+                raise HTTPException(status_code=413, detail=f"Settings payload too large (max {MAX_SETTINGS_BYTES} bytes)")
             config_file = Path(config.CONFIG_DIR) / "settings.json"
             config_file.parent.mkdir(parents=True, exist_ok=True)
-            config_file.write_text(json.dumps(data, indent=2))
+            config_file.write_text(serialized, encoding="utf-8")
             return {"success": True, "message": "Settings saved"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to save settings") from exc
     
     @app.post("/api/test-notification")
     async def test_notification_api(request: Request):
         """Test notification channel."""
         try:
             data = await request.json()
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=400, detail="Invalid request payload")
             channel = data.get("channel")
+            if channel not in ALLOWED_NOTIFICATION_CHANNELS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid channel '{channel}'. Allowed: {', '.join(sorted(ALLOWED_NOTIFICATION_CHANNELS))}",
+                )
             
             # Import alerting module
             from recon_cli.utils.alerting import AlertManager
@@ -647,10 +698,12 @@ if WEB_AVAILABLE:
                 return {"success": True, "message": f"Test notification sent to {channel}"}
             else:
                 return {"success": False, "message": "Failed to send notification"}
+        except HTTPException:
+            raise
         except ImportError:
             return {"success": False, "message": "Alerting module not available"}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+        except Exception:
+            return {"success": False, "message": "Notification test failed"}
     
     # ========================================================================
     # JOB ACTIONS - Cancel, Retry, Delete from web
@@ -659,50 +712,70 @@ if WEB_AVAILABLE:
     @app.post("/api/jobs/{job_id}/cancel")
     async def cancel_job_api(job_id: str):
         """Cancel a running job."""
+        _validate_job_id_or_400(job_id)
         manager = JobManager()
         record = manager.load_job(job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        
+
+        if record.metadata.status not in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail=f"Cannot cancel job in status '{record.metadata.status}'")
+
         # Move to failed
         try:
             from recon_cli.jobs.lifecycle import JobLifecycle
             lifecycle = JobLifecycle(manager)
-            lifecycle.move_to_failed(job_id)
+            moved = lifecycle.move_to_failed(job_id)
+            if not moved:
+                raise HTTPException(status_code=409, detail="Unable to cancel job")
             return {"success": True, "message": f"Job {job_id} cancelled"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to cancel job") from exc
     
     @app.post("/api/jobs/{job_id}/retry")
     async def retry_job_api(job_id: str):
         """Retry a failed job."""
+        _validate_job_id_or_400(job_id)
         manager = JobManager()
         record = manager.load_job(job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        
+
+        if record.metadata.status not in {"failed", "finished"}:
+            raise HTTPException(status_code=409, detail=f"Cannot retry job in status '{record.metadata.status}'")
+
         try:
             from recon_cli.jobs.lifecycle import JobLifecycle
             lifecycle = JobLifecycle(manager)
-            lifecycle.requeue(job_id)
+            moved = lifecycle.requeue(job_id)
+            if not moved:
+                raise HTTPException(status_code=409, detail="Unable to requeue job")
             return {"success": True, "job_id": job_id, "message": f"Job {job_id} requeued"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to retry job") from exc
     
     @app.delete("/api/jobs/{job_id}")
     async def delete_job_api(job_id: str):
         """Delete a job."""
+        _validate_job_id_or_400(job_id)
         manager = JobManager()
         record = manager.load_job(job_id)
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
-        
+
         try:
-            import shutil
-            shutil.rmtree(record.paths.root)
+            removed = manager.remove_job(job_id)
+            if not removed:
+                raise HTTPException(status_code=409, detail="Unable to delete job")
             return {"success": True, "message": f"Job {job_id} deleted"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to delete job") from exc
 
 
 def run_dashboard(host: str = "0.0.0.0", port: int = 8080):
