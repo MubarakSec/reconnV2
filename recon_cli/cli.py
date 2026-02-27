@@ -1387,6 +1387,7 @@ def generate_report(
     title: Optional[str] = typer.Option(None, "--title", "-t", help="Custom report title"),
     verified_only: bool = typer.Option(False, "--verified-only", help="Include only verified findings in the report"),
     proof_required: bool = typer.Option(False, "--proof-required", help="Include only findings with proof in the report"),
+    hunter_mode: bool = typer.Option(False, "--hunter-mode", help="Hunter mode report preset (html only)"),
 ) -> None:
     """Generate a report for a completed job."""
     try:
@@ -1398,6 +1399,16 @@ def generate_report(
         
         manager = JobManager()
         record = _load_job_or_exit(manager, job_id)
+
+        if hunter_mode:
+            verified_only = True
+            proof_required = True
+        if hunter_mode and format.lower() != "html":
+            typer.echo("--hunter-mode is only supported with --format html", err=True)
+            raise typer.Exit(code=2)
+        if executive and hunter_mode:
+            typer.echo("--hunter-mode cannot be combined with --executive", err=True)
+            raise typer.Exit(code=2)
         
         # Load job data
         job_data = {
@@ -1441,6 +1452,21 @@ def generate_report(
         else:
             # Full report
             report_format = ReportFormat(format.lower())
+            if report_format == ReportFormat.HTML and (verified_only or proof_required or hunter_mode):
+                from recon_cli.utils.reporter import ReportConfig as LegacyReportConfig
+                from recon_cli.utils.reporter import generate_html_report as generate_legacy_html_report
+
+                output_path = output or (record.paths.root / "report.html")
+                config = LegacyReportConfig(
+                    title=title or "ReconnV2 Scan Report",
+                    language="en",
+                    verified_only=verified_only,
+                    proof_required=proof_required,
+                    hunter_mode=hunter_mode,
+                )
+                generate_legacy_html_report(record.paths.root, output_path, config)
+                typer.secho(f"✅ Report saved to {output_path}", fg=typer.colors.GREEN)
+                return
             config = ReportConfig(
                 title=title or f"Reconnaissance Report - {job_id}",
             )

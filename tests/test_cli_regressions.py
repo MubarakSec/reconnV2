@@ -266,3 +266,45 @@ def test_status_includes_last_failed_stage_and_log_path(tmp_path: Path, monkeypa
     assert "last_failed_stage" in result.stdout
     assert "http_probe" in result.stdout
     assert "log_path" in result.stdout
+
+
+def test_report_hunter_mode_generates_actionable_html(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    record.metadata.status = "finished"
+    manager.update_metadata(record)
+
+    findings = [
+        {
+            "type": "finding",
+            "title": "confirmed-sqli",
+            "source": "sqlmap",
+            "finding_type": "sql_injection",
+            "tags": ["sqli:confirmed"],
+            "severity": "critical",
+            "repro_cmd": "sqlmap -u https://example.com/search?q=1 --batch",
+            "url": "https://example.com/search?q=1",
+        },
+        {
+            "type": "finding",
+            "title": "low-noise",
+            "source": "waf-probe",
+            "severity": "low",
+            "url": "https://example.com/",
+        },
+    ]
+    record.paths.results_jsonl.write_text(
+        "\n".join(json.dumps(item) for item in findings) + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["report", record.spec.job_id, "--format", "html", "--hunter-mode"])
+    assert result.exit_code == 0
+    html_path = record.paths.root / "report.html"
+    assert html_path.exists()
+    content = html_path.read_text(encoding="utf-8")
+    assert "Top Actionable Findings" in content
+    assert "confirmed-sqli" in content
+    assert "recon-cli rerun" in content
