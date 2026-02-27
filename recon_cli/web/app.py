@@ -482,6 +482,7 @@ def _stage_overrides(selected: List[str]) -> Dict[str, Any]:
             "auto_scanners",
             "enable_verification",
             "enable_extended_validation",
+            "enable_idor_validator",
             "enable_ssrf_validator",
             "enable_open_redirect_validator",
             "enable_auth_bypass_validator",

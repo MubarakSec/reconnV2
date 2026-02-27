@@ -20,7 +20,7 @@
 
 ## Phase 3: Vulnerability-Class Validation Stages
 - [x] Add dedicated SSRF validator (outbound callback + internal target checks).
-- [ ] Add dedicated IDOR validator (object ownership/access control checks).
+- [x] Add dedicated IDOR validator (object ownership/access control checks).
 - [x] Add auth-bypass validator (forced-browse and privilege-boundary checks).
 - [x] Add open-redirect validator (redirect chain and sink confirmation).
 - [x] Add subdomain takeover validator hardening (fingerprint + DNS state + claimability).

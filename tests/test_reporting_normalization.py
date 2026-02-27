@@ -49,6 +49,7 @@ def test_resolve_confidence_label_edge_cases():
 
 def test_infer_replay_stage_and_rerun_command():
     assert reporting.infer_replay_stage({"source": "dalfox"}) == "vuln_scan"
+    assert reporting.infer_replay_stage({"source": "idor-validator"}) == "idor_validator"
     assert reporting.infer_replay_stage({"source": "ssrf-validator"}) == "ssrf_validator"
     assert reporting.infer_replay_stage({"source": "auth-bypass-validator"}) == "auth_bypass_validator"
     assert reporting.infer_replay_stage({"finding_type": "open_redirect"}) == "extended_validation"
