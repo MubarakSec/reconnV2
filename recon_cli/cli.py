@@ -20,6 +20,7 @@ from recon_cli import config
 from recon_cli.jobs.lifecycle import JobLifecycle
 from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.pipeline.runner import run_pipeline
+from recon_cli.pipeline.stages import PIPELINE_STAGES
 from recon_cli.utils import fs
 from recon_cli.utils import validation
 from recon_cli.utils.jsonl import read_jsonl
@@ -59,14 +60,79 @@ SCANNER_HELP = ", ".join(SCANNER_CHOICES)
 STATUS_CHOICES = ["queued", "running", "finished", "failed"]
 
 
-def _print_job(metadata) -> None:
+def _last_failed_stage(metadata) -> tuple[Optional[str], Optional[str]]:
+    stats = getattr(metadata, "stats", {}) or {}
+    progress = stats.get("stage_progress", [])
+    if isinstance(progress, list):
+        for entry in reversed(progress):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("status") != "failed":
+                continue
+            return entry.get("stage"), entry.get("error")
+    return None, None
+
+
+def _print_job(record: JobRecord) -> None:
+    metadata = record.metadata
+    failed_stage, failed_error = _last_failed_stage(metadata)
     rich_print(f"[bold]Job {metadata.job_id}[/bold]")
-    rich_print(f"  status     : {metadata.status}")
-    rich_print(f"  stage      : {metadata.stage}")
-    rich_print(f"  queued_at  : {metadata.queued_at}")
-    rich_print(f"  started_at : {metadata.started_at}")
-    rich_print(f"  finished_at: {metadata.finished_at}")
-    rich_print(f"  error      : {metadata.error}")
+    rich_print(f"  status            : {metadata.status}")
+    rich_print(f"  stage             : {metadata.stage}")
+    rich_print(f"  last_failed_stage : {failed_stage or '-'}")
+    rich_print(f"  last_failed_error : {failed_error or '-'}")
+    rich_print(f"  log_path          : {record.paths.pipeline_log}")
+    rich_print(f"  queued_at         : {metadata.queued_at}")
+    rich_print(f"  started_at        : {metadata.started_at}")
+    rich_print(f"  finished_at       : {metadata.finished_at}")
+    rich_print(f"  error             : {metadata.error}")
+
+
+def _truncate_file(path: Path) -> None:
+    try:
+        path.write_text("", encoding="utf-8")
+    except FileNotFoundError:
+        return
+
+
+def _reset_job_state(record: JobRecord, *, clear_results: bool) -> None:
+    record.metadata.checkpoints = {}
+    record.metadata.attempts = {}
+    record.metadata.stats = {}
+    record.metadata.error = None
+    record.metadata.stage = "queued"
+    if not clear_results:
+        return
+    for path in (record.paths.results_jsonl, record.paths.results_txt, record.paths.trimmed_results_jsonl):
+        if path.exists():
+            _truncate_file(path)
+    report_path = record.paths.root / "report.html"
+    report_path.unlink(missing_ok=True)
+
+
+def _normalize_stage_selection(raw_values: List[str]) -> List[str]:
+    selected: List[str] = []
+    for item in raw_values:
+        for part in str(item).split(","):
+            value = part.strip()
+            if value:
+                selected.append(value)
+    if not selected:
+        return []
+    available = {stage.name for stage in PIPELINE_STAGES}
+    invalid = [name for name in selected if name not in available]
+    if invalid:
+        joined = ", ".join(sorted(set(invalid)))
+        raise typer.BadParameter(f"Unknown stage(s): {joined}", param_name="--stages")
+    # Preserve input order but drop duplicates
+    ordered: List[str] = []
+    seen = set()
+    for name in selected:
+        if name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return ordered
 
 
 def _load_job_or_exit(manager: JobManager, job_id: str) -> JobRecord:
@@ -348,7 +414,7 @@ def status(job_id: str) -> None:
     """Show the latest metadata for a job."""
     manager = JobManager()
     record = _load_job_or_exit(manager, job_id)
-    _print_job(record.metadata)
+    _print_job(record)
 
 
 @app.command("tail-logs")
@@ -402,6 +468,60 @@ def requeue(job_id: str) -> None:
         typer.echo(f"Job {job_id} not found", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"Job {job_id} moved to queue")
+
+
+@app.command()
+def rerun(
+    job_id: str,
+    restart: bool = typer.Option(False, "--restart", help="Clear checkpoints and rerun all stages"),
+    stages: List[str] = typer.Option(
+        [],
+        "--stages",
+        help="Replay specific stage(s); repeat flag or pass comma-separated names",
+        show_default=False,
+    ),
+    clean_results: bool = typer.Option(
+        True,
+        "--clean-results/--keep-results",
+        help="When restarting, clear results files before running",
+    ),
+) -> None:
+    """Requeue and rerun a job immediately (resume from last checkpoint by default)."""
+    selected_stages = _normalize_stage_selection(stages)
+    if restart and selected_stages:
+        typer.echo("--restart cannot be combined with --stages", err=True)
+        raise typer.Exit(code=2)
+    manager = JobManager()
+    lifecycle = JobLifecycle(manager)
+    record = _load_job_or_exit(manager, job_id)
+    if record.metadata.status == "running":
+        typer.echo(f"Job {job_id} is running; stop it before rerun", err=True)
+        raise typer.Exit(code=1)
+
+    if record.metadata.status != "queued":
+        record = lifecycle.requeue(job_id)
+        if not record:
+            typer.echo(f"Unable to requeue {job_id}", err=True)
+            raise typer.Exit(code=1)
+
+    if restart:
+        _reset_job_state(record, clear_results=clean_results)
+        manager.update_metadata(record)
+
+    running_record = lifecycle.move_to_running(job_id, owner="cli-rerun")
+    if not running_record:
+        typer.echo("Failed to transition job to running", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        run_force = bool(running_record.spec.force or selected_stages)
+        run_pipeline(running_record, manager, force=run_force, stages=selected_stages or None)
+    except Exception as exc:  # pragma: no cover - runtime path
+        typer.echo(f"Job {job_id} failed: {exc}", err=True)
+        lifecycle.move_to_failed(job_id)
+        raise typer.Exit(code=1)
+    lifecycle.move_to_finished(job_id)
+    typer.echo(f"Job {job_id} finished")
 
 
 @app.command()
@@ -762,21 +882,59 @@ def prune(
 
 
 @app.command()
-def export(job_id: str, fmt: str = typer.Option("jsonl", "--format", case_sensitive=False, help="Export format: jsonl|txt|zip")) -> None:
+def export(
+    job_id: str,
+    fmt: str = typer.Option("jsonl", "--format", case_sensitive=False, help="Export format: jsonl|txt|zip"),
+    verified_only: bool = typer.Option(False, "--verified-only", help="Export only verified findings (jsonl only)"),
+    proof_required: bool = typer.Option(False, "--proof-required", help="Export only findings with proof (jsonl only)"),
+    hunter_mode: bool = typer.Option(
+        False,
+        "--hunter-mode",
+        help="Export top verified findings with proof (jsonl only)",
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        "--limit",
+        min=1,
+        help="Limit findings exported (jsonl only; used with filters/hunter-mode)",
+    ),
+) -> None:
     """Export job artifacts in JSONL, text summary, or ZIP form."""
     fmt = fmt.lower()
     if fmt not in {"jsonl", "txt", "zip"}:
         typer.echo(f"Unsupported format: {fmt}", err=True)
         raise typer.Exit(code=1)
+    if hunter_mode:
+        verified_only = True
+        proof_required = True
+        if limit is None:
+            limit = 50
     manager = JobManager()
     record = _load_job_or_exit(manager, job_id)
     if fmt == "jsonl":
-        payload = record.paths.results_jsonl.read_text(encoding="utf-8")
-        typer.echo(redact(payload) or payload)
+        from recon_cli.utils.jsonl import read_jsonl
+        from recon_cli.utils.reporting import filter_findings, is_finding, rank_findings
+
+        if verified_only or proof_required or limit is not None:
+            entries = [entry for entry in read_jsonl(record.paths.results_jsonl) if is_finding(entry)]
+            filtered = filter_findings(entries, verified_only=verified_only, proof_required=proof_required)
+            if limit is not None:
+                filtered = rank_findings(filtered, limit=limit)
+            payload = "\n".join(json.dumps(item, separators=(",", ":"), ensure_ascii=True) for item in filtered) + "\n"
+            typer.echo(redact(payload) or payload)
+        else:
+            payload = record.paths.results_jsonl.read_text(encoding="utf-8")
+            typer.echo(redact(payload) or payload)
     elif fmt == "txt":
+        if verified_only or proof_required or hunter_mode or limit is not None:
+            typer.echo("verified-only/proof-required filters are only supported for jsonl exports", err=True)
+            raise typer.Exit(code=2)
         payload = record.paths.results_txt.read_text(encoding="utf-8")
         typer.echo(redact(payload) or payload)
     else:
+        if verified_only or proof_required or hunter_mode or limit is not None:
+            typer.echo("verified-only/proof-required filters are only supported for jsonl exports", err=True)
+            raise typer.Exit(code=2)
         import shutil
 
         archive_path = config.RECON_HOME / f"{job_id}.zip"
@@ -787,7 +945,13 @@ def export(job_id: str, fmt: str = typer.Option("jsonl", "--format", case_sensit
 
 
 @app.command()
-def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html")) -> None:
+def report(
+    job_id: str,
+    fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html"),
+    verified_only: bool = typer.Option(False, "--verified-only", help="Include only verified findings (html only)"),
+    proof_required: bool = typer.Option(False, "--proof-required", help="Include only findings with proof (html only)"),
+    hunter_mode: bool = typer.Option(False, "--hunter-mode", help="Hunter mode report preset (html only)"),
+) -> None:
     """Emit a shareable report for a finished job."""
     fmt = fmt.lower()
     if fmt not in {"txt", "md", "json", "html"}:
@@ -796,17 +960,33 @@ def report(job_id: str, fmt: str = typer.Option("txt", "--format", case_sensitiv
     manager = JobManager()
     record = _load_job_or_exit(manager, job_id)
     if fmt == "txt":
+        if verified_only or proof_required or hunter_mode:
+            typer.echo("verified-only/proof-required filters are only supported for html reports", err=True)
+            raise typer.Exit(code=2)
         typer.echo(record.paths.results_txt.read_text(encoding="utf-8"))
         return
     if fmt == "md":
+        if verified_only or proof_required or hunter_mode:
+            typer.echo("verified-only/proof-required filters are only supported for html reports", err=True)
+            raise typer.Exit(code=2)
         content = record.paths.results_txt.read_text(encoding="utf-8")
         md_lines = ["# recon-cli report", f"Job: {job_id}", "", "```", content.strip(), "```"]
         typer.echo("\n".join(md_lines))
         return
     if fmt == "html":
         from recon_cli.utils.reporter import generate_html_report
+        from recon_cli.utils.reporter import ReportConfig
+
         output_path = record.paths.root / "report.html"
-        generate_html_report(record.paths.root, output_path)
+        if hunter_mode:
+            verified_only = True
+            proof_required = True
+        report_config = ReportConfig(
+            verified_only=verified_only,
+            proof_required=proof_required,
+            hunter_mode=hunter_mode,
+        )
+        generate_html_report(record.paths.root, output_path, report_config)
         typer.secho(f"✅ HTML report generated: {output_path}", fg=typer.colors.GREEN)
         return
     payload = {
@@ -1205,6 +1385,8 @@ def generate_report(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
     executive: bool = typer.Option(False, "--executive", "-e", help="Generate executive summary only"),
     title: Optional[str] = typer.Option(None, "--title", "-t", help="Custom report title"),
+    verified_only: bool = typer.Option(False, "--verified-only", help="Include only verified findings in the report"),
+    proof_required: bool = typer.Option(False, "--proof-required", help="Include only findings with proof in the report"),
 ) -> None:
     """Generate a report for a completed job."""
     try:
@@ -1231,10 +1413,13 @@ def generate_report(
         # Load results
         if record.paths.results_jsonl.exists():
             from recon_cli.utils.jsonl import read_jsonl
-            from recon_cli.utils.reporting import categorize_results
+            from recon_cli.utils.reporting import categorize_results, filter_findings
             categorized = categorize_results(read_jsonl(record.paths.results_jsonl), include_secret_in_findings=True)
             job_data["hosts"].extend(categorized["hosts"])
-            job_data["findings"].extend(categorized["findings"])
+            findings = categorized["findings"]
+            if verified_only or proof_required:
+                findings = filter_findings(findings, verified_only=verified_only, proof_required=proof_required)
+            job_data["findings"].extend(findings)
         
         if executive:
             # Executive summary only

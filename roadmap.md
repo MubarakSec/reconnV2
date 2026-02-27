@@ -3,9 +3,9 @@
 ## Phase 1: Noise Reduction and Signal Quality
 - [ ] Add global deduplication across stages (host, path, param, vuln fingerprint).
 - [ ] Add confidence scoring per finding (`low`, `medium`, `high`, `verified`).
-- [ ] Add `--verified-only` output mode.
-- [ ] Add `--proof-required` mode to suppress unverified high-risk claims.
-- [ ] Add result quality metrics (noise ratio, duplicate ratio, verified ratio).
+- [x] Add `--verified-only` output mode.
+- [x] Add `--proof-required` mode to suppress unverified high-risk claims.
+- [x] Add result quality metrics (noise ratio, duplicate ratio, verified ratio).
 - [ ] Add tests for dedupe collisions and confidence classification edge cases.
 - [ ] **Done when:** repeated runs produce stable, low-noise findings with measurable improvement.
 
@@ -47,9 +47,9 @@
 - [ ] **Done when:** scans reveal deeper, exploitable paths instead of just broad asset lists.
 
 ## Phase 6: Hunter Mode Reporting
-- [ ] Add `hunter-mode` report preset (verified-only, high signal, PoC-focused).
-- [ ] Output “Top 10 Actionable Bugs” with proof links and rerun commands.
-- [ ] Add one-click rerun command per finding (stage-scoped replay).
+- [x] Add `hunter-mode` report preset (verified-only, high signal, PoC-focused).
+- [x] Output “Top 10 Actionable Bugs” with proof links and rerun commands.
+- [x] Add one-click rerun command per finding (stage-scoped replay).
 - [ ] Add concise submission-ready summaries per finding.
 - [ ] Add report sections for duplicates/out-of-scope filtering hints.
 - [ ] Add end-to-end tests for hunter-mode report generation.
@@ -62,6 +62,12 @@
 - [ ] Add safe-failure behavior (partial results + clear error taxonomy).
 - [ ] Add dependency health checks in `doctor` for all critical scanners/modules.
 - [ ] Add CI gates: quality thresholds + regression suites for false positives.
+
+## Operational Reliability and Job Control
+- [x] Add `recon.sh` support for rerunning a job by ID.
+- [x] Define rerun behavior (resume from failing stage vs. full restart) and implement it.
+- [x] Expose last-failing stage and log path in CLI output for quicker triage.
+- [x] Add `doctor` checks for `dnspython`, `interactsh-client`, and `playwright`.
 
 ## Execution Plan
 - [ ] Week 1: Phase 1 + initial metrics dashboard.

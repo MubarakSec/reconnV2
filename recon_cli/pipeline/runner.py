@@ -313,11 +313,16 @@ class PipelineRunner:
         summary.generate_summary(context)
 
 
-def run_pipeline(record, manager: JobManager, force: bool = False) -> None:
+def run_pipeline(
+    record,
+    manager: JobManager,
+    force: bool = False,
+    stages: Optional[Sequence[str]] = None,
+) -> None:
     context = PipelineContext(record=record, manager=manager, force=force)
     plugin_stages = plugins_module.load_stage_plugins(logger=context.logger)
     runner = PipelineRunner(list(PIPELINE_STAGES) + plugin_stages)
-    runner.run(context)
+    runner.run(context, stages=stages)
     if os.environ.get("RECON_METRICS", "0") not in {"0", "false", "False"}:
         stats = {
             "job_id": record.spec.job_id,

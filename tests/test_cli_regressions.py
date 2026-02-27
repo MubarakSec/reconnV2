@@ -9,6 +9,8 @@ from typer.testing import CliRunner
 
 import recon_cli.cli as cli
 import recon_cli.completions as completions
+from recon_cli import config
+from recon_cli.jobs.manager import JobManager
 
 
 def test_schema_command_outputs_json():
@@ -114,3 +116,153 @@ def test_doctor_fix_deps_attempts_installs(monkeypatch):
     assert result.exit_code == 0
     assert "== Dependency Fix Attempts ==" in result.stdout
     assert any(cmd[:4] == [sys.executable, "-m", "pip", "install"] for cmd in calls)
+
+
+def _configure_test_home(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(config, "RECON_HOME", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr(config, "JOBS_ROOT", tmp_path / "jobs")
+    monkeypatch.setattr(config, "QUEUED_JOBS", config.JOBS_ROOT / "queued")
+    monkeypatch.setattr(config, "RUNNING_JOBS", config.JOBS_ROOT / "running")
+    monkeypatch.setattr(config, "FINISHED_JOBS", config.JOBS_ROOT / "finished")
+    monkeypatch.setattr(config, "FAILED_JOBS", config.JOBS_ROOT / "failed")
+    monkeypatch.setattr(config, "ARCHIVE_ROOT", tmp_path / "archive")
+    config.ensure_base_directories(force=True)
+
+
+def test_export_hunter_mode_filters_and_limits(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    results = [
+        {
+            "type": "finding",
+            "title": "verified-high",
+            "tags": ["ssrf:confirmed"],
+            "score": 90,
+            "severity": "high",
+        },
+        {
+            "type": "finding",
+            "title": "verified-low",
+            "tags": ["redirect:confirmed"],
+            "score": 50,
+            "severity": "low",
+        },
+        {
+            "type": "finding",
+            "title": "unverified",
+            "score": 99,
+            "severity": "high",
+        },
+    ]
+    record.paths.results_jsonl.write_text(
+        "\n".join(json.dumps(item) for item in results) + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        ["export", record.spec.job_id, "--format", "jsonl", "--hunter-mode", "--limit", "1"],
+    )
+    assert result.exit_code == 0
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["title"] == "verified-high"
+
+
+def test_rerun_restart_clears_checkpoints_and_results(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    job_id = record.spec.job_id
+
+    from recon_cli.jobs.lifecycle import JobLifecycle
+
+    lifecycle = JobLifecycle(manager)
+    lifecycle.move_to_failed(job_id)
+    record = manager.load_job(job_id)
+    record.metadata.status = "failed"
+    record.metadata.stage = "dns"
+    record.metadata.checkpoints = {"dns": "2024-01-01T00:00:00Z"}
+    manager.update_metadata(record)
+
+    record.paths.results_jsonl.write_text("{\"type\":\"finding\"}\n", encoding="utf-8")
+    record.paths.results_txt.write_text("old\n", encoding="utf-8")
+    record.paths.trimmed_results_jsonl.write_text("{\"type\":\"finding\"}\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "run_pipeline", lambda *_args, **_kwargs: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["rerun", job_id, "--restart"])
+    assert result.exit_code == 0
+
+    record = manager.load_job(job_id)
+    assert record.metadata.status == "finished"
+    assert record.metadata.checkpoints == {}
+    assert record.paths.results_jsonl.read_text(encoding="utf-8") == ""
+    assert record.paths.results_txt.read_text(encoding="utf-8") == ""
+    assert record.paths.trimmed_results_jsonl.read_text(encoding="utf-8") == ""
+
+
+def test_rerun_stages_replays_selected_stage(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    job_id = record.spec.job_id
+
+    from recon_cli.jobs.lifecycle import JobLifecycle
+
+    lifecycle = JobLifecycle(manager)
+    lifecycle.move_to_failed(job_id)
+
+    called = {}
+
+    def _fake_run_pipeline(run_record, run_manager, force=False, stages=None):
+        called["job_id"] = run_record.spec.job_id
+        called["force"] = force
+        called["stages"] = stages
+
+    monkeypatch.setattr(cli, "run_pipeline", _fake_run_pipeline)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["rerun", job_id, "--stages", "vuln_scan"])
+    assert result.exit_code == 0
+    assert called["job_id"] == job_id
+    assert called["force"] is True
+    assert called["stages"] == ["vuln_scan"]
+
+
+def test_rerun_rejects_restart_with_stages(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["rerun", record.spec.job_id, "--restart", "--stages", "vuln_scan"])
+    assert result.exit_code == 2
+    assert "--restart cannot be combined with --stages" in result.output
+
+
+def test_status_includes_last_failed_stage_and_log_path(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    record.metadata.status = "failed"
+    record.metadata.stage = "http_probe"
+    record.metadata.stats = {
+        "stage_progress": [
+            {"stage": "dns", "status": "completed"},
+            {"stage": "http_probe", "status": "failed", "error": "timeout"},
+        ]
+    }
+    manager.update_metadata(record)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["status", record.spec.job_id])
+    assert result.exit_code == 0
+    assert "last_failed_stage" in result.stdout
+    assert "http_probe" in result.stdout
+    assert "log_path" in result.stdout

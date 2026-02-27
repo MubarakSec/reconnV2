@@ -6,6 +6,7 @@ from pathlib import Path
 from recon_cli.utils.reporter import (
     generate_html_report,
     ReportData,
+    ReportConfig,
 )
 
 
@@ -138,6 +139,98 @@ class TestGenerateHtmlReport:
             content = output_path.read_text()
             assert "vulnerable.example.com" in content
             assert "api.example.com" in content
+
+    def test_html_includes_quality_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            job_dir.mkdir()
+
+            metadata = {
+                "job_id": "test_job",
+                "status": "finished",
+                "stats": {
+                    "quality": {
+                        "noise_ratio": 0.25,
+                        "verified_ratio": 0.5,
+                        "duplicate_ratio": 0.1,
+                    }
+                },
+            }
+            (job_dir / "metadata.json").write_text(json.dumps(metadata))
+            (job_dir / "results.jsonl").write_text("")
+
+            output_path = Path(tmpdir) / "report.html"
+            config = ReportConfig(language="en", include_quality=True)
+            generate_html_report(job_dir, output_path, config)
+
+            content = output_path.read_text()
+            assert "Verified ratio" in content
+            assert "Noise ratio" in content
+            assert "Duplicate ratio" in content
+
+    def test_html_verified_only_filters_findings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            job_dir.mkdir()
+
+            (job_dir / "metadata.json").write_text(json.dumps({
+                "job_id": "test_job",
+                "status": "finished",
+                "stats": {}
+            }))
+
+            results = [
+                {"type": "finding", "title": "confirmed-issue", "tags": ["ssrf:confirmed"], "severity": "high"},
+                {"type": "finding", "title": "unconfirmed-issue", "severity": "high"},
+            ]
+            with (job_dir / "results.jsonl").open("w") as f:
+                for r in results:
+                    f.write(json.dumps(r) + "\n")
+
+            output_path = Path(tmpdir) / "report.html"
+            config = ReportConfig(language="en", verified_only=True)
+            generate_html_report(job_dir, output_path, config)
+
+            content = output_path.read_text()
+            assert "confirmed-issue" in content
+            assert "unconfirmed-issue" not in content
+
+    def test_html_hunter_mode_top_findings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            job_dir.mkdir()
+
+            (job_dir / "metadata.json").write_text(json.dumps({
+                "job_id": "test_job",
+                "status": "finished",
+                "stats": {}
+            }))
+
+            results = [
+                {
+                    "type": "finding",
+                    "title": "confirmed-issue",
+                    "tags": ["ssrf:confirmed"],
+                    "severity": "high",
+                    "source": "dalfox",
+                    "repro_cmd": "curl https://example.com?x=1",
+                },
+                {"type": "finding", "title": "unconfirmed-issue", "severity": "high"},
+            ]
+            with (job_dir / "results.jsonl").open("w") as f:
+                for r in results:
+                    f.write(json.dumps(r) + "\n")
+
+            output_path = Path(tmpdir) / "report.html"
+            config = ReportConfig(language="en", hunter_mode=True)
+            generate_html_report(job_dir, output_path, config)
+
+            content = output_path.read_text()
+            assert "Top Actionable Findings" in content
+            assert "confirmed-issue" in content
+            assert "unconfirmed-issue" not in content
+            assert "curl https://example.com" in content
+            assert "recon-cli rerun test_job --stages vuln_scan --keep-results" in content
 
     def test_handles_arabic_content(self):
         """Handles Arabic text in results."""

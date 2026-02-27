@@ -26,6 +26,46 @@ SECRET_TYPES = {
     "credential",
 }
 
+FINDING_STAGE_BY_SOURCE = {
+    "dalfox": "vuln_scan",
+    "sqlmap": "vuln_scan",
+    "waf-probe": "waf_probe",
+    "security-headers": "security_headers",
+    "tls-hygiene": "tls_hygiene",
+    "takeover-check": "takeover_check",
+    "upload-probe": "upload_probe",
+    "secrets-static": "secrets_detection",
+    "extended-validation": "extended_validation",
+    "graphql-exploit": "graphql_exploit",
+    "auth-matrix": "auth_matrix",
+    "idor-stage": "idor_probe",
+    "cloud-discovery": "cloud_asset_discovery",
+    "cms-scan": "cms_scan",
+    "nmap": "nmap_scan",
+    "nmap-udp": "nmap_scan",
+    "verify-findings": "verify_findings",
+}
+
+FINDING_STAGE_BY_TYPE = {
+    "xss": "vuln_scan",
+    "sql_injection": "vuln_scan",
+    "waf_detected": "waf_probe",
+    "waf_bypass_possible": "waf_probe",
+    "security_headers": "security_headers",
+    "tls_hygiene": "tls_hygiene",
+    "subdomain_takeover": "takeover_check",
+    "upload_directory_listing": "upload_probe",
+    "exposed_secret": "secrets_detection",
+    "open_redirect": "extended_validation",
+    "lfi": "extended_validation",
+    "ssrf": "extended_validation",
+    "xxe": "extended_validation",
+    "graphql_authz": "graphql_exploit",
+    "auth_matrix_issue": "auth_matrix",
+    "cloud_asset_public": "cloud_asset_discovery",
+    "cms": "cms_scan",
+}
+
 
 def resolve_severity(entry: Dict[str, object]) -> str:
     severity = str(entry.get("severity") or "").lower()
@@ -69,6 +109,135 @@ def resolve_finding_type(entry: Dict[str, object]) -> str:
     if "secret" in tags or source == "secrets-static":
         return "exposed_secret"
     return str(raw_type)
+
+
+def resolve_confidence_label(entry: Dict[str, object]) -> str:
+    label = entry.get("confidence_label")
+    if isinstance(label, str) and label:
+        return label.lower()
+
+    if entry.get("verified") is True:
+        return "verified"
+
+    tags = entry.get("tags", [])
+    if isinstance(tags, list):
+        for tag in tags:
+            if not isinstance(tag, str):
+                continue
+            lower = tag.lower()
+            if lower == "confirmed" or lower == "verified:live" or lower.endswith(":confirmed"):
+                return "verified"
+
+    source = str(entry.get("source") or "").lower()
+    if source in {"extended-validation", "exploit-validation"}:
+        return "verified"
+
+    confidence = entry.get("confidence")
+    if confidence is not None:
+        try:
+            value = float(confidence)
+        except (TypeError, ValueError):
+            value = None
+        if value is not None:
+            if value >= 0.85:
+                return "high"
+            if value >= 0.6:
+                return "medium"
+            return "low"
+
+    severity = resolve_severity(entry)
+    if severity in {"critical", "high"}:
+        return "high"
+    if severity == "medium":
+        return "medium"
+    return "low"
+
+
+def is_verified_finding(entry: Dict[str, object]) -> bool:
+    return resolve_confidence_label(entry) == "verified"
+
+
+def has_proof(entry: Dict[str, object]) -> bool:
+    if is_verified_finding(entry):
+        return True
+    for key in ("evidence", "proof", "repro_cmd", "request", "response"):
+        if entry.get(key):
+            return True
+    return False
+
+
+def rank_findings(
+    items: Iterable[Dict[str, object]],
+    *,
+    limit: int | None = None,
+) -> List[Dict[str, object]]:
+    priority_order = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+    confidence_order = {"low": 0, "medium": 1, "high": 2, "verified": 3}
+
+    def _priority_rank(value: object) -> int:
+        if not isinstance(value, str):
+            return -1
+        return priority_order.get(value.lower(), -1)
+
+    def _confidence_rank(value: object) -> int:
+        if not isinstance(value, str):
+            return -1
+        return confidence_order.get(value.lower(), -1)
+
+    def _key(entry: Dict[str, object]) -> tuple[int, int, int, int, int]:
+        score = int(entry.get("score", 0) or 0)
+        severity = resolve_severity(entry)
+        priority = str(entry.get("priority") or severity)
+        confidence = resolve_confidence_label(entry)
+        verified = 1 if confidence == "verified" else 0
+        proof = 1 if has_proof(entry) else 0
+        return (
+            verified,
+            proof,
+            _confidence_rank(confidence),
+            score,
+            _priority_rank(priority),
+        )
+
+    ranked = sorted([entry for entry in items if isinstance(entry, dict)], key=_key, reverse=True)
+    if limit is not None:
+        return ranked[:limit]
+    return ranked
+
+
+def filter_findings(
+    items: Iterable[Dict[str, object]],
+    *,
+    verified_only: bool = False,
+    proof_required: bool = False,
+) -> List[Dict[str, object]]:
+    filtered: List[Dict[str, object]] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        if verified_only and not is_verified_finding(entry):
+            continue
+        if proof_required and not has_proof(entry):
+            continue
+        filtered.append(entry)
+    return filtered
+
+
+def infer_replay_stage(entry: Dict[str, object]) -> str | None:
+    source = str(entry.get("source") or "").lower()
+    if source in FINDING_STAGE_BY_SOURCE:
+        return FINDING_STAGE_BY_SOURCE[source]
+    finding_type = str(entry.get("finding_type") or "").lower()
+    if finding_type in FINDING_STAGE_BY_TYPE:
+        return FINDING_STAGE_BY_TYPE[finding_type]
+    return None
+
+
+def build_finding_rerun_command(job_id: str, entry: Dict[str, object]) -> str:
+    stage = infer_replay_stage(entry)
+    if stage:
+        return f"recon-cli rerun {job_id} --stages {stage} --keep-results"
+    return f"recon-cli rerun {job_id} --restart"
 
 
 def is_secret(entry: Dict[str, object]) -> bool:

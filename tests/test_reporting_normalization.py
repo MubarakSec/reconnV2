@@ -21,3 +21,25 @@ def test_is_finding_and_secret():
     assert reporting.is_secret({"finding_type": "exposed_secret"}) is True
     assert reporting.is_secret({"type": "secret"}) is True
     assert reporting.is_secret({"source": "secrets-static"}) is True
+
+
+def test_resolve_confidence_label_and_verified():
+    assert reporting.resolve_confidence_label({"tags": ["confirmed"]}) == "verified"
+    assert reporting.resolve_confidence_label({"tags": ["ssrf:confirmed"]}) == "verified"
+    assert reporting.resolve_confidence_label({"source": "extended-validation"}) == "verified"
+    assert reporting.resolve_confidence_label({"confidence": 0.9}) == "high"
+    assert reporting.resolve_confidence_label({"confidence": 0.7}) == "medium"
+    assert reporting.resolve_confidence_label({"confidence": 0.2}) == "low"
+    assert reporting.resolve_confidence_label({"severity": "high"}) == "high"
+    assert reporting.resolve_confidence_label({"severity": "medium"}) == "medium"
+    assert reporting.is_verified_finding({"tags": ["verified:live"]}) is True
+    assert reporting.is_verified_finding({"severity": "high"}) is False
+
+
+def test_infer_replay_stage_and_rerun_command():
+    assert reporting.infer_replay_stage({"source": "dalfox"}) == "vuln_scan"
+    assert reporting.infer_replay_stage({"finding_type": "open_redirect"}) == "extended_validation"
+    assert reporting.build_finding_rerun_command("job123", {"source": "dalfox"}) == (
+        "recon-cli rerun job123 --stages vuln_scan --keep-results"
+    )
+    assert reporting.build_finding_rerun_command("job123", {"source": "unknown"}) == "recon-cli rerun job123 --restart"

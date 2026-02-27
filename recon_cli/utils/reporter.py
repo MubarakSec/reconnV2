@@ -11,7 +11,15 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 from recon_cli.utils.jsonl import read_jsonl
-from recon_cli.utils.reporting import is_finding, is_secret, resolve_severity
+from recon_cli.utils.reporting import (
+    build_finding_rerun_command,
+    filter_findings,
+    is_finding,
+    is_secret,
+    rank_findings,
+    resolve_confidence_label,
+    resolve_severity,
+)
 
 
 @dataclass
@@ -22,6 +30,11 @@ class ReportConfig:
     include_screenshots: bool = True
     theme: str = "dark"  # dark, light
     language: str = "ar"  # ar, en
+    verified_only: bool = False
+    proof_required: bool = False
+    include_quality: bool = True
+    hunter_mode: bool = False
+    hunter_top: int = 10
 
 
 @dataclass
@@ -87,6 +100,9 @@ def generate_html_report(
         مسار ملف التقرير
     """
     config = config or ReportConfig()
+    if config.hunter_mode:
+        config.verified_only = True
+        config.proof_required = True
 
     if not job_dir.exists():
         if output_path is None:
@@ -103,7 +119,14 @@ def generate_html_report(
     results = list(read_jsonl(results_path)) if results_path.exists() else []
     
     # تحليل النتائج
-    stats = _analyze_results(results)
+    stats = _analyze_results(
+        results,
+        verified_only=config.verified_only,
+        proof_required=config.proof_required,
+    )
+    stats["quality"] = _compute_quality_stats(results, metadata)
+    if config.hunter_mode:
+        stats["top_findings"] = rank_findings(stats["findings"], limit=config.hunter_top)
     
     # إنشاء HTML
     html = _generate_html(spec, metadata, results, stats, config)
@@ -117,12 +140,16 @@ def generate_html_report(
     return output_path
 
 
-def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
+def _analyze_results(
+    results: List[Dict],
+    *,
+    verified_only: bool = False,
+    proof_required: bool = False,
+) -> Dict[str, Any]:
     """تحليل النتائج وإنشاء إحصائيات"""
     stats = {
         "total": len(results),
         "by_type": {},
-        "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
         "by_source": {},
         "hostnames": set(),
         "urls": set(),
@@ -130,6 +157,7 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         "urls_list": [],
         "secrets": [],
         "findings": [],
+        "findings_all": [],
         "screenshots": [],
         "services": [],
         "auth_forms": [],
@@ -153,15 +181,11 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         if "url" in result:
             stats["urls"].add(result["url"])
         
-        severity = resolve_severity(result)
-        if severity in stats["by_severity"]:
-            stats["by_severity"][severity] += 1
-        
         if is_secret(result):
             stats["secrets"].append(result)
 
         if is_finding(result):
-            stats["findings"].append(result)
+            stats["findings_all"].append(result)
 
         if result_type == "screenshot":
             stats["screenshots"].append(result)
@@ -180,6 +204,26 @@ def _analyze_results(results: List[Dict]) -> Dict[str, Any]:
         if result_type == "finding" and result.get("source") in {"dalfox", "sqlmap"}:
             stats["vuln_findings"].append(result)
     
+    if verified_only or proof_required:
+        stats["findings"] = filter_findings(
+            stats["findings_all"],
+            verified_only=verified_only,
+            proof_required=proof_required,
+        )
+        stats["waf_findings"] = filter_findings(
+            stats["waf_findings"],
+            verified_only=verified_only,
+            proof_required=proof_required,
+        )
+        stats["vuln_findings"] = filter_findings(
+            stats["vuln_findings"],
+            verified_only=verified_only,
+            proof_required=proof_required,
+        )
+    else:
+        stats["findings"] = list(stats["findings_all"])
+
+    stats["by_severity"] = _severity_counts(stats["findings"])
     stats["hostnames_list"] = sorted(stats["hostnames"])[:50]
     stats["urls_list"] = sorted(stats["urls"])[:50]
     stats["hostnames"] = len(stats["hostnames"])
@@ -244,7 +288,17 @@ def _generate_html(
             "medium": "متوسط",
             "low": "منخفض",
             "info": "معلومات",
+            "quality": "جودة النتائج",
+            "noise_ratio": "نسبة الضوضاء",
+            "verified_ratio": "نسبة التحقق",
+            "duplicate_ratio": "نسبة التكرار",
             "details": "التفاصيل",
+            "top_actionable": "أهم النتائج القابلة للاستغلال",
+            "confidence": "الثقة",
+            "proof": "الدليل",
+            "repro_cmd": "أمر الإعادة",
+            "rerun_cmd": "أمر إعادة التشغيل",
+            "source": "المصدر",
             "generated": "تم إنشاؤه في",
         },
         "en": {
@@ -267,7 +321,17 @@ def _generate_html(
             "medium": "Medium",
             "low": "Low",
             "info": "Info",
+            "quality": "Quality",
+            "noise_ratio": "Noise ratio",
+            "verified_ratio": "Verified ratio",
+            "duplicate_ratio": "Duplicate ratio",
             "details": "Details",
+            "top_actionable": "Top Actionable Findings",
+            "confidence": "Confidence",
+            "proof": "Proof",
+            "repro_cmd": "Repro Command",
+            "rerun_cmd": "Rerun Command",
+            "source": "Source",
             "generated": "Generated at",
         }
     }
@@ -275,6 +339,22 @@ def _generate_html(
     t = translations.get(config.language, translations["en"])
     rtl = 'dir="rtl"' if config.language == "ar" else ""
     
+    job_id = str(metadata.get("job_id") or spec.get("job_id") or "")
+    quality = stats.get("quality") or {}
+    noise_ratio = _format_pct(quality.get("noise_ratio"))
+    verified_ratio = _format_pct(quality.get("verified_ratio"))
+    duplicate_ratio = _format_pct(quality.get("duplicate_ratio"))
+    quality_card = ""
+    if config.include_quality:
+        quality_card = f'''
+            <div class="card" style="text-align: center;">
+                <div class="stat-number">{verified_ratio}</div>
+                <div class="stat-label">{t["verified_ratio"]}</div>
+                <div class="stat-label">{t["noise_ratio"]}: {noise_ratio}</div>
+                <div class="stat-label">{t["duplicate_ratio"]}: {duplicate_ratio}</div>
+            </div>
+        '''
+
     html = f'''<!DOCTYPE html>
 <html lang="{config.language}" {rtl}>
 <head>
@@ -480,7 +560,7 @@ def _generate_html(
                 <strong>{t["target"]}:</strong> {spec.get("target", "N/A")} |
                 <strong>{t["profile"]}:</strong> {spec.get("profile", "N/A")} |
                 <strong>{t["status"]}:</strong> {metadata.get("status", "N/A")} |
-                <strong>ID:</strong> {metadata.get("job_id", spec.get("job_id", "N/A"))}
+                <strong>ID:</strong> {job_id or "N/A"}
             </div>
         </div>
         
@@ -502,6 +582,7 @@ def _generate_html(
                 <div class="stat-number">{len(stats["findings"])}</div>
                 <div class="stat-label">{t["findings"]}</div>
             </div>
+            {quality_card}
         </div>
         
         <!-- الخطورة -->
@@ -542,7 +623,10 @@ def _generate_html(
         
         <!-- الأسرار -->
         {_generate_secrets_section(stats["secrets"], t, colors) if stats["secrets"] else ""}
-        
+
+        <!-- Hunter Mode -->
+        {_generate_hunter_section(stats.get("top_findings", []), t, colors, job_id) if config.hunter_mode else ""}
+
         <!-- الاكتشافات -->
         {_generate_findings_section(stats["findings"], t, colors) if stats["findings"] else ""}
 
@@ -599,6 +683,54 @@ def _generate_severity_chart(severity_data: Dict, t: Dict) -> str:
     return "".join(items)
 
 
+def _format_pct(value: object) -> str:
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _severity_counts(findings: List[Dict]) -> Dict[str, int]:
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for entry in findings:
+        severity = resolve_severity(entry)
+        if severity in counts:
+            counts[severity] += 1
+    return counts
+
+
+def _compute_quality_stats(results: List[Dict], metadata: Dict) -> Dict[str, object]:
+    stats = metadata.get("stats", {}) if isinstance(metadata, dict) else {}
+    quality = stats.get("quality") if isinstance(stats.get("quality"), dict) else None
+    if quality:
+        return quality
+    total_urls = 0
+    noise_count = 0
+    findings_total = 0
+    verified_count = 0
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "url":
+            total_urls += 1
+            tags = entry.get("tags", [])
+            if isinstance(tags, list) and "noise" in tags:
+                noise_count += 1
+        if is_finding(entry):
+            findings_total += 1
+            if resolve_confidence_label(entry) == "verified":
+                verified_count += 1
+    return {
+        "noise_ratio": (noise_count / total_urls) if total_urls else 0.0,
+        "verified_ratio": (verified_count / findings_total) if findings_total else 0.0,
+        "duplicate_ratio": None,
+        "noise": noise_count,
+        "urls": total_urls,
+        "verified_findings": verified_count,
+        "findings": findings_total,
+    }
+
+
 def _generate_secrets_section(secrets: List[Dict], t: Dict, colors: Dict) -> str:
     """إنشاء قسم الأسرار"""
     if not secrets:
@@ -621,6 +753,65 @@ def _generate_secrets_section(secrets: List[Dict], t: Dict, colors: Dict) -> str
                 <tr><th>النوع</th><th>المصدر</th><th>الخطورة</th></tr>
                 {"".join(rows)}
             </table>
+        </div>
+    '''
+
+
+def _truncate_text(value: object, limit: int = 220) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        return f"{text[: max(0, limit - 3)]}..."
+    return text
+
+
+def _extract_proof(entry: Dict[str, object], t: Dict[str, str]) -> tuple[str, str]:
+    repro = entry.get("repro_cmd")
+    if repro:
+        return t["repro_cmd"], _truncate_text(repro)
+    for key in ("proof", "evidence", "request", "response"):
+        value = entry.get(key)
+        if value:
+            return t["proof"], _truncate_text(value)
+    return "", ""
+
+
+def _generate_hunter_section(findings: List[Dict], t: Dict, colors: Dict, job_id: str) -> str:
+    if not findings:
+        return ""
+    items = []
+    for finding in findings:
+        severity = resolve_severity(finding)
+        confidence = resolve_confidence_label(finding)
+        title = finding.get("title") or finding.get("name") or finding.get("description") or "Finding"
+        url = finding.get("url") or finding.get("hostname") or finding.get("host") or ""
+        source = finding.get("source") or ""
+        proof_label, proof_value = _extract_proof(finding, t)
+        rerun_cmd = build_finding_rerun_command(job_id, finding) if job_id else ""
+        items.append(f'''
+            <div class="finding-item">
+                <div class="finding-title">
+                    <span class="severity-badge severity-{severity}">{severity.upper()}</span>
+                    {title}
+                </div>
+                <div><strong>{t["confidence"]}:</strong> {confidence}</div>
+                {f'<div><strong>{t["source"]}:</strong> {source}</div>' if source else ''}
+                {f'<div><strong>URL:</strong> {url}</div>' if url else ''}
+                {f'<div><strong>{proof_label}:</strong> <code>{proof_value}</code></div>' if proof_value else ''}
+                {f'<div><strong>{t["rerun_cmd"]}:</strong> <code>{rerun_cmd}</code></div>' if rerun_cmd else ''}
+            </div>
+        ''')
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧭 {t["top_actionable"]} ({len(findings)})</h3>
+            <div class="findings-list">
+                {"".join(items)}
+            </div>
         </div>
     '''
 
