@@ -29,7 +29,6 @@
 reconnV2/
 ├── 📜 install.sh          # سكربت التثبيت التلقائي
 ├── 📜 recon.sh             # واجهة تفاعلية بالعربية
-├── 📜 quick-scan.sh        # فحص سريع بأمر واحد
 ├── 📜 wizard.py            # معالج تفاعلي بواجهة ملونة
 ├── 📜 cheatsheet.sh        # مرجع سريع للأوامر
 ├── 📜 Makefile             # أوامر Make مختصرة
@@ -141,7 +140,7 @@ git clone https://github.com/your-repo/reconnV2.git
 cd reconnV2
 
 # تشغيل سكربت التثبيت
-chmod +x install.sh recon.sh quick-scan.sh cheatsheet.sh
+chmod +x install.sh recon.sh cheatsheet.sh
 ./install.sh
 ```
 
@@ -208,16 +207,21 @@ make docker-down        # إيقاف
 ```
 تفتح قائمة تفاعلية سهلة الاستخدام:
 ```
-╔═══════════════════════════════════════╗
-║          القائمة الرئيسية             ║
-╠═══════════════════════════════════════╣
-║ [1] 🔍 فحص سريع (Quick Scan)          ║
-║ [2] 🎯 فحص سلبي (Passive Scan)        ║
-║ [3] 🚀 فحص شامل (Full Scan)           ║
-║ [4] 🔬 فحص عميق (Deep Scan)           ║
-║ [5] 🐛 فحص Bug Bounty                 ║
-║ ...                                   ║
-╚═══════════════════════════════════════╝
+==================== Scan Profiles ====================
+[1] Quick
+[2] Passive
+[3] Full
+[4] Deep
+[5] API-only
+[6] Secure
+[7] Fuzz-only
+[8] WordPress (full + wpscan)
+[9] Select profile manually (includes ultra-deep)
+==================== Job Control ======================
+[10] List jobs / [11] Status / [12] Tail logs
+[13] Rerun / [14] Requeue / [15] Cancel / [16] Verify
+==================== Output / Reports =================
+[17] Export / [18] Report / [19] PDF
 ```
 
 ### 2️⃣ المعالج التفاعلي (Python)
@@ -229,14 +233,14 @@ python wizard.py
 
 ### 3️⃣ الفحص السريع
 ```bash
-# فحص بسيط
-./quick-scan.sh target.com
+# فحص سريع (preset)
+recon scan target.com --profile quick --inline
 
-# فحص مع خيارات
-./quick-scan.sh target.com -p full -s nuclei
+# فحص شامل
+recon scan target.com --profile full --inline
 
-# فحص Bug Bounty
-./quick-scan.sh target.com -p bugbounty -s nuclei -a js-secrets
+# فحص مكثف جدًا
+recon scan target.com --profile ultra-deep --scanner nuclei --active-module js-secrets --inline
 ```
 
 ### 4️⃣ أوامر Make
@@ -295,10 +299,10 @@ recon-cli scan --targets-file targets.txt --profile deep --inline
 | `full` | فحص نشط وشامل | الفحص الكامل |
 | `quick` | فحص سريع وخفيف | نظرة سريعة |
 | `deep` | فحص عميق ومكثف | تحليل شامل |
-| `bugbounty` | مُحسَّن لصيد الثغرات | Bug Bounty |
-| `stealth` | فحص خفي وبطيء | تجنب الاكتشاف |
+| `ultra-deep` | فحص شديد العمق ومكثف الموارد | البرامج عالية القيمة |
 | `api-only` | APIs و GraphQL فقط | فحص APIs |
-| `wordpress` | مُحسَّن لـ WordPress | مواقع WP |
+| `secure` | فحص محافظ وحدود أكثر أمانًا | بيئات حساسة |
+| `fuzz-only` | تركيز على الفازينغ فقط | اختبار endpoints سريعًا |
 
 ---
 
@@ -334,9 +338,9 @@ recon-cli scan target.com --active-module js-secrets --inline
 recon-cli scan target.com --profile full --scanner nuclei --inline
 ```
 
-### فحص WordPress
+### فحص WordPress (WPScan)
 ```bash
-recon-cli scan wordpress-site.com --profile wordpress --scanner wpscan --inline
+recon-cli scan wordpress-site.com --profile full --scanner wpscan --inline
 ```
 
 ### فحص قائمة أهداف
@@ -352,19 +356,19 @@ EOF
 recon-cli scan --targets-file targets.txt --profile deep --inline
 ```
 
-### فحص Bug Bounty الكامل
+### فحص Bug Bounty مكثف
 ```bash
-recon-cli scan bugbounty-target.com \
-    --profile bugbounty \
+recon-cli scan high-value-target.com \
+    --profile ultra-deep \
     --scanner nuclei \
     --active-module js-secrets \
     --active-module backup \
     --inline
 ```
 
-### فحص خفي (Stealth)
+### فحص API فقط
 ```bash
-recon-cli scan sensitive-target.com --profile stealth --inline
+recon-cli scan api.target.com --profile api-only --inline
 ```
 
 ---
@@ -447,7 +451,7 @@ import requests
 # بدء فحص
 response = requests.post(
     "http://localhost:8000/api/scan",
-    json={"target": "example.com", "profile": "bugbounty"}
+    json={"target": "example.com", "profile": "ultra-deep"}
 )
 job_id = response.json()["job_id"]
 
@@ -466,14 +470,11 @@ print(results.json())
 # تقرير PDF
 recon pdf <job_id>
 
-# تقرير بالعربية (RTL)
-recon pdf <job_id> --rtl
+# حفظ بمسار مخصص
+recon pdf <job_id> --output report.pdf
 
-# مع logo مخصص
-recon pdf <job_id> --logo logo.png
-
-# تقرير تنفيذي فقط
-recon pdf <job_id> --executive-only
+# عنوان مخصص
+recon pdf <job_id> --title "Security Assessment Report"
 ```
 
 ---
@@ -594,7 +595,7 @@ jobs:
 ```bash
 # عرض المهام
 recon-cli list-jobs
-recon-cli list-jobs --status running
+recon-cli list-jobs running
 
 # عرض حالة مهمة
 recon-cli status example.com_20260201_143052_a1b2
@@ -606,7 +607,7 @@ recon-cli tail-logs example.com_20260201_143052_a1b2
 recon-cli requeue example.com_20260201_143052_a1b2
 
 # تصدير النتائج
-recon-cli export example.com_20260201_143052_a1b2 --format json
+recon-cli export example.com_20260201_143052_a1b2 --format jsonl
 recon-cli export example.com_20260201_143052_a1b2 --format txt
 
 # إنشاء تقرير
@@ -687,13 +688,15 @@ docker-compose run recon list-jobs
       "enable_secrets": true
     }
   },
-  "bugbounty": {
+  "ultra-deep": {
     "base_profile": "full",
-    "description": "مُحسَّن لصيد الثغرات",
+    "description": "أقصى عمق متاح لصيد الثغرات",
     "runtime": {
       "enable_fuzz": true,
       "enable_runtime_crawl": true,
-      "enable_screenshots": true
+      "enable_screenshots": true,
+      "enable_extended_validation": true,
+      "runtime_crawl_max_urls": 120
     }
   }
 }
@@ -726,10 +729,10 @@ docker-compose run recon list-jobs
 
 ```bash
 # اكتشاف سريع للنطاقات الفرعية
-recon-cli scan target.com -p passive --inline 2>/dev/null | grep hostname
+recon-cli scan target.com --profile passive --inline 2>/dev/null | grep hostname
 
 # فحص وعرض النتائج مباشرة
-JOB=$(recon-cli scan target.com -p quick --inline 2>&1 | grep -oP 'Job \K\S+')
+JOB=$(recon-cli scan target.com --profile quick --inline 2>&1 | grep -oP 'Job \K\S+')
 cat jobs/finished/$JOB/results.txt
 
 # عرض آخر نتائج
