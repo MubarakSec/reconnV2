@@ -159,3 +159,23 @@ def test_rank_findings_prioritizes_higher_risk():
     ]
     ranked = reporting.rank_findings(items)
     assert ranked[0]["title"] == "high-risk"
+
+
+def test_compute_risk_score_boosts_recent_findings():
+    recent = {
+        "type": "finding",
+        "finding_type": "xss",
+        "source": "dalfox",
+        "url": "https://example.com/recent",
+        "severity": "medium",
+        "timestamp": "2026-02-26T12:00:00Z",
+    }
+    old = {
+        "type": "finding",
+        "finding_type": "xss",
+        "source": "dalfox",
+        "url": "https://example.com/old",
+        "severity": "medium",
+        "timestamp": "2025-01-01T12:00:00Z",
+    }
+    assert reporting.compute_risk_score(recent) > reporting.compute_risk_score(old)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List
 from urllib.parse import urlparse
 
@@ -122,6 +123,27 @@ def _is_private_host(host: str) -> bool:
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
+def _recency_score(entry: Dict[str, object]) -> int:
+    raw_value = entry.get("timestamp") or entry.get("detected_at") or entry.get("created_at")
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return 0
+    value = raw_value.strip()
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        observed = datetime.fromisoformat(value)
+    except ValueError:
+        return 0
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).days
+    if age_days <= 7:
+        return 8
+    if age_days <= 30:
+        return 4
+    return 0
+
+
 def compute_risk_score(entry: Dict[str, object]) -> int:
     severity = resolve_severity(entry)
     severity_base = {
@@ -162,8 +184,9 @@ def compute_risk_score(entry: Dict[str, object]) -> int:
     business_terms = {"auth", "admin", "api", "payment", "account", "billing"}
     business_hits = sum(1 for term in business_terms if term in context_blob)
     business_score = min(15, business_hits * 4)
+    recency = _recency_score(entry)
 
-    total = severity_base + exposure_score + exploitability_score + business_score
+    total = severity_base + exposure_score + exploitability_score + business_score + recency
     return int(max(0, min(100, total)))
 
 

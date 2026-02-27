@@ -32,7 +32,7 @@
 - [x] Add risk score formula: severity + exposure + exploitability + business context.
 - [x] Prioritize sensitive asset types (`auth`, `admin`, `api`, `payment`, `account`).
 - [x] Add internet exposure weighting (publicly reachable > internal-only).
-- [ ] Add recency/novelty weighting to surface newly introduced risks.
+- [x] Add recency/novelty weighting to surface newly introduced risks.
 - [ ] Add “top targets first” queue mode for high-value attack surface.
 - [x] Add tests that validate ranking determinism and priority ordering.
 - [ ] **Done when:** top-ranked issues consistently match what a skilled hunter would triage first.
