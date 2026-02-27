@@ -230,6 +230,8 @@ class TestGenerateHtmlReport:
             assert "confirmed-issue" in content
             assert "unconfirmed-issue" not in content
             assert "curl https://example.com" in content
+            assert "Submission Summary" in content
+            assert "confidence=verified" in content
             assert "recon-cli rerun test_job --stages vuln_scan --keep-results" in content
 
     def test_handles_arabic_content(self):

@@ -50,7 +50,7 @@
 - [x] Add `hunter-mode` report preset (verified-only, high signal, PoC-focused).
 - [x] Output “Top 10 Actionable Bugs” with proof links and rerun commands.
 - [x] Add one-click rerun command per finding (stage-scoped replay).
-- [ ] Add concise submission-ready summaries per finding.
+- [x] Add concise submission-ready summaries per finding.
 - [ ] Add report sections for duplicates/out-of-scope filtering hints.
 - [ ] Add end-to-end tests for hunter-mode report generation.
 - [ ] **Done when:** output is directly usable for triage and bug bounty submission workflow.

@@ -43,3 +43,20 @@ def test_infer_replay_stage_and_rerun_command():
         "recon-cli rerun job123 --stages vuln_scan --keep-results"
     )
     assert reporting.build_finding_rerun_command("job123", {"source": "unknown"}) == "recon-cli rerun job123 --restart"
+
+
+def test_build_submission_summary_contains_key_fields():
+    summary = reporting.build_submission_summary(
+        {
+            "title": "SQLi in search",
+            "source": "sqlmap",
+            "finding_type": "sql_injection",
+            "url": "https://example.com/search?q=1",
+            "severity": "critical",
+            "tags": ["confirmed"],
+        }
+    )
+    assert "SQLi in search" in summary
+    assert "CRITICAL" in summary
+    assert "https://example.com/search?q=1" in summary
+    assert "confidence=verified" in summary

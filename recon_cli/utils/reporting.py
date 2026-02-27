@@ -66,6 +66,20 @@ FINDING_STAGE_BY_TYPE = {
     "cms": "cms_scan",
 }
 
+IMPACT_HINTS = {
+    "sql_injection": "can expose or modify backend data",
+    "xss": "may enable account takeover through browser-side script execution",
+    "subdomain_takeover": "can enable hostile content hosting on a trusted domain",
+    "exposed_secret": "can lead to credential abuse and further compromise",
+    "open_redirect": "can support phishing and token theft chains",
+    "lfi": "can expose sensitive files and runtime secrets",
+    "ssrf": "can reach internal services not exposed publicly",
+    "xxe": "can expose local files or internal network resources",
+    "graphql_authz": "can expose unauthorized cross-tenant data",
+    "upload_directory_listing": "can leak uploaded sensitive files",
+    "auth_matrix_issue": "indicates broken authorization boundaries",
+}
+
 
 def resolve_severity(entry: Dict[str, object]) -> str:
     severity = str(entry.get("severity") or "").lower()
@@ -238,6 +252,21 @@ def build_finding_rerun_command(job_id: str, entry: Dict[str, object]) -> str:
     if stage:
         return f"recon-cli rerun {job_id} --stages {stage} --keep-results"
     return f"recon-cli rerun {job_id} --restart"
+
+
+def build_submission_summary(entry: Dict[str, object]) -> str:
+    severity = resolve_severity(entry).upper()
+    finding_type = resolve_finding_type(entry)
+    finding_label = finding_type.replace("_", " ")
+    target = entry.get("url") or entry.get("hostname") or entry.get("host") or "target"
+    confidence = resolve_confidence_label(entry)
+    impact = IMPACT_HINTS.get(finding_type, "can expose additional attack surface and business risk")
+    title = str(entry.get("title") or entry.get("name") or "").strip()
+    title_fragment = f"{title}: " if title else ""
+    return (
+        f"{title_fragment}{severity} {finding_label} on {target}; "
+        f"confidence={confidence}; impact={impact}."
+    )
 
 
 def is_secret(entry: Dict[str, object]) -> bool:

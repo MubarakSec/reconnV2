@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.reporting import (
     build_finding_rerun_command,
+    build_submission_summary,
     filter_findings,
     is_finding,
     is_secret,
@@ -299,6 +300,7 @@ def _generate_html(
             "repro_cmd": "أمر الإعادة",
             "rerun_cmd": "أمر إعادة التشغيل",
             "source": "المصدر",
+            "submission_summary": "ملخص جاهز للتبليغ",
             "generated": "تم إنشاؤه في",
         },
         "en": {
@@ -332,6 +334,7 @@ def _generate_html(
             "repro_cmd": "Repro Command",
             "rerun_cmd": "Rerun Command",
             "source": "Source",
+            "submission_summary": "Submission Summary",
             "generated": "Generated at",
         }
     }
@@ -793,6 +796,7 @@ def _generate_hunter_section(findings: List[Dict], t: Dict, colors: Dict, job_id
         source = finding.get("source") or ""
         proof_label, proof_value = _extract_proof(finding, t)
         rerun_cmd = build_finding_rerun_command(job_id, finding) if job_id else ""
+        submission_summary = _truncate_text(build_submission_summary(finding), limit=260)
         items.append(f'''
             <div class="finding-item">
                 <div class="finding-title">
@@ -803,6 +807,7 @@ def _generate_hunter_section(findings: List[Dict], t: Dict, colors: Dict, job_id
                 {f'<div><strong>{t["source"]}:</strong> {source}</div>' if source else ''}
                 {f'<div><strong>URL:</strong> {url}</div>' if url else ''}
                 {f'<div><strong>{proof_label}:</strong> <code>{proof_value}</code></div>' if proof_value else ''}
+                <div><strong>{t["submission_summary"]}:</strong> {submission_summary}</div>
                 {f'<div><strong>{t["rerun_cmd"]}:</strong> <code>{rerun_cmd}</code></div>' if rerun_cmd else ''}
             </div>
         ''')
