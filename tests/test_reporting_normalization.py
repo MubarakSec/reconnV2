@@ -110,3 +110,52 @@ def test_compute_risk_score_prioritizes_verified_public_auth():
         "tags": [],
     }
     assert reporting.compute_risk_score(high_value) > reporting.compute_risk_score(low_value)
+
+
+def test_rank_findings_is_deterministic():
+    items = [
+        {
+            "type": "finding",
+            "title": "a",
+            "finding_type": "sql_injection",
+            "source": "sqlmap",
+            "url": "https://example.com/a",
+            "severity": "high",
+            "tags": ["sqli:confirmed"],
+        },
+        {
+            "type": "finding",
+            "title": "b",
+            "finding_type": "xss",
+            "source": "dalfox",
+            "url": "https://example.com/b",
+            "severity": "medium",
+        },
+    ]
+    first = [entry["title"] for entry in reporting.rank_findings(items)]
+    second = [entry["title"] for entry in reporting.rank_findings(items)]
+    assert first == second
+
+
+def test_rank_findings_prioritizes_higher_risk():
+    items = [
+        {
+            "type": "finding",
+            "title": "low-risk",
+            "finding_type": "xss",
+            "source": "dalfox",
+            "url": "https://10.0.0.5/internal",
+            "severity": "low",
+        },
+        {
+            "type": "finding",
+            "title": "high-risk",
+            "finding_type": "sql_injection",
+            "source": "sqlmap",
+            "url": "https://example.com/api/admin/account?id=1",
+            "severity": "high",
+            "tags": ["sqli:confirmed"],
+        },
+    ]
+    ranked = reporting.rank_findings(items)
+    assert ranked[0]["title"] == "high-risk"

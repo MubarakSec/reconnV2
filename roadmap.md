@@ -34,7 +34,7 @@
 - [x] Add internet exposure weighting (publicly reachable > internal-only).
 - [ ] Add recency/novelty weighting to surface newly introduced risks.
 - [ ] Add “top targets first” queue mode for high-value attack surface.
-- [ ] Add tests that validate ranking determinism and priority ordering.
+- [x] Add tests that validate ranking determinism and priority ordering.
 - [ ] **Done when:** top-ranked issues consistently match what a skilled hunter would triage first.
 
 ## Phase 5: Attack Surface Depth
