@@ -19,7 +19,7 @@
 - [ ] **Done when:** a hunter can reproduce top findings directly from output without extra digging.
 
 ## Phase 3: Vulnerability-Class Validation Stages
-- [ ] Add dedicated SSRF validator (outbound callback + internal target checks).
+- [x] Add dedicated SSRF validator (outbound callback + internal target checks).
 - [ ] Add dedicated IDOR validator (object ownership/access control checks).
 - [ ] Add auth-bypass validator (forced-browse and privilege-boundary checks).
 - [x] Add open-redirect validator (redirect chain and sink confirmation).

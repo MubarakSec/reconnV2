@@ -49,6 +49,7 @@ FINDING_STAGE_BY_SOURCE = {
     "nmap": "nmap_scan",
     "nmap-udp": "nmap_scan",
     "verify-findings": "verify_findings",
+    "ssrf-validator": "ssrf_validator",
     "open-redirect-validator": "open_redirect_validator",
 }
 
