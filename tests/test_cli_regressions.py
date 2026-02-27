@@ -214,7 +214,7 @@ def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):
     assert payload["job_id"] == record.spec.job_id
     assert payload["severity"] == "high"
     assert payload["proof"] == "verified"
-    assert payload["repro_cmd"].startswith("recon-cli rerun")
+    assert payload["repro_cmd"].startswith("python -m recon_cli rerun")
     assert payload["finding_id"].startswith("fnd_")
     assert payload["poc_steps"]
     assert payload["asset_context"]["endpoint"] == "https://example.com/profile"
@@ -411,4 +411,4 @@ def test_report_hunter_mode_generates_actionable_html(tmp_path: Path, monkeypatc
     content = html_path.read_text(encoding="utf-8")
     assert "Top Actionable Findings" in content
     assert "confirmed-sqli" in content
-    assert "recon-cli rerun" in content
+    assert "python -m recon_cli rerun" in content

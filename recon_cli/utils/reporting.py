@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List
 from urllib.parse import parse_qsl, urlparse
@@ -421,11 +422,20 @@ def infer_replay_stage(entry: Dict[str, object]) -> str | None:
     return None
 
 
+def _rerun_command_prefix() -> str:
+    value = str(os.environ.get("RECON_RERUN_CMD") or "").strip()
+    if value:
+        return value
+    # Use module invocation by default because it works even when console scripts are not installed.
+    return "python -m recon_cli"
+
+
 def build_finding_rerun_command(job_id: str, entry: Dict[str, object]) -> str:
     stage = infer_replay_stage(entry)
+    prefix = _rerun_command_prefix()
     if stage:
-        return f"recon-cli rerun {job_id} --stages {stage} --keep-results"
-    return f"recon-cli rerun {job_id} --restart"
+        return f"{prefix} rerun {job_id} --stages {stage} --keep-results"
+    return f"{prefix} rerun {job_id} --restart"
 
 
 def build_submission_summary(entry: Dict[str, object]) -> str:

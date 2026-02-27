@@ -258,7 +258,7 @@ class TestGenerateHtmlReport:
             assert "curl https://example.com" in content
             assert "Submission Summary" in content
             assert "confidence=verified" in content
-            assert "recon-cli rerun test_job --stages vuln_scan --keep-results" in content
+            assert "python -m recon_cli rerun test_job --stages vuln_scan --keep-results" in content
 
     def test_html_hunter_mode_includes_triage_hints(self):
         with tempfile.TemporaryDirectory() as tmpdir:

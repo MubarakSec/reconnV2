@@ -55,9 +55,19 @@ def test_infer_replay_stage_and_rerun_command():
     assert reporting.infer_replay_stage({"source": "secret-validator"}) == "secret_exposure_validator"
     assert reporting.infer_replay_stage({"finding_type": "open_redirect"}) == "extended_validation"
     assert reporting.build_finding_rerun_command("job123", {"source": "dalfox"}) == (
+        "python -m recon_cli rerun job123 --stages vuln_scan --keep-results"
+    )
+    assert (
+        reporting.build_finding_rerun_command("job123", {"source": "unknown"})
+        == "python -m recon_cli rerun job123 --restart"
+    )
+
+
+def test_rerun_command_prefix_override(monkeypatch):
+    monkeypatch.setenv("RECON_RERUN_CMD", "recon-cli")
+    assert reporting.build_finding_rerun_command("job123", {"source": "dalfox"}) == (
         "recon-cli rerun job123 --stages vuln_scan --keep-results"
     )
-    assert reporting.build_finding_rerun_command("job123", {"source": "unknown"}) == "recon-cli rerun job123 --restart"
 
 
 def test_build_submission_summary_contains_key_fields():
@@ -127,7 +137,7 @@ def test_build_triage_entry_fields():
     assert entry["severity"] == "critical"
     assert entry["finding_type"] == "sql_injection"
     assert entry["proof"] == "verified"
-    assert entry["repro_cmd"].startswith("recon-cli rerun job123 --stages vuln_scan")
+    assert entry["repro_cmd"].startswith("python -m recon_cli rerun job123 --stages vuln_scan")
     assert entry["poc_steps"][0]["command"] == entry["repro_cmd"]
     assert "injectable parameter" in entry["poc_steps"][0]["expected_success"].lower()
     assert entry["asset_context"]["host"] == "example.com"
