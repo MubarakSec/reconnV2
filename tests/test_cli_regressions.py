@@ -217,6 +217,54 @@ def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):
     assert payload["poc_steps"]
     assert payload["asset_context"]["endpoint"] == "https://example.com/profile"
     assert payload["impact_hypothesis"]
+    assert Path(payload["artifact_path"]).exists()
+
+
+def test_export_triage_generates_artifacts_for_verified_high_critical(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    results = [
+        {
+            "type": "finding",
+            "title": "verified-high",
+            "source": "extended-validation",
+            "finding_type": "ssrf",
+            "tags": ["ssrf:confirmed"],
+            "severity": "high",
+            "url": "https://example.com/high",
+        },
+        {
+            "type": "finding",
+            "title": "verified-critical",
+            "source": "sqlmap",
+            "finding_type": "sql_injection",
+            "tags": ["sqli:confirmed"],
+            "severity": "critical",
+            "url": "https://example.com/critical",
+        },
+        {
+            "type": "finding",
+            "title": "unverified-high",
+            "source": "waf-probe",
+            "severity": "high",
+            "url": "https://example.com/no-proof",
+        },
+    ]
+    record.paths.results_jsonl.write_text(
+        "\n".join(json.dumps(item) for item in results) + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["export", record.spec.job_id, "--format", "triage"])
+    assert result.exit_code == 0
+    payloads = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    by_title = {item["title"]: item for item in payloads}
+
+    assert Path(by_title["verified-high"]["artifact_path"]).exists()
+    assert Path(by_title["verified-critical"]["artifact_path"]).exists()
+    assert "artifact_path" not in by_title["unverified-high"]
 
 
 def test_rerun_restart_clears_checkpoints_and_results(tmp_path: Path, monkeypatch):

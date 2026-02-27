@@ -932,7 +932,32 @@ def export(
         entries = [entry for entry in read_jsonl(record.paths.results_jsonl) if is_finding(entry)]
         filtered = filter_findings(entries, verified_only=verified_only, proof_required=proof_required)
         ranked = rank_findings(filtered, limit=limit)
-        triage_entries = [build_triage_entry(entry, job_id=job_id) for entry in ranked]
+        triage_entries = []
+        triage_dir = record.paths.ensure_subdir("triage")
+        for entry in ranked:
+            triage_entry = build_triage_entry(entry, job_id=job_id)
+            severity = str(triage_entry.get("severity") or "").lower()
+            confidence = str(triage_entry.get("confidence") or "").lower()
+            if severity in {"high", "critical"} and confidence == "verified":
+                artifact_path = triage_dir / f"{triage_entry['finding_id']}.json"
+                artifact_payload = {
+                    "job_id": job_id,
+                    "finding_id": triage_entry["finding_id"],
+                    "severity": severity,
+                    "confidence": confidence,
+                    "source_finding": entry,
+                    "repro_cmd": triage_entry.get("repro_cmd"),
+                    "poc_steps": triage_entry.get("poc_steps", []),
+                    "proof": triage_entry.get("proof"),
+                    "request": entry.get("request"),
+                    "response": entry.get("response"),
+                }
+                artifact_path.write_text(
+                    json.dumps(artifact_payload, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                triage_entry["artifact_path"] = str(artifact_path)
+            triage_entries.append(triage_entry)
         payload = "\n".join(json.dumps(item, separators=(",", ":"), ensure_ascii=True) for item in triage_entries) + "\n"
         typer.echo(redact(payload) or payload)
     elif fmt == "txt":
