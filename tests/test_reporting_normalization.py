@@ -60,3 +60,24 @@ def test_build_submission_summary_contains_key_fields():
     assert "CRITICAL" in summary
     assert "https://example.com/search?q=1" in summary
     assert "confidence=verified" in summary
+
+
+def test_build_triage_entry_fields():
+    entry = reporting.build_triage_entry(
+        {
+            "type": "finding",
+            "finding_type": "sql_injection",
+            "source": "sqlmap",
+            "title": "SQLi in search",
+            "url": "https://example.com/search?q=1",
+            "severity": "critical",
+            "tags": ["sqli:confirmed"],
+        },
+        job_id="job123",
+    )
+    assert entry["finding_id"].startswith("fnd_")
+    assert entry["job_id"] == "job123"
+    assert entry["severity"] == "critical"
+    assert entry["finding_type"] == "sql_injection"
+    assert entry["proof"] == "verified"
+    assert entry["repro_cmd"].startswith("recon-cli rerun job123 --stages vuln_scan")

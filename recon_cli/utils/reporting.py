@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Dict, Iterable, List
 
 
@@ -267,6 +269,57 @@ def build_submission_summary(entry: Dict[str, object]) -> str:
         f"{title_fragment}{severity} {finding_label} on {target}; "
         f"confidence={confidence}; impact={impact}."
     )
+
+
+def _proof_text(entry: Dict[str, object]) -> str:
+    for key in ("proof", "evidence", "request", "response"):
+        value = entry.get(key)
+        if value in (None, ""):
+            continue
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+        return str(value)
+    if is_verified_finding(entry):
+        return "verified"
+    return ""
+
+
+def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, object]:
+    finding_type = resolve_finding_type(entry)
+    severity = resolve_severity(entry)
+    source = str(entry.get("source") or "")
+    target = str(entry.get("url") or entry.get("hostname") or entry.get("host") or "")
+    title = str(entry.get("title") or entry.get("name") or entry.get("description") or finding_type)
+    confidence = resolve_confidence_label(entry)
+    proof = _proof_text(entry)
+    repro_cmd = str(entry.get("repro_cmd") or "").strip() or build_finding_rerun_command(job_id, entry)
+    raw_id = "|".join(
+        [
+            str(job_id),
+            finding_type,
+            source,
+            target,
+            title,
+        ]
+    )
+    finding_id = f"fnd_{hashlib.sha1(raw_id.encode('utf-8')).hexdigest()[:12]}"
+    tags = entry.get("tags")
+    if not isinstance(tags, list):
+        tags = []
+    return {
+        "finding_id": finding_id,
+        "job_id": job_id,
+        "severity": severity,
+        "confidence": confidence,
+        "finding_type": finding_type,
+        "title": title,
+        "target": target,
+        "source": source,
+        "proof": proof,
+        "repro_cmd": repro_cmd,
+        "submission_summary": build_submission_summary(entry),
+        "tags": [str(tag) for tag in tags if isinstance(tag, str)],
+    }
 
 
 def is_secret(entry: Dict[str, object]) -> bool:

@@ -173,6 +173,49 @@ def test_export_hunter_mode_filters_and_limits(tmp_path: Path, monkeypatch):
     assert payload["title"] == "verified-high"
 
 
+def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    results = [
+        {
+            "type": "finding",
+            "title": "verified-high",
+            "tags": ["ssrf:confirmed"],
+            "source": "extended-validation",
+            "finding_type": "ssrf",
+            "severity": "high",
+            "url": "https://example.com/profile",
+        },
+        {
+            "type": "finding",
+            "title": "low",
+            "source": "waf-probe",
+            "severity": "low",
+            "url": "https://example.com/",
+        },
+    ]
+    record.paths.results_jsonl.write_text(
+        "\n".join(json.dumps(item) for item in results) + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.app,
+        ["export", record.spec.job_id, "--format", "triage", "--verified-only", "--limit", "1"],
+    )
+    assert result.exit_code == 0
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["job_id"] == record.spec.job_id
+    assert payload["severity"] == "high"
+    assert payload["proof"] == "verified"
+    assert payload["repro_cmd"].startswith("recon-cli rerun")
+    assert payload["finding_id"].startswith("fnd_")
+
+
 def test_rerun_restart_clears_checkpoints_and_results(tmp_path: Path, monkeypatch):
     _configure_test_home(tmp_path, monkeypatch)
     manager = JobManager()

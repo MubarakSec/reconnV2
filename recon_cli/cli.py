@@ -884,7 +884,7 @@ def prune(
 @app.command()
 def export(
     job_id: str,
-    fmt: str = typer.Option("jsonl", "--format", case_sensitive=False, help="Export format: jsonl|txt|zip"),
+    fmt: str = typer.Option("jsonl", "--format", case_sensitive=False, help="Export format: jsonl|triage|txt|zip"),
     verified_only: bool = typer.Option(False, "--verified-only", help="Export only verified findings (jsonl only)"),
     proof_required: bool = typer.Option(False, "--proof-required", help="Export only findings with proof (jsonl only)"),
     hunter_mode: bool = typer.Option(
@@ -896,12 +896,12 @@ def export(
         None,
         "--limit",
         min=1,
-        help="Limit findings exported (jsonl only; used with filters/hunter-mode)",
+        help="Limit findings exported (jsonl/triage only; used with filters/hunter-mode)",
     ),
 ) -> None:
     """Export job artifacts in JSONL, text summary, or ZIP form."""
     fmt = fmt.lower()
-    if fmt not in {"jsonl", "txt", "zip"}:
+    if fmt not in {"jsonl", "triage", "txt", "zip"}:
         typer.echo(f"Unsupported format: {fmt}", err=True)
         raise typer.Exit(code=1)
     if hunter_mode:
@@ -925,15 +925,25 @@ def export(
         else:
             payload = record.paths.results_jsonl.read_text(encoding="utf-8")
             typer.echo(redact(payload) or payload)
+    elif fmt == "triage":
+        from recon_cli.utils.jsonl import read_jsonl
+        from recon_cli.utils.reporting import build_triage_entry, filter_findings, is_finding, rank_findings
+
+        entries = [entry for entry in read_jsonl(record.paths.results_jsonl) if is_finding(entry)]
+        filtered = filter_findings(entries, verified_only=verified_only, proof_required=proof_required)
+        ranked = rank_findings(filtered, limit=limit)
+        triage_entries = [build_triage_entry(entry, job_id=job_id) for entry in ranked]
+        payload = "\n".join(json.dumps(item, separators=(",", ":"), ensure_ascii=True) for item in triage_entries) + "\n"
+        typer.echo(redact(payload) or payload)
     elif fmt == "txt":
         if verified_only or proof_required or hunter_mode or limit is not None:
-            typer.echo("verified-only/proof-required filters are only supported for jsonl exports", err=True)
+            typer.echo("verified-only/proof-required filters are only supported for jsonl/triage exports", err=True)
             raise typer.Exit(code=2)
         payload = record.paths.results_txt.read_text(encoding="utf-8")
         typer.echo(redact(payload) or payload)
     else:
         if verified_only or proof_required or hunter_mode or limit is not None:
-            typer.echo("verified-only/proof-required filters are only supported for jsonl exports", err=True)
+            typer.echo("verified-only/proof-required filters are only supported for jsonl/triage exports", err=True)
             raise typer.Exit(code=2)
         import shutil
 
