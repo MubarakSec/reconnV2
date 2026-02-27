@@ -51,6 +51,7 @@ FINDING_STAGE_BY_SOURCE = {
     "verify-findings": "verify_findings",
     "ssrf-validator": "ssrf_validator",
     "open-redirect-validator": "open_redirect_validator",
+    "auth-bypass-validator": "auth_bypass_validator",
 }
 
 FINDING_STAGE_BY_TYPE = {
@@ -69,6 +70,7 @@ FINDING_STAGE_BY_TYPE = {
     "xxe": "extended_validation",
     "graphql_authz": "graphql_exploit",
     "auth_matrix_issue": "auth_matrix",
+    "auth_bypass": "auth_bypass_validator",
     "cloud_asset_public": "cloud_asset_discovery",
     "cms": "cms_scan",
 }
@@ -85,6 +87,7 @@ IMPACT_HINTS = {
     "graphql_authz": "can expose unauthorized cross-tenant data",
     "upload_directory_listing": "can leak uploaded sensitive files",
     "auth_matrix_issue": "indicates broken authorization boundaries",
+    "auth_bypass": "indicates restricted functionality can be accessed without proper authorization",
 }
 
 POC_EXPECTED_BY_TYPE = {
@@ -99,6 +102,7 @@ POC_EXPECTED_BY_TYPE = {
     "exposed_secret": "Secret pattern is present in response/body and hash/metadata confirms match.",
     "upload_directory_listing": "Uploaded/accessible directory listing is exposed with sensitive content paths.",
     "auth_matrix_issue": "Cross-role access matrix shows forbidden action permitted.",
+    "auth_bypass": "Forced-browse or privilege-boundary test reaches restricted content unexpectedly.",
 }
 
 
