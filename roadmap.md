@@ -1,8 +1,8 @@
 # ReconnV2 Bug Bounty Hardening Roadmap
 
 ## Phase 1: Noise Reduction and Signal Quality
-- [ ] Add global deduplication across stages (host, path, param, vuln fingerprint).
-- [ ] Add confidence scoring per finding (`low`, `medium`, `high`, `verified`).
+- [x] Add global deduplication across stages (host, path, param, vuln fingerprint).
+- [x] Add confidence scoring per finding (`low`, `medium`, `high`, `verified`).
 - [x] Add `--verified-only` output mode.
 - [x] Add `--proof-required` mode to suppress unverified high-risk claims.
 - [x] Add result quality metrics (noise ratio, duplicate ratio, verified ratio).

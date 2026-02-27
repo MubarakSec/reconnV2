@@ -99,6 +99,8 @@ def test_results_tracker_sets_confidence_label(tmp_path: Path):
     )
     entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
     assert entries[0].get("confidence_label") == "verified"
+    assert entries[0].get("confidence_score") == 1.0
+    assert str(entries[0].get("finding_fingerprint", "")).startswith("fp_")
 
 
 def test_results_tracker_keeps_findings_with_different_parameters(tmp_path: Path):
@@ -117,3 +119,29 @@ def test_results_tracker_keeps_findings_with_different_parameters(tmp_path: Path
     tracker.append({**base, "parameter": "id", "url": "https://example.com/search?id=1"})
     entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
     assert len(entries) == 2
+
+
+def test_results_tracker_dedupes_by_fingerprint_across_sources(tmp_path: Path):
+    path = tmp_path / "results.jsonl"
+    tracker = ResultsTracker(path)
+    first = {
+        "type": "finding",
+        "finding_type": "xss",
+        "description": "Reflected XSS",
+        "url": "https://example.com/search?q=1",
+        "source": "dalfox",
+        "severity": "high",
+    }
+    second = {
+        "type": "finding",
+        "finding_type": "xss",
+        "description": "Reflected XSS",
+        "url": "https://example.com/search?q=999",
+        "source": "manual-check",
+        "severity": "high",
+    }
+    tracker.append(first)
+    tracker.append(second)
+    entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
+    assert len(entries) == 1
+    assert set(entries[0].get("sources", [])) >= {"dalfox", "manual-check"}

@@ -5,7 +5,7 @@ import ipaddress
 import json
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 
 FINDING_TYPES = {
@@ -121,6 +121,58 @@ def _is_private_host(host: str) -> bool:
     except ValueError:
         return host in {"localhost"} or host.endswith(".local")
     return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+def confidence_to_score(label: str) -> float:
+    mapping = {
+        "low": 0.25,
+        "medium": 0.55,
+        "high": 0.8,
+        "verified": 1.0,
+    }
+    return mapping.get(str(label).lower(), 0.25)
+
+
+def build_finding_fingerprint(entry: Dict[str, object]) -> str:
+    finding_type = resolve_finding_type(entry)
+    template = str(entry.get("template_id") or entry.get("template") or entry.get("templateID") or "")
+    host = _extract_host(entry).lower()
+    url_value = str(entry.get("url") or entry.get("matched_at") or "")
+    path = ""
+    params: tuple[str, ...] = ()
+    if url_value:
+        try:
+            parsed = urlparse(url_value)
+            path = parsed.path or ""
+            params = tuple(sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)))
+        except ValueError:
+            path = ""
+            params = ()
+    param_hint = ""
+    for key in ("parameter", "param", "name"):
+        value = entry.get(key)
+        if isinstance(value, str) and value:
+            param_hint = value
+            break
+    if not param_hint:
+        details = entry.get("details")
+        if isinstance(details, dict):
+            for key in ("parameter", "param", "name"):
+                value = details.get(key)
+                if isinstance(value, str) and value:
+                    param_hint = value
+                    break
+    raw = "|".join(
+        [
+            finding_type,
+            template,
+            host,
+            path,
+            ",".join(params),
+            param_hint,
+        ]
+    )
+    return f"fp_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _recency_score(entry: Dict[str, object]) -> int:

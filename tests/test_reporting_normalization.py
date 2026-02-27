@@ -73,6 +73,37 @@ def test_build_submission_summary_contains_key_fields():
     assert "confidence=verified" in summary
 
 
+def test_build_finding_fingerprint_and_confidence_score():
+    one = reporting.build_finding_fingerprint(
+        {
+            "type": "finding",
+            "finding_type": "sql_injection",
+            "url": "https://example.com/search?q=1",
+            "source": "sqlmap",
+        }
+    )
+    two = reporting.build_finding_fingerprint(
+        {
+            "type": "finding",
+            "finding_type": "sql_injection",
+            "url": "https://example.com/search?q=2",
+            "source": "sqlmap",
+        }
+    )
+    three = reporting.build_finding_fingerprint(
+        {
+            "type": "finding",
+            "finding_type": "sql_injection",
+            "url": "https://example.com/search?id=2",
+            "source": "sqlmap",
+        }
+    )
+    assert one == two
+    assert one != three
+    assert reporting.confidence_to_score("low") == 0.25
+    assert reporting.confidence_to_score("verified") == 1.0
+
+
 def test_build_triage_entry_fields():
     entry = reporting.build_triage_entry(
         {

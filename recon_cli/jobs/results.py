@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.jsonl import JsonlWriter, read_jsonl
-from recon_cli.utils.reporting import is_finding, resolve_confidence_label
+from recon_cli.utils.reporting import build_finding_fingerprint, confidence_to_score, is_finding, resolve_confidence_label
 from recon_cli.jobs.manager import JobManager
 
 
@@ -59,6 +59,9 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
     if ptype == "asset_enrichment":
         return (ptype, payload.get("hostname"), payload.get("ip"))
     if ptype == "finding":
+        fingerprint = payload.get("finding_fingerprint")
+        if isinstance(fingerprint, str) and fingerprint:
+            return (ptype, fingerprint)
         url_value = payload.get("url") or payload.get("matched_at")
         path_fp, query_param_fp = _url_path_and_params(url_value)
         return (
@@ -256,6 +259,8 @@ class ResultsTracker:
             label = resolve_confidence_label(normalized)
             if label:
                 normalized["confidence_label"] = label
+                normalized["confidence_score"] = confidence_to_score(label)
+            normalized["finding_fingerprint"] = build_finding_fingerprint(normalized)
         return normalized
 
     def _merge_entries(self, existing: Dict[str, object], new: Dict[str, object]) -> Dict[str, object]:
@@ -268,6 +273,9 @@ class ResultsTracker:
             existing_sources = list(existing_sources)
         else:
             existing_sources = []
+        existing_source = merged.get("source")
+        if existing_source and existing_source not in existing_sources:
+            existing_sources.append(existing_source)
         new_source = new.get("source")
         if new_source and new_source not in existing_sources:
             existing_sources.append(new_source)
@@ -319,12 +327,22 @@ class ResultsTracker:
                 if new_rank > existing_rank:
                     merged["confidence_label"] = value
                 continue
+            if key == "confidence_score":
+                try:
+                    merged_value = float(merged.get("confidence_score", 0.0))
+                    new_value = float(value)
+                    merged["confidence_score"] = max(merged_value, new_value)
+                except (TypeError, ValueError):
+                    merged["confidence_score"] = merged.get("confidence_score", value)
+                continue
             if key == "timestamp":
                 continue
             if key not in merged or merged.get(key) in (None, "", []):
                 merged[key] = value
         if is_finding(merged):
             merged["confidence_label"] = resolve_confidence_label(merged)
+            merged["confidence_score"] = confidence_to_score(merged["confidence_label"])
+            merged["finding_fingerprint"] = build_finding_fingerprint(merged)
         return merged
 
     def _rewrite_all(self) -> None:
