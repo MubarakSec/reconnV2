@@ -139,15 +139,15 @@ def build_finding_fingerprint(entry: Dict[str, object]) -> str:
     host = _extract_host(entry).lower()
     url_value = str(entry.get("url") or entry.get("matched_at") or "")
     path = ""
-    params: tuple[str, ...] = ()
+    params: List[str] = []
     if url_value:
         try:
             parsed = urlparse(url_value)
             path = parsed.path or ""
-            params = tuple(sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)))
+            params = sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True))
         except ValueError:
             path = ""
-            params = ()
+            params = []
     param_hint = ""
     for key in ("parameter", "param", "name"):
         value = entry.get(key)
@@ -168,7 +168,7 @@ def build_finding_fingerprint(entry: Dict[str, object]) -> str:
             template,
             host,
             path,
-            ",".join(params),
+            ",".join(sorted(params)),
             param_hint,
         ]
     )

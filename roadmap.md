@@ -61,7 +61,7 @@
 - [ ] Add sensitive data redaction checks in logs/reports/artifacts.
 - [ ] Add safe-failure behavior (partial results + clear error taxonomy).
 - [ ] Add dependency health checks in `doctor` for all critical scanners/modules.
-- [ ] Add CI gates: quality thresholds + regression suites for false positives.
+- [x] Add CI gates: quality thresholds + regression suites for false positives.
 
 ## Operational Reliability and Job Control
 - [x] Add `recon.sh` support for rerunning a job by ID.
