@@ -1,136 +1,103 @@
-# ReconnV2 Remediation Plan (Checklist)
+# ReconnV2 Quality Gate Fix Plan
 
-This file tracks the concrete fixes required to address the audit findings.
+This checklist replaces the old plan and is based on current code checks only.
 
-## 0) Execution Rules
+Baseline captured on 2026-02-27:
+- `pytest tests -v`: `471 passed`
+- `ruff check recon_cli`: `131 errors` (`94` auto-fixable)
+- `mypy recon_cli --ignore-missing-imports`: `1128 errors in 103 files`
 
-- [ ] Create a short-lived `security-remediation` branch.
-- [ ] Link each completed checkbox to a PR/commit hash.
-- [ ] Do not merge until sections 1-4 and 7 are complete.
+## 1) Critical (must fix first)
 
-## 1) Critical Access Control Fixes
+- [ ] Resolve broken/duplicated tracing implementation in `recon_cli/utils/tracing.py`.
+- [ ] Remove duplicate definitions: `Span` (`:78` and `:766`), `Trace` (`:183` and `:850`), `get_tracer` (`:714` and `:1025`).
+- [ ] Move late import to module top (`recon_cli/utils/tracing.py:738`) to clear `E402`.
+- [ ] Decide one canonical tracing API surface and delete the shadow copy.
 
-- [ ] Enforce required auth (not optional) for all non-health API endpoints in `recon_cli/api/app.py`.
-- [ ] Require auth for:
-  - [ ] `POST /api/scan`
-  - [ ] `POST /api/jobs`
-  - [ ] `POST /api/jobs/{job_id}/requeue`
-  - [ ] `GET /api/jobs*` data endpoints (if intended private)
-  - [ ] `GET /api/jobs/{job_id}/logs`
-  - [ ] `GET /api/jobs/{job_id}/report`
-- [ ] Enforce auth on web API routes in `recon_cli/web/app.py`.
-- [ ] Require auth for:
-  - [ ] `POST /api/scan`
-  - [ ] `POST /api/settings`
-  - [ ] `POST /api/test-notification`
-  - [ ] `POST /api/jobs/{job_id}/cancel`
-  - [ ] `POST /api/jobs/{job_id}/retry`
-  - [ ] `DELETE /api/jobs/{job_id}`
-  - [ ] `GET /api/jobs/{job_id}/outputs/{output_name}`
-  - [ ] `GET /api/jobs/{job_id}/report`
-- [ ] Add websocket authentication in `recon_cli/web/websocket.py` for:
-  - [ ] `/ws/connect`
-  - [ ] `/ws/job/{job_id}`
-- [ ] Add auth scope checks (read/write/admin) after key validation.
-- [ ] Return `401` for missing/invalid key and `403` for insufficient scope.
+- [ ] Fix import-order/runtime hygiene in `recon_cli/tools/executor.py`.
+- [ ] Remove `E402` sequence at `:19-:28` by keeping imports at top only.
 
-## 2) Default Exposure Hardening
+- [ ] Fix undefined-name and import-shadow issues in `recon_cli/utils/diff.py`.
+- [ ] Resolve `timedelta` undefined use (`:571`) and duplicate/late import (`:573`).
+- [ ] Rename loop variable shadowing imported symbol (`:182`, `F402`).
 
-- [ ] Change default bind host to `127.0.0.1` for:
-  - [ ] CLI `serve` command (`recon_cli/cli.py`)
-  - [ ] CLI `dashboard` command (`recon_cli/cli.py`)
-  - [ ] API runner (`recon_cli/api/app.py`)
-  - [ ] Web dashboard runner (`recon_cli/web/app.py`)
-- [ ] Keep explicit `--host 0.0.0.0` as opt-in only.
+- [ ] Fix undefined `requests` references in `recon_cli/pipeline/stage_idor_validator.py`.
+- [ ] Address `F821` for session annotations at `:279` and `:336`.
+- [ ] Use `TYPE_CHECKING` import or real import and consistent annotation style.
 
-## 3) Stored XSS Remediation in Reports
+- [ ] Fix API bootstrap type violations in `recon_cli/api/app.py`.
+- [ ] Remove illegal type/method assignments reported at `:22`, `:23`, `:111`.
 
-- [ ] Replace raw string-concatenated HTML in `recon_cli/utils/reporter.py` with auto-escaped templates (Jinja2).
-- [ ] Escape all dynamic fields before rendering:
-  - [ ] URLs
-  - [ ] Titles/descriptions
-  - [ ] Hostnames/source strings
-  - [ ] Proof and summary fields
-- [ ] Add a regression test proving payloads like `<script>` are rendered safely (escaped, not executed).
+- [ ] Fix CLI type contract issues in `recon_cli/cli.py`.
+- [ ] Replace invalid `BadParameter(..., param_name=...)` call (`:126`).
+- [ ] Fix `JobRecord.path` vs `JobRecord.paths` mismatch (`:1260`).
+- [ ] Fix report config type mixing (`:1540`, `:1543`).
 
-## 4) Secrets + Settings Security
+## 2) High (stability and correctness)
 
-- [ ] Protect `POST /api/settings` with auth + admin scope.
-- [ ] Protect `POST /api/test-notification` with auth + admin scope.
-- [ ] Stop storing sensitive notification secrets in plaintext:
-  - [ ] Prefer env var references or secure secret backend.
-  - [ ] If file storage remains, encrypt at rest.
-- [ ] Force file permissions to owner-only (`0600`) for settings and secret files.
+- [ ] Eliminate high-volume nullability errors in pipeline core.
+- [ ] `recon_cli/pipeline/runner.py`: fix `union-attr`/`arg-type` cluster (`:41`, `:61`, `:131`, `:220`, `:347`, etc.).
+- [ ] `recon_cli/pipeline/stage_runtime_crawl.py`: enforce non-null `JobRecord`/`JobManager` before use (`:26`, `:58`, `:149`, `:264`, `:292`, etc.).
+- [ ] Introduce guard helpers (for example `_require_record`, `_require_manager`) instead of repeated unchecked access.
 
-## 5) Unsafe Primitives and Transport Safety
+- [ ] Fix parallel runner typing in `recon_cli/pipeline/parallel.py`.
+- [ ] Resolve missing model attributes at `:23`.
+- [ ] Correct executor callable signature issue at `:244`.
+- [ ] Correct result assignment type at `:301`.
 
-- [ ] Replace `pickle.loads`/`pickle.dumps` cache serialization in `recon_cli/utils/cache.py` with safe format (JSON/msgpack + schema).
-- [ ] Remove unconditional `--disable-tls-checks` from `run_wpscan` in `recon_cli/scanners/integrations.py`.
-- [ ] Add explicit insecure override flag if TLS bypass is truly needed.
+- [ ] Fix top mypy error classes by count:
+- [ ] `union-attr` (438)
+- [ ] `arg-type` (239)
+- [ ] `attr-defined` (120)
+- [ ] `call-overload` (101)
+- [ ] `assignment` (66)
 
-## 6) Noise / False-Positive Reduction
+- [ ] Fix remaining non-trivial ruff issues by type:
+- [ ] `F821` undefined names
+- [ ] `F811` redefinition
+- [ ] `E402` imports not at top
+- [ ] `F402` import shadowing
 
-- [ ] Downgrade heuristic-only findings to `suspected` confidence in:
-  - [ ] `stage_waf.py`
-  - [ ] `stage_ssrf_validator.py` (internal signature-only cases)
-  - [ ] `stage_cms_scan.py` fallback detections
-  - [ ] `takeover/detector.py` signature-only matches
-- [ ] Prevent heuristic-only findings from being emitted as `high`/`critical` without replay evidence.
-- [ ] Require artifact-backed evidence for `verified` confidence label.
-- [ ] Add a clear triage field: `evidence_strength = heuristic|replay|oast|validated`.
+## 3) Medium (cleanup and maintainability)
 
-## 7) API DoS and Performance Controls
+- [ ] Apply safe auto-fixes first: `ruff check recon_cli --fix`.
+- [ ] Re-run and manually address unresolved lint categories.
 
-- [ ] Add strict max `limit` and input validation to `/api/search`.
-- [ ] Stop rebuilding full search index on every request in `recon_cli/web/app.py`.
-- [ ] Build and persist index incrementally; refresh by job-change events.
-- [ ] Add server-side request rate limiting for API and web mutation routes.
-- [ ] Add pagination limits and sane defaults for large endpoints.
+- [ ] Clean unused imports/variables and f-strings without placeholders across high-churn files:
+- [ ] `recon_cli/secrets/detector.py` (11 lint hits)
+- [ ] `recon_cli/utils/pdf_reporter.py` (10)
+- [ ] `recon_cli/tools/executor.py` (9)
+- [ ] `recon_cli/utils/config_migrate.py` (6)
+- [ ] `recon_cli/cli.py` (6)
+- [ ] `recon_cli/utils/tracing.py` (5)
+- [ ] `recon_cli/utils/diff.py` (5)
 
-## 8) CI Security Gate Fixes
+- [ ] Add type stubs/dependency typing policy:
+- [ ] Install and pin `types-requests`.
+- [ ] Install and pin `types-PyYAML`.
+- [ ] Decide whether to keep `--ignore-missing-imports` or move to per-module overrides.
 
-- [ ] Remove `|| true` from security and quality steps in `.github/workflows/ci.yml`:
-  - [ ] `bandit`
-  - [ ] `safety`
-  - [ ] smoke/integration steps that should gate releases
-- [ ] Add dependency vulnerability gate (`pip-audit` or equivalent) in CI.
-- [ ] Fail CI on high/critical findings (configurable baseline file allowed).
-- [ ] Upload and retain security reports as artifacts.
+- [ ] Fix implicit optional defaults flagged by mypy:
+- [ ] `recon_cli/exceptions.py` (`completed_stages`, `searched_paths`)
+- [ ] `recon_cli/plugins/__init__.py` (`options` defaults)
 
-## 9) Dependency and Release Hygiene
+## 4) Execution order
 
-- [ ] Add a lockfile strategy for reproducible builds (pip-tools/uv/poetry lock).
-- [ ] Add scheduled dependency update + vuln scan workflow.
-- [ ] Generate SBOM in CI (CycloneDX or SPDX).
+- [ ] Phase A: remove redefinitions/undefined names/import-order issues (`tracing`, `diff`, `stage_idor_validator`, `executor`).
+- [ ] Phase B: harden pipeline nullability (`runner`, `stage_runtime_crawl`, `parallel`).
+- [ ] Phase C: normalize CLI/API typing (`cli`, `api/app.py`, report config types).
+- [ ] Phase D: run `ruff --fix`, then manual lint cleanup, then mypy pass.
 
-## 10) Test Coverage Gaps to Close
+## 5) Verification gates (must all pass)
 
-- [ ] Add authz tests for every mutating endpoint (API + web).
-- [ ] Add tests that unauthenticated access returns `401/403` where required.
-- [ ] Add report rendering security tests (XSS payload escaping).
-- [ ] Add tests for websocket auth handshake rejection.
-- [ ] Add load tests for `/api/search` and large job lists.
-- [ ] Add regression test for duplicate CLI command name conflict.
+- [ ] `.venv/bin/python -m pytest tests -v`
+- [ ] `.venv/bin/ruff check recon_cli`
+- [ ] `.venv/bin/mypy recon_cli --ignore-missing-imports`
 
-## 11) CLI and Product Quality Bugs
+## 6) Done criteria
 
-- [ ] Resolve duplicate `report` command definitions in `recon_cli/cli.py` (keep one canonical command name/path).
-- [ ] Ensure help output and command behavior remain stable after consolidation.
-
-## 12) Repository Hygiene
-
-- [ ] Add `users.db` to `.gitignore` if it should not be versioned.
-- [ ] Verify no real credentials/tokens are committed.
-- [ ] Add secret scanning pre-commit/CI check (detect-secrets or gitleaks).
-
-## 13) Completion Criteria (Do Not Close Early)
-
-- [ ] All section 1-4 checkboxes complete.
-- [ ] Security CI gates enforced and passing.
-- [ ] New authz/XSS tests merged and passing.
-- [ ] Manual verification run completed:
-  - [ ] unauthenticated mutation requests rejected
-  - [ ] report fields escaped
-  - [ ] settings/notification endpoints protected
-  - [ ] scanner TLS behavior secure by default
-- [ ] Final risk re-assessment documented in a follow-up audit note.
+- [ ] Ruff errors = 0.
+- [ ] Mypy errors = 0 (or documented, approved baseline file with explicit exclusions).
+- [ ] No duplicate core runtime implementations (`tracing` single source of truth).
+- [ ] Pipeline core modules (`runner`, `parallel`, `stage_runtime_crawl`) are null-safe and typed.
+- [ ] CI uses the same three gates and blocks merges on failure.
