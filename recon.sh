@@ -368,42 +368,16 @@ rerun_job() {
         return
     fi
 
-    echo -e "${BLUE}[*] إعادة المهمة إلى قائمة الانتظار...${NC}"
-    if ! "$PYTHON_BIN" -m recon_cli requeue "$JOB_ID"; then
-        echo -e "${RED}[!] تعذر إعادة المهمة للطابور${NC}"
-        pause_screen
-        return
+    echo -ne "${CYAN}إعادة تشغيل كاملة؟ [y/N]: ${NC}"
+    read -r FULL_RESTART
+
+    RESTART_FLAG=""
+    if [[ "$FULL_RESTART" =~ ^[Yy]$ ]]; then
+        RESTART_FLAG="--restart"
     fi
 
     echo -e "${BLUE}[*] تشغيل المهمة الآن: $JOB_ID${NC}"
-    "$PYTHON_BIN" - "$JOB_ID" <<'PY'
-import sys
-
-from recon_cli.jobs.lifecycle import JobLifecycle
-from recon_cli.jobs.manager import JobManager
-from recon_cli.pipeline.runner import run_pipeline
-
-job_id = sys.argv[1]
-manager = JobManager()
-lifecycle = JobLifecycle(manager=manager)
-
-record = lifecycle.move_to_running(job_id, owner="recon.sh-rerun")
-if not record:
-    print(f"Unable to move {job_id} to running", file=sys.stderr)
-    raise SystemExit(1)
-
-try:
-    run_pipeline(record, manager, force=record.spec.force)
-except Exception as exc:
-    lifecycle.move_to_failed(job_id)
-    print(f"Job {job_id} failed: {exc}", file=sys.stderr)
-    raise SystemExit(1)
-else:
-    lifecycle.move_to_finished(job_id)
-    print(f"Job {job_id} finished")
-PY
-
-    if [ $? -eq 0 ]; then
+    if "$PYTHON_BIN" -m recon_cli rerun "$JOB_ID" $RESTART_FLAG; then
         echo -e "${GREEN}[✓] تمت إعادة تشغيل المهمة بنجاح${NC}"
     else
         echo -e "${RED}[!] فشل إعادة تشغيل المهمة${NC}"

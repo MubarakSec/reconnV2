@@ -44,6 +44,10 @@ class CorrelationStage(Stage):
         tech_counter = Counter()
         features_by_host: Dict[str, Dict[str, float]] = defaultdict(lambda: {key: 0.0 for key in FEATURE_KEYS})
         tag_histogram: Dict[str, Counter] = defaultdict(Counter)
+        host_urls: Dict[str, List[Dict[str, object]]] = defaultdict(list)
+        finding_sinks: List[Dict[str, object]] = []
+        passive_surface_urls: set[str] = set()
+        actionable_surface_urls: set[str] = set()
 
         processed = 0
         runtime = context.runtime_config
@@ -133,6 +137,7 @@ class CorrelationStage(Stage):
                 if not url:
                     continue
                 urls_seen += 1
+                source_name = str(entry.get("source") or "").lower()
                 host = entry.get("hostname") or urlparse(url).hostname
                 tags = list(entry.get("tags", []))
                 graph.add_node(
@@ -180,6 +185,19 @@ class CorrelationStage(Stage):
                     params = {name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
                     if params:
                         graph.add_edge("url", url, "has_params", "param_group", ",".join(sorted(params)))
+                if host:
+                    host_urls[host].append(
+                        {
+                            "url": url,
+                            "score": int(entry.get("score", 0) or 0),
+                            "source": source_name,
+                            "tags": tags,
+                        }
+                    )
+                if self._is_actionable_surface(url, tags):
+                    actionable_surface_urls.add(url)
+                    if source_name in {"probe", "httpx", "passive", "wayback", "gau", "katana"}:
+                        passive_surface_urls.add(url)
                 server = entry.get("server")
                 if server:
                     tech_label = server.lower()
@@ -220,6 +238,17 @@ class CorrelationStage(Stage):
                 if url:
                     graph.add_node("url", url)
                     graph.add_edge("finding", finding_id, "references", "url", url)
+                finding_sinks.append(
+                    {
+                        "id": finding_id,
+                        "url": url,
+                        "hostname": host,
+                        "finding_type": entry.get("finding_type") or entry.get("type"),
+                        "severity": entry.get("severity") or entry.get("priority") or "medium",
+                        "score": int(entry.get("score", 0) or 0),
+                        "confidence": entry.get("confidence_label") or "low",
+                    }
+                )
 
         if not seen_any:
             logger.info("No results recorded; skipping correlation stage")
@@ -293,6 +322,45 @@ class CorrelationStage(Stage):
         ]
         api_clusters.sort(key=lambda item: item["count"], reverse=True)
 
+        attack_paths = self._build_attack_paths(
+            host_urls,
+            finding_sinks,
+            limit=max(1, int(getattr(runtime, "correlation_attack_path_limit", 30))),
+        )
+        if attack_paths:
+            for attack_path in attack_paths:
+                context.results.append(
+                    {
+                        "type": "attack_path",
+                        "source": "correlation",
+                        "hostname": attack_path["hostname"],
+                        "entry_url": attack_path["entry_url"],
+                        "sink_url": attack_path["sink_url"],
+                        "finding_type": attack_path["finding_type"],
+                        "severity": attack_path["severity"],
+                        "score": attack_path["score"],
+                        "description": attack_path["description"],
+                        "tags": ["attack-path", "correlated", f"finding:{attack_path['finding_type']}"],
+                    }
+                )
+            (artifacts_dir / "attack_paths.json").write_text(
+                json.dumps(attack_paths, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+
+        baseline_count = len(passive_surface_urls)
+        final_count = len(actionable_surface_urls)
+        benchmark = {
+            "baseline_unique_surfaces": baseline_count,
+            "final_unique_surfaces": final_count,
+            "delta_unique_surfaces": max(0, final_count - baseline_count),
+            "growth_ratio": round((final_count / baseline_count), 2) if baseline_count else (1.0 if final_count else 0.0),
+        }
+        (artifacts_dir / "surface_benchmark.json").write_text(
+            json.dumps(benchmark, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
         provider_common = [
             {"provider": provider, "hosts": sorted(hosts), "count": len(hosts)}
             for provider, hosts in provider_hosts.items()
@@ -308,9 +376,11 @@ class CorrelationStage(Stage):
             "asn_clusters": len(clusters["asn"]),
             "provider_clusters": len(clusters["provider"]),
             "api_hosts": len(api_report),
+            "attack_paths": len(attack_paths),
             "top_nodes": top_nodes,
             "top_api_clusters": api_clusters[:10],
             "common_providers": provider_common[:10],
+            "surface_benchmark": benchmark,
             "truncated": truncated,
             "max_records": max_records,
             "processed": processed,
@@ -353,3 +423,78 @@ class CorrelationStage(Stage):
             graph.node_count(),
             graph.edge_count(),
         )
+
+    def _is_actionable_surface(self, url: str, tags: List[str]) -> bool:
+        lowered = (url or "").lower()
+        tag_set = {str(tag).lower() for tag in (tags or [])}
+        if any(marker in lowered for marker in ("/api", "/graphql", "admin", "login", "account", "billing", "upload")):
+            return True
+        if any(
+            marker in tag_set
+            for marker in (
+                "service:api",
+                "api:graphql",
+                "surface:admin",
+                "surface:login",
+                "surface:account",
+                "surface:billing",
+                "surface:upload",
+            )
+        ):
+            return True
+        return False
+
+    def _build_attack_paths(
+        self,
+        host_urls: Dict[str, List[Dict[str, object]]],
+        finding_sinks: List[Dict[str, object]],
+        *,
+        limit: int,
+    ) -> List[Dict[str, object]]:
+        if not host_urls or not finding_sinks:
+            return []
+        attack_paths: List[Dict[str, object]] = []
+        for sink in finding_sinks:
+            host = str(sink.get("hostname") or "")
+            sink_url = str(sink.get("url") or "")
+            if not host or not sink_url:
+                continue
+            candidates = host_urls.get(host, [])
+            if not candidates:
+                continue
+            ranked = sorted(candidates, key=lambda item: int(item.get("score", 0) or 0), reverse=True)
+            for candidate in ranked[:5]:
+                entry_url = str(candidate.get("url") or "")
+                if not entry_url or entry_url == sink_url:
+                    continue
+                tags = {str(tag).lower() for tag in (candidate.get("tags") or [])}
+                if not self._is_actionable_surface(entry_url, list(tags)):
+                    continue
+                description = (
+                    "Potential attack path from discovered entry surface "
+                    f"to validated sink ({sink.get('finding_type') or 'finding'})"
+                )
+                attack_paths.append(
+                    {
+                        "hostname": host,
+                        "entry_url": entry_url,
+                        "sink_url": sink_url,
+                        "finding_type": str(sink.get("finding_type") or "finding"),
+                        "severity": str(sink.get("severity") or "medium"),
+                        "score": max(int(sink.get("score", 0) or 0), int(candidate.get("score", 0) or 0)),
+                        "description": description,
+                    }
+                )
+                break
+        attack_paths.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+        unique: List[Dict[str, object]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for entry in attack_paths:
+            key = (entry["hostname"], entry["entry_url"], entry["sink_url"])
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(entry)
+            if len(unique) >= limit:
+                break
+        return unique

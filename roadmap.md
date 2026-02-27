@@ -7,7 +7,7 @@
 - [x] Add `--proof-required` mode to suppress unverified high-risk claims.
 - [x] Add result quality metrics (noise ratio, duplicate ratio, verified ratio).
 - [x] Add tests for dedupe collisions and confidence classification edge cases.
-- [ ] **Done when:** repeated runs produce stable, low-noise findings with measurable improvement.
+- [x] **Done when:** repeated runs produce stable, low-noise findings with measurable improvement.
 
 ## Phase 2: Exploitable Finding Output
 - [x] For each high/critical finding, generate reproducible request/response artifacts.
@@ -16,7 +16,7 @@
 - [x] Add impact hypothesis template (why it matters from bounty perspective).
 - [x] Add structured export format for triage (`finding_id`, `severity`, `proof`, `repro_cmd`).
 - [x] Add tests to ensure artifact generation for every verified high/critical finding.
-- [ ] **Done when:** a hunter can reproduce top findings directly from output without extra digging.
+- [x] **Done when:** a hunter can reproduce top findings directly from output without extra digging.
 
 ## Phase 3: Vulnerability-Class Validation Stages
 - [x] Add dedicated SSRF validator (outbound callback + internal target checks).
@@ -35,16 +35,16 @@
 - [x] Add recency/novelty weighting to surface newly introduced risks.
 - [x] Add “top targets first” queue mode for high-value attack surface.
 - [x] Add tests that validate ranking determinism and priority ordering.
-- [ ] **Done when:** top-ranked issues consistently match what a skilled hunter would triage first.
+- [x] **Done when:** top-ranked issues consistently match what a skilled hunter would triage first.
 
 ## Phase 5: Attack Surface Depth
-- [ ] Improve JS endpoint extraction (dynamic routes, API patterns, hidden parameters).
-- [ ] Improve API discovery (OpenAPI/GraphQL/gRPC/websocket path enrichment).
-- [ ] Expand parameter mining and candidate mutation strategy.
-- [ ] Improve auth-aware crawling with session continuity and role awareness.
-- [ ] Correlate passive + active intel into attack paths (entrypoint -> vulnerable sink).
-- [ ] Add benchmarks to compare discovered unique actionable surfaces before/after.
-- [ ] **Done when:** scans reveal deeper, exploitable paths instead of just broad asset lists.
+- [x] Improve JS endpoint extraction (dynamic routes, API patterns, hidden parameters).
+- [x] Improve API discovery (OpenAPI/GraphQL/gRPC/websocket path enrichment).
+- [x] Expand parameter mining and candidate mutation strategy.
+- [x] Improve auth-aware crawling with session continuity and role awareness.
+- [x] Correlate passive + active intel into attack paths (entrypoint -> vulnerable sink).
+- [x] Add benchmarks to compare discovered unique actionable surfaces before/after.
+- [x] **Done when:** scans reveal deeper, exploitable paths instead of just broad asset lists.
 
 ## Phase 6: Hunter Mode Reporting
 - [x] Add `hunter-mode` report preset (verified-only, high signal, PoC-focused).
@@ -53,7 +53,7 @@
 - [x] Add concise submission-ready summaries per finding.
 - [x] Add report sections for duplicates/out-of-scope filtering hints.
 - [x] Add end-to-end tests for hunter-mode report generation.
-- [ ] **Done when:** output is directly usable for triage and bug bounty submission workflow.
+- [x] **Done when:** output is directly usable for triage and bug bounty submission workflow.
 
 ## Cross-Cutting Hardening
 - [x] Standardize timeout/retry/circuit-breaker defaults per tool class.
@@ -70,16 +70,16 @@
 - [x] Add `doctor` checks for `dnspython`, `interactsh-client`, and `playwright`.
 
 ## Execution Plan
-- [ ] Week 1: Phase 1 + initial metrics dashboard.
-- [ ] Week 2: Phase 2 + artifact schemas.
-- [ ] Week 3: Phase 3 validators (SSRF/IDOR/auth bypass first).
-- [ ] Week 4: Phase 4 prioritization + ranking tests.
-- [ ] Week 5: Phase 5 discovery depth improvements.
-- [ ] Week 6: Phase 6 hunter-mode reporting + release checklist.
+- [x] Week 1: Phase 1 + initial metrics dashboard.
+- [x] Week 2: Phase 2 + artifact schemas.
+- [x] Week 3: Phase 3 validators (SSRF/IDOR/auth bypass first).
+- [x] Week 4: Phase 4 prioritization + ranking tests.
+- [x] Week 5: Phase 5 discovery depth improvements.
+- [x] Week 6: Phase 6 hunter-mode reporting + release checklist.
 
 ## Release Readiness Checklist
-- [ ] All new features covered by unit/integration tests.
-- [ ] Full suite passes (`pytest`) in project venv.
-- [ ] No sensitive leakage in logs/reports under test fixtures.
-- [ ] Documentation updated (`README`, examples, flags, report fields).
-- [ ] Backward compatibility verified for existing CLI/web API flows.
+- [x] All new features covered by unit/integration tests.
+- [x] Full suite passes (`pytest`) in project venv.
+- [x] No sensitive leakage in logs/reports under test fixtures.
+- [x] Documentation updated (`README`, examples, flags, report fields).
+- [x] Backward compatibility verified for existing CLI/web API flows.

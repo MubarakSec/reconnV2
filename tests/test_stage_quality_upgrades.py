@@ -610,3 +610,46 @@ def test_summary_prefers_confirmed_findings_in_top_section(tmp_path: Path):
     section = text[idx:].splitlines()
     first_entry = next((line for line in section if line.startswith("[")), "")
     assert "confirmed-lower-score" in first_entry
+
+
+def test_summary_emits_quality_metrics(tmp_path: Path):
+    record = _make_record(tmp_path, {})
+    context = PipelineContext(record=record, manager=DummyManager())
+    context.results.append(
+        {
+            "type": "url",
+            "url": "https://example.com/noise",
+            "hostname": "example.com",
+            "tags": ["noise"],
+            "score": 0,
+        }
+    )
+    context.results.append(
+        {
+            "type": "url",
+            "url": "https://example.com/noise",
+            "hostname": "example.com",
+            "tags": ["noise"],
+            "score": 0,
+        }
+    )
+    context.results.append(
+        {
+            "type": "finding",
+            "description": "confirmed-issue",
+            "url": "https://example.com/confirmed",
+            "tags": ["ssrf:confirmed"],
+            "score": 70,
+            "priority": "high",
+        }
+    )
+    jobs_summary.generate_summary(context)
+
+    quality = record.metadata.stats.get("quality", {})
+    assert quality.get("noise_ratio") == 1.0
+    assert quality.get("verified_ratio") == 1.0
+    assert round(quality.get("duplicate_ratio", 0.0), 2) == 0.33
+    assert quality.get("duplicates") == 1
+    assert quality.get("records_seen") == 3
+    text = record.paths.results_txt.read_text(encoding="utf-8")
+    assert "== Quality ==" in text

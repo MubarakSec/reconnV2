@@ -251,7 +251,7 @@ def create_app() -> "FastAPI":
             raise HTTPException(status_code=400, detail="Invalid profile value")
         available_profiles = set(config.available_profiles().keys())
         fallback_profiles = {"passive", "full", "safe", "aggressive"}
-        allowed_profiles = available_profiles or fallback_profiles
+        allowed_profiles = fallback_profiles | available_profiles
         if normalized not in allowed_profiles:
             allowed_display = ", ".join(sorted(allowed_profiles))
             raise HTTPException(

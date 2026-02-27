@@ -39,6 +39,8 @@ STAGE_HEALTH_SIGNALS = {
 
 
 def generate_summary(context) -> None:
+    from recon_cli.utils.reporting import is_finding, resolve_confidence_label
+
     record = context.record
     metadata = record.metadata
     spec = record.spec
@@ -55,6 +57,8 @@ def generate_summary(context) -> None:
     priority_counter = Counter()
     signal_counter = Counter()
     noise_count = 0
+    findings_total = 0
+    verified_count = 0
     top_candidates: List[dict] = []
     top_urls: List[dict] = []
     top_findings: List[dict] = []
@@ -140,6 +144,10 @@ def generate_summary(context) -> None:
     for entry in iter_jsonl(results_path):
         etype = entry.get("type", "unknown")
         counts[etype] += 1
+        if is_finding(entry):
+            findings_total += 1
+            if resolve_confidence_label(entry) == "verified":
+                verified_count += 1
         if etype == "signal":
             signal_type = entry.get("signal_type")
             if signal_type:
@@ -213,6 +221,23 @@ def generate_summary(context) -> None:
         lines.append("== Priority Counts ==")
         for priority, count in priority_counter.most_common():
             lines.append(f"{priority}: {count}")
+    total_urls = counts.get("url", 0)
+    noise_ratio = (noise_count / total_urls) if total_urls else 0.0
+    verified_ratio = (verified_count / findings_total) if findings_total else 0.0
+    dupe_seen = 0
+    dupe_count = 0
+    if hasattr(context, "results") and getattr(context.results, "stats", None) is not None:
+        dupe_seen = int(context.results.stats.get("records_seen", 0))
+        dupe_count = int(context.results.stats.get("records_duplicate", 0))
+    duplicate_ratio = (dupe_count / dupe_seen) if dupe_seen else 0.0
+    lines.append("")
+    lines.append("== Quality ==")
+    lines.append(f"Noise ratio     : {noise_ratio:.2%} (noise {noise_count} / urls {total_urls})")
+    lines.append(f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})")
+    if dupe_seen:
+        lines.append(f"Duplicate ratio : {duplicate_ratio:.2%} (duplicates {dupe_count} / seen {dupe_seen})")
+    else:
+        lines.append("Duplicate ratio : n/a (no in-memory stats)")
     missing_tools = metadata.stats.get("missing_tools") if hasattr(metadata, "stats") else None
     if missing_tools:
         lines.append("")
@@ -503,6 +528,17 @@ def generate_summary(context) -> None:
     metadata.stats.update({f"status_{code}": value for code, value in status_counter.items()})
     metadata.stats["noise_suppressed"] = noise_count
     metadata.stats["confirmed_findings"] = len(confirmed_entries)
+    metadata.stats["quality"] = {
+        "noise_ratio": noise_ratio,
+        "verified_ratio": verified_ratio,
+        "duplicate_ratio": duplicate_ratio,
+        "noise": noise_count,
+        "urls": total_urls,
+        "verified_findings": verified_count,
+        "findings": findings_total,
+        "duplicates": dupe_count,
+        "records_seen": dupe_seen,
+    }
     for priority, count in priority_counter.items():
         metadata.stats[f"priority_{priority}"] = count
     context.manager.update_metadata(record)

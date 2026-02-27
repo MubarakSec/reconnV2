@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import base64
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
-from recon_cli.crawl.runtime import PLAYWRIGHT_AVAILABLE, crawl_urls, dom_artifact_name, save_results as save_crawl_results
+from recon_cli.crawl.runtime import (
+    PLAYWRIGHT_AVAILABLE,
+    CrawlResult,
+    crawl_urls,
+    dom_artifact_name,
+    save_results as save_crawl_results,
+)
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.utils.jsonl import read_jsonl
@@ -57,16 +64,12 @@ class RuntimeCrawlStage(Stage):
         timeout = max(1, getattr(context.runtime_config, "runtime_crawl_timeout", 15))
         concurrency = max(1, getattr(context.runtime_config, "runtime_crawl_concurrency", 2))
 
-        if not PLAYWRIGHT_AVAILABLE:
-            available = False
-        else:
-            available = True
-
+        available = bool(PLAYWRIGHT_AVAILABLE)
         crawl_func = crawl_urls
         try:
             from recon_cli.pipeline import stages as stages_module
 
-            available = getattr(stages_module, "PLAYWRIGHT_AVAILABLE", available)
+            available = bool(getattr(stages_module, "PLAYWRIGHT_AVAILABLE", available))
             crawl_func = getattr(stages_module, "crawl_urls", crawl_func)
         except Exception:
             pass
@@ -148,7 +151,6 @@ class RuntimeCrawlStage(Stage):
             return
 
         candidates.sort(key=lambda item: item[0], reverse=True)
-
         selected_urls: List[str] = []
         host_counts: Dict[str, int] = defaultdict(int)
         for score, url, host in candidates:
@@ -181,23 +183,53 @@ class RuntimeCrawlStage(Stage):
             concurrency,
         )
 
-        auth_headers = None
-        auth_cookies = None
+        default_domain = urlparse(selected_urls[0]).hostname if selected_urls else None
+        auth_headers: Optional[Dict[str, str]] = None
+        auth_cookies: Optional[List[Dict[str, object]]] = None
         if context.auth_enabled():
             context.auth_session(selected_urls[0] if selected_urls else None)
             auth_headers = context.auth_headers({"User-Agent": "recon-cli runtime-crawl"})
-            default_domain = urlparse(selected_urls[0]).hostname if selected_urls else None
             auth_cookies = context.auth_cookies(default_domain)
-        try:
-            results = crawl_func(
-                selected_urls,
-                timeout,
-                concurrency,
-                headers=auth_headers,
-                cookies=auth_cookies,
-            )
-        except Exception as exc:
-            message = str(exc)
+
+        crawl_profiles: List[Dict[str, object]] = [
+            {"name": "default", "headers": auth_headers, "cookies": auth_cookies}
+        ]
+        if bool(getattr(context.runtime_config, "runtime_crawl_role_aware", True)):
+            crawl_profiles.extend(self._role_aware_profiles(context, default_domain))
+
+        merged_results: Dict[str, CrawlResult] = {}
+        per_profile_results: Dict[str, Dict[str, CrawlResult]] = {}
+        role_profile_names: List[str] = []
+        default_error: Optional[Exception] = None
+
+        for profile in crawl_profiles:
+            profile_name = str(profile.get("name") or "default")
+            headers = profile.get("headers")
+            cookies = profile.get("cookies")
+            try:
+                results = crawl_func(
+                    selected_urls,
+                    timeout,
+                    concurrency,
+                    headers=headers if isinstance(headers, dict) else None,
+                    cookies=cookies if isinstance(cookies, list) else None,
+                )
+            except Exception as exc:
+                if profile_name == "default":
+                    default_error = exc
+                    break
+                logger.warning("Runtime crawl profile %s failed: %s", profile_name, exc)
+                continue
+            if not results:
+                continue
+            per_profile_results[profile_name] = results
+            if profile_name != "default":
+                role_profile_names.append(profile_name)
+            for url, result in results.items():
+                merged_results[url] = self._merge_result(merged_results.get(url), result)
+
+        if default_error is not None:
+            message = str(default_error)
             missing_browsers = "playwright install" in message.lower() or "executable doesn't exist" in message.lower()
             stats.update(
                 {
@@ -217,7 +249,8 @@ class RuntimeCrawlStage(Stage):
             else:
                 logger.warning("Runtime crawl failed; skipping stage: %s", message)
             return
-        if not results:
+
+        if not merged_results:
             stats.update(
                 {
                     "selected": len(selected_urls),
@@ -233,26 +266,33 @@ class RuntimeCrawlStage(Stage):
             return
 
         artifact_dir = context.record.paths.ensure_subdir("runtime_crawl")
-        save_crawl_results(results, artifact_dir)
+        save_crawl_results(merged_results, artifact_dir)
+        for profile_name, results in per_profile_results.items():
+            if profile_name == "default":
+                continue
+            profile_dir = artifact_dir / f"profile_{self._safe_profile_name(profile_name)}"
+            save_crawl_results(results, profile_dir)
 
-        success_count = sum(1 for result in results.values() if result.success)
-        failure_count = len(results) - success_count
-        javascript_total = sum(len(result.javascript_files) for result in results.values())
+        success_count = sum(1 for result in merged_results.values() if result.success)
+        failure_count = len(merged_results) - success_count
+        javascript_total = sum(len(result.javascript_files) for result in merged_results.values())
 
         stats.update(
             {
                 "selected": len(selected_urls),
-                "crawled": len(results),
+                "crawled": len(merged_results),
                 "success": success_count,
                 "failures": failure_count,
                 "javascript_files": javascript_total,
+                "profiles": len(per_profile_results),
+                "role_profiles": role_profile_names,
                 "status": "completed",
             }
         )
         context.manager.update_metadata(context.record)
 
         appended = 0
-        for url, result in results.items():
+        for url, result in merged_results.items():
             if not context.url_allowed(url):
                 continue
             artifact_rel = self._dom_relpath(context, artifact_dir, url)
@@ -271,15 +311,98 @@ class RuntimeCrawlStage(Stage):
                 "network_requests": len(result.network),
                 "score": score_map.get(url, 0),
             }
+            if role_profile_names:
+                payload["auth_profiles"] = ["default", *role_profile_names]
             if artifact_rel:
                 payload["dom_artifact"] = artifact_rel
             if context.results.append(payload):
                 appended += 1
+            for profile_name, profile_results in per_profile_results.items():
+                if profile_name == "default":
+                    continue
+                profile_result = profile_results.get(url)
+                if not profile_result:
+                    continue
+                context.results.append(
+                    {
+                        "type": "runtime_crawl_profile",
+                        "source": "playwright",
+                        "url": url,
+                        "hostname": payload["hostname"],
+                        "auth_profile": profile_name,
+                        "success": profile_result.success,
+                        "javascript_count": len(profile_result.javascript_files),
+                        "error_count": len(profile_result.errors),
+                        "score": score_map.get(url, 0),
+                    }
+                )
 
         logger.info(
             "Runtime crawl completed: %s/%s successful, %s JS files discovered (%s new records)",
             success_count,
-            len(results),
+            len(merged_results),
             javascript_total,
             appended,
         )
+
+    def _role_aware_profiles(self, context: PipelineContext, default_domain: Optional[str]) -> List[Dict[str, object]]:
+        try:
+            from recon_cli.utils.auth import build_profiles
+        except Exception:
+            return []
+        profiles = build_profiles(context.runtime_config)
+        if len(profiles) <= 1:
+            return []
+        max_profiles = max(1, int(getattr(context.runtime_config, "runtime_crawl_max_auth_profiles", 3)))
+        result: List[Dict[str, object]] = []
+        for profile in profiles[:max_profiles]:
+            name = str(getattr(profile, "name", "") or "")
+            if not name or name == "default":
+                continue
+            headers = {"User-Agent": "recon-cli runtime-crawl"}
+            headers.update(dict(getattr(profile, "headers", {}) or {}))
+            bearer = str(getattr(profile, "bearer", "") or "")
+            basic_user = str(getattr(profile, "basic_user", "") or "")
+            basic_pass = str(getattr(profile, "basic_pass", "") or "")
+            if bearer and "Authorization" not in headers:
+                headers["Authorization"] = f"Bearer {bearer}"
+            elif basic_user and basic_pass and "Authorization" not in headers:
+                token = f"{basic_user}:{basic_pass}".encode("utf-8")
+                headers["Authorization"] = f"Basic {base64.b64encode(token).decode('ascii')}"
+            cookies = self._cookies_from_profile(dict(getattr(profile, "cookies", {}) or {}), default_domain)
+            result.append({"name": name, "headers": headers, "cookies": cookies})
+        return result
+
+    def _cookies_from_profile(
+        self,
+        cookies: Dict[str, str],
+        default_domain: Optional[str],
+    ) -> List[Dict[str, object]]:
+        if not cookies or not default_domain:
+            return []
+        return [
+            {"name": str(name), "value": str(value), "domain": default_domain, "path": "/"}
+            for name, value in cookies.items()
+        ]
+
+    def _merge_result(self, existing: Optional[CrawlResult], new: CrawlResult) -> CrawlResult:
+        if existing is None:
+            return new
+        merged_network = existing.network + [entry for entry in new.network if entry not in existing.network]
+        merged_js = sorted(set(existing.javascript_files).union(set(new.javascript_files)))
+        merged_errors = list(dict.fromkeys(existing.errors + new.errors))
+        merged_console = list(dict.fromkeys(existing.console_messages + new.console_messages))
+        return CrawlResult(
+            url=new.url,
+            success=bool(existing.success or new.success),
+            network=merged_network[:500],
+            javascript_files=merged_js,
+            errors=merged_errors[:120],
+            console_messages=merged_console[:160],
+            dom_snapshot=existing.dom_snapshot or new.dom_snapshot,
+        )
+
+    def _safe_profile_name(self, name: str) -> str:
+        lowered = (name or "").lower().strip().replace(" ", "_")
+        cleaned = "".join(ch for ch in lowered if ch.isalnum() or ch in {"_", "-"})
+        return cleaned.strip("_-") or "profile"

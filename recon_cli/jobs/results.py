@@ -52,6 +52,8 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("url"), payload.get("hostname"))
     if ptype == "parameter":
         return (ptype, payload.get("name"), payload.get("source"))
+    if ptype == "param_mutation":
+        return (ptype, payload.get("name"), payload.get("category"), payload.get("source"))
     if ptype == "form":
         return (ptype, payload.get("url"), payload.get("action"), payload.get("method"))
     if ptype == "auth_form":
@@ -83,8 +85,18 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("screenshot_path"))
     if ptype == "runtime_crawl":
         return (ptype, payload.get("url"))
+    if ptype == "runtime_crawl_profile":
+        return (ptype, payload.get("url"), payload.get("auth_profile"))
     if ptype == "idor_suspect":
         return (ptype, payload.get("url"), payload.get("auth"), payload.get("source"))
+    if ptype == "attack_path":
+        return (
+            ptype,
+            payload.get("entry_url"),
+            payload.get("sink_url"),
+            payload.get("finding_type"),
+            payload.get("hostname"),
+        )
     if ptype == "signal":
         return (
             ptype,

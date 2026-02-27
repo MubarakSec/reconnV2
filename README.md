@@ -75,6 +75,48 @@ reconnV2/
 
 ---
 
+## 🧪 تحسينات العمق (Phase 5)
+
+تمت إضافة تحسينات عملية لزيادة عمق الاكتشاف وجودة السطح الهجومي:
+
+- **JS Intelligence أعمق**:
+  - استخراج مسارات ديناميكية من template literals.
+  - استخراج أنماط استدعاءات API (`fetch`, `axios`, `$.ajax`).
+  - استخراج hidden parameter hints من JavaScript.
+- **API Recon Enrichment**:
+  - توسيع probing لمسارات OpenAPI/GraphQL/gRPC/Swagger.
+  - إثراء مسارات الفحص تلقائيًا من نتائج `js-intel` و `api-spec`.
+- **Param Mining + Mutation Catalog**:
+  - تصنيف كل parameter حسب الفئة (identifier/url/file_path/token/...).
+  - توليد mutation candidates جاهزة لإعادة الاستخدام في replay/fuzzing.
+- **Role-aware Runtime Crawl**:
+  - دعم crawling متعدد ملفات auth profiles.
+  - تسجيل نتائج لكل profile عبر `runtime_crawl_profile`.
+- **Attack Path Correlation**:
+  - بناء مسارات هجوم مترابطة `entry_url -> sink_url`.
+  - إنتاج benchmark لقياس الفرق بين baseline surfaces والنتائج النهائية.
+
+Artifacts الجديدة:
+
+- `artifacts/js_intel.json`
+- `artifacts/param_mining.json` (يشمل mutation catalog)
+- `artifacts/correlation/attack_paths.json`
+- `artifacts/correlation/surface_benchmark.json`
+
+Runtime flags مفيدة:
+
+- `RECON_JS_INTEL_DYNAMIC_ROUTES=1`
+- `RECON_JS_INTEL_HIDDEN_PARAMS=1`
+- `RECON_API_RECON_ENRICH_FROM_JS=1`
+- `RECON_API_RECON_MAX_ENRICHED_PATHS=40`
+- `RECON_PARAM_MINING_MUTATIONS=1`
+- `RECON_PARAM_MINING_MUTATIONS_PER_PARAM=8`
+- `RECON_RUNTIME_CRAWL_ROLE_AWARE=1`
+- `RECON_RUNTIME_CRAWL_MAX_AUTH_PROFILES=3`
+- `RECON_CORRELATION_ATTACK_PATH_LIMIT=30`
+
+---
+
 ## 🚀 البدء السريع (للمبتدئين)
 
 ```bash

@@ -82,10 +82,10 @@ class TakeoverStage(Stage):
         for host in hosts[:max_hosts]:
             checked += 1
             cname_chain = self._resolve_cname_chain(host, dns_timeout) if dns is not None else []
-            dns_state = self._evaluate_dns_state(host, cname_chain, dns_timeout)
             if require_cname and not cname_chain:
                 skipped_no_cname += 1
                 continue
+            dns_state = self._evaluate_dns_state(host, cname_chain, dns_timeout)
             providers = self._match_providers(cname_chain)
             if providers:
                 cname_matches += 1
@@ -180,9 +180,16 @@ class TakeoverStage(Stage):
     def _target_has_address(self, hostname: str, timeout: int) -> bool:
         if dns is None:
             return False
-        resolver = dns.resolver.Resolver()
-        resolver.timeout = timeout
-        resolver.lifetime = timeout
+        try:
+            resolver = dns.resolver.Resolver()
+        except Exception:
+            return False
+        if hasattr(resolver, "timeout"):
+            resolver.timeout = timeout
+        if hasattr(resolver, "lifetime"):
+            resolver.lifetime = timeout
+        if not hasattr(resolver, "resolve"):
+            return False
         for record_type in ("A", "AAAA"):
             try:
                 answers = resolver.resolve(hostname, record_type)

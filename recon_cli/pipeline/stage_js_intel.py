@@ -14,9 +14,19 @@ class JSIntelligenceStage(Stage):
     name = "js_intelligence"
 
     ENDPOINT_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
+    API_CALL_PATTERN = re.compile(
+        r"(?:fetch|axios\.(?:get|post|put|patch|delete)|\$.ajax)\(\s*([\"'`])([^\"'`]+)\1",
+        re.IGNORECASE,
+    )
     RELATIVE_PATTERN = re.compile(
         r"/(?:api|graphql|v\\d+|auth|oauth|login|logout|register|admin|internal|debug|config|upload|media)[^\\s\"'<>]*"
     )
+    DYNAMIC_ROUTE_PATTERN = re.compile(
+        r"`(/(?:api|graphql|v\d+|auth|oauth|admin|internal|upload|media|ws|socket)[^`<>]*)`"
+    )
+    QUERY_PARAM_PATTERN = re.compile(r"[?&]([a-zA-Z_][a-zA-Z0-9_-]{1,40})=")
+    PARAM_BLOCK_PATTERN = re.compile(r"(?:params|query|variables)\s*:\s*\{([^}]*)\}", re.IGNORECASE | re.DOTALL)
+    PARAM_KEY_PATTERN = re.compile(r"([a-zA-Z_][a-zA-Z0-9_-]{1,40})\s*:")
     SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
     AUTH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "register", "password", "reset", "forgot", "auth", "oauth", "sso")
     ADMIN_HINTS = ("admin", "dashboard", "console", "manage", "staff", "internal", "superuser")
@@ -101,6 +111,8 @@ class JSIntelligenceStage(Stage):
         max_files = int(getattr(context.runtime_config, "js_intel_max_files", 40))
         timeout = int(getattr(context.runtime_config, "js_intel_timeout", 12))
         max_urls = int(getattr(context.runtime_config, "js_intel_max_urls", 120))
+        include_dynamic = bool(getattr(context.runtime_config, "js_intel_extract_dynamic_routes", True))
+        include_hidden = bool(getattr(context.runtime_config, "js_intel_extract_hidden_params", True))
         runtime = context.runtime_config
         limiter = context.get_rate_limiter(
             "js_intel",
@@ -111,6 +123,7 @@ class JSIntelligenceStage(Stage):
         js_urls = js_urls[:max_files]
         artifacts: List[Dict[str, object]] = []
         discovered_urls: List[str] = []
+        hidden_param_hints: set[str] = set()
         for js_url in js_urls:
             session = context.auth_session(js_url)
             headers = context.auth_headers({"User-Agent": "recon-cli js-intel"})
@@ -142,10 +155,9 @@ class JSIntelligenceStage(Stage):
             if resp.status_code >= 400:
                 continue
             content = resp.text or ""
-            endpoints = set(self.ENDPOINT_PATTERN.findall(content))
-            rels = set(self.RELATIVE_PATTERN.findall(content))
-            for rel in rels:
-                endpoints.add(urljoin(js_url, rel))
+            endpoints = self._extract_endpoints_from_blob(content, base_url=js_url, include_dynamic=include_dynamic)
+            if include_hidden:
+                hidden_param_hints.update(self._extract_param_hints(content))
             source_map = None
             map_match = self.SOURCEMAP_PATTERN.search(content)
             if map_match:
@@ -181,9 +193,15 @@ class JSIntelligenceStage(Stage):
                             for source_blob in sources_content[:5]:
                                 if not source_blob or not isinstance(source_blob, str):
                                     continue
-                                endpoints.update(self.ENDPOINT_PATTERN.findall(source_blob))
-                                for rel in self.RELATIVE_PATTERN.findall(source_blob):
-                                    endpoints.add(urljoin(js_url, rel))
+                                endpoints.update(
+                                    self._extract_endpoints_from_blob(
+                                        source_blob,
+                                        base_url=js_url,
+                                        include_dynamic=include_dynamic,
+                                    )
+                                )
+                                if include_hidden:
+                                    hidden_param_hints.update(self._extract_param_hints(source_blob))
                     except Exception:
                         if limiter:
                             limiter.on_error(source_map)
@@ -297,9 +315,12 @@ class JSIntelligenceStage(Stage):
             artifact_path = context.record.paths.artifact("js_intel.json")
             artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
             context.set_data("js_endpoints", discovered_urls)
+            if hidden_param_hints:
+                context.set_data("js_param_hints", sorted(hidden_param_hints))
             stats = context.record.metadata.stats.setdefault("js_intel", {})
             stats["files"] = len(artifacts)
             stats["endpoints"] = len(discovered_urls)
+            stats["hidden_params"] = len(hidden_param_hints)
             context.manager.update_metadata(context.record)
 
     def _classify_endpoint(self, path: str) -> tuple[set[str], int]:
@@ -356,6 +377,9 @@ class JSIntelligenceStage(Stage):
     def _normalize_endpoint(self, endpoint: str) -> str:
         if not endpoint:
             return ""
+        endpoint = self._clean_endpoint_candidate(endpoint)
+        if not endpoint:
+            return ""
         try:
             parsed = urlparse(endpoint)
         except Exception:
@@ -364,6 +388,57 @@ class JSIntelligenceStage(Stage):
             return ""
         cleaned = parsed._replace(fragment="")
         return cleaned.geturl()
+
+    def _extract_endpoints_from_blob(self, content: str, *, base_url: str, include_dynamic: bool) -> set[str]:
+        endpoints: set[str] = set()
+        for absolute in self.ENDPOINT_PATTERN.findall(content):
+            endpoints.add(absolute)
+        for rel in self.RELATIVE_PATTERN.findall(content):
+            endpoints.add(urljoin(base_url, rel))
+        for _quote, candidate in self.API_CALL_PATTERN.findall(content):
+            cleaned_candidate = self._clean_endpoint_candidate(candidate)
+            if not cleaned_candidate:
+                continue
+            if cleaned_candidate.startswith(("http://", "https://")):
+                endpoints.add(cleaned_candidate)
+                continue
+            if cleaned_candidate.startswith("/"):
+                endpoints.add(urljoin(base_url, cleaned_candidate))
+        if include_dynamic:
+            for dynamic in self.DYNAMIC_ROUTE_PATTERN.findall(content):
+                materialized = self._materialize_dynamic_path(dynamic)
+                if materialized:
+                    endpoints.add(urljoin(base_url, materialized))
+        return endpoints
+
+    def _extract_param_hints(self, content: str) -> set[str]:
+        hints: set[str] = set()
+        for name in self.QUERY_PARAM_PATTERN.findall(content):
+            lowered = name.lower()
+            if len(lowered) >= 2:
+                hints.add(lowered)
+        for block in self.PARAM_BLOCK_PATTERN.findall(content):
+            for key in self.PARAM_KEY_PATTERN.findall(block):
+                lowered = key.lower()
+                if len(lowered) >= 2:
+                    hints.add(lowered)
+        return hints
+
+    def _materialize_dynamic_path(self, path: str) -> str:
+        if not path:
+            return ""
+        normalized = re.sub(r"\$\{[^}]+\}", "1", path)
+        return self._clean_endpoint_candidate(normalized)
+
+    def _clean_endpoint_candidate(self, value: str) -> str:
+        cleaned = (value or "").strip().strip("\"'`")
+        if not cleaned:
+            return ""
+        cleaned = re.sub(r"\$\{[^}]+\}", "1", cleaned)
+        cleaned = cleaned.rstrip("),;")
+        if cleaned.startswith("//"):
+            cleaned = "https:" + cleaned
+        return cleaned
 
     def _is_static_asset(self, path: str) -> bool:
         if not path:

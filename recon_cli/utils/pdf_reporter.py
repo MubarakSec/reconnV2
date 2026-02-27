@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
 
+from recon_cli.utils.reporting import is_finding, resolve_confidence_label
 
 @dataclass
 class PDFReportConfig:
@@ -214,6 +215,7 @@ class PDFReporter:
         # Statistics
         if results:
             stats = self._calculate_statistics(results)
+            quality = self._calculate_quality_stats(job_data, results)
             story.append(Paragraph("Statistics", heading_style))
             
             stats_data = [
@@ -223,6 +225,13 @@ class PDFReporter:
                 ['Vulnerabilities', str(stats.get('vulnerabilities', 0))],
                 ['Secrets Found', str(stats.get('secrets', 0))],
             ]
+            if quality:
+                stats_data.extend([
+                    ['Noise ratio', self._format_ratio(quality.get('noise_ratio'))],
+                    ['Verified ratio', self._format_ratio(quality.get('verified_ratio'))],
+                ])
+                if quality.get('duplicate_ratio') is not None:
+                    stats_data.append(['Duplicate ratio', self._format_ratio(quality.get('duplicate_ratio'))])
             
             stats_table = Table(stats_data, colWidths=[8*cm, 5*cm])
             stats_table.setStyle(TableStyle([
@@ -378,6 +387,7 @@ class PDFReporter:
         profile = job_data.get('profile', 'default')
         
         stats = self._calculate_statistics(results) if results else {}
+        quality = self._calculate_quality_stats(job_data, results) if results else {}
         
         # Categorize results
         hosts = [r for r in (results or []) if r.get('type') == 'host']
@@ -431,6 +441,7 @@ class PDFReporter:
                 <div class="value">{stats.get('secrets', 0)}</div>
                 <div class="label">الأسرار</div>
             </div>
+            {self._quality_cards(quality) if quality else ""}
         </div>
     </section>
 """
@@ -788,6 +799,68 @@ footer {{
                 stats['secrets'] += 1
         
         return stats
+
+    def _calculate_quality_stats(
+        self,
+        job_data: Dict[str, Any],
+        results: Optional[List[Dict]] = None,
+    ) -> Dict[str, object]:
+        stats = job_data.get("stats", {}) if isinstance(job_data, dict) else {}
+        quality = stats.get("quality") if isinstance(stats.get("quality"), dict) else None
+        if quality:
+            return quality
+        if not results:
+            return {}
+        total_urls = 0
+        noise_count = 0
+        findings_total = 0
+        verified_count = 0
+        for entry in results:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") == "url":
+                total_urls += 1
+                tags = entry.get("tags", [])
+                if isinstance(tags, list) and "noise" in tags:
+                    noise_count += 1
+            if is_finding(entry):
+                findings_total += 1
+                if resolve_confidence_label(entry) == "verified":
+                    verified_count += 1
+        return {
+            "noise_ratio": (noise_count / total_urls) if total_urls else 0.0,
+            "verified_ratio": (verified_count / findings_total) if findings_total else 0.0,
+            "duplicate_ratio": None,
+            "noise": noise_count,
+            "urls": total_urls,
+            "verified_findings": verified_count,
+            "findings": findings_total,
+        }
+
+    @staticmethod
+    def _format_ratio(value: object) -> str:
+        try:
+            return f"{float(value) * 100:.2f}%"
+        except (TypeError, ValueError):
+            return "n/a"
+
+    def _quality_cards(self, quality: Dict[str, object]) -> str:
+        if not quality:
+            return ""
+        return f"""
+            <div class="stat-card">
+                <div class="value">{self._format_ratio(quality.get('noise_ratio'))}</div>
+                <div class="label">نسبة الضوضاء</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{self._format_ratio(quality.get('verified_ratio'))}</div>
+                <div class="label">نسبة التحقق</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{self._format_ratio(quality.get('duplicate_ratio'))}</div>
+                <div class="label">نسبة التكرار</div>
+            </div>
+        """
 
 
 def generate_pdf_report(

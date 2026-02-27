@@ -14,17 +14,27 @@ class APIReconStage(Stage):
     name = "api_recon"
 
     PROBE_PATHS = [
+        "/.well-known/openapi.json",
+        "/.well-known/swagger.json",
         "/swagger.json",
         "/openapi.json",
         "/openapi.yaml",
+        "/openapi.yml",
         "/v2/api-docs",
         "/v3/api-docs",
+        "/v1/api-docs",
         "/swagger/v1/swagger.json",
         "/swagger/v1/swagger.yaml",
+        "/swagger-ui/index.html",
         "/api-docs",
+        "/docs",
+        "/redoc",
+        "/graphql/schema.json",
+        "/graphql/v1",
         "/graphql",
         "/graphiql",
         "/graphql/console",
+        "/grpc.health.v1.Health/Check",
     ]
     SPEC_INDICATORS = ("openapi", "swagger", "\"openapi\"", "\"swagger\"")
     LOGIN_HINTS = ("login", "signin", "sign-in", "auth", "sso", "oauth")
@@ -44,6 +54,10 @@ class APIReconStage(Stage):
             return
         signal_index = context.signal_index()
         ranked_hosts = self._rank_hosts(host_info, signal_index)
+        if bool(getattr(context.runtime_config, "api_recon_enrich_from_js", True)):
+            enriched_paths = self._build_host_enriched_paths(context, host_info)
+        else:
+            enriched_paths = {}
         max_hosts = int(getattr(context.runtime_config, "api_recon_max_hosts", 50))
         timeout = int(getattr(context.runtime_config, "api_recon_timeout", 8))
         runtime = context.runtime_config
@@ -55,13 +69,19 @@ class APIReconStage(Stage):
         signaled_hosts: set[str] = set()
         specs_found = 0
         urls_added = 0
+        probe_attempts = 0
+        enriched_probe_count = 0
         for host in ranked_hosts[:max_hosts]:
             info = host_info.get(host, {})
             base_url = str(info.get("base_url") or f"https://{host}")
             parsed_base = urlparse(base_url)
             scheme = parsed_base.scheme or "https"
             base = f"{scheme}://{host}"
-            for path in self.PROBE_PATHS:
+            host_probe_paths = list(dict.fromkeys(self.PROBE_PATHS + enriched_paths.get(host, [])))
+            for path in host_probe_paths:
+                probe_attempts += 1
+                if path not in self.PROBE_PATHS:
+                    enriched_probe_count += 1
                 url = urljoin(base, path)
                 if not context.url_allowed(url):
                     continue
@@ -219,11 +239,12 @@ class APIReconStage(Stage):
                             evidence={"url": url},
                         )
                         signaled_hosts.add(host)
-        if specs_found or urls_added:
-            stats = context.record.metadata.stats.setdefault("api_recon", {})
-            stats["specs"] = specs_found
-            stats["urls_added"] = urls_added
-            context.manager.update_metadata(context.record)
+        stats = context.record.metadata.stats.setdefault("api_recon", {})
+        stats["specs"] = specs_found
+        stats["urls_added"] = urls_added
+        stats["probe_attempts"] = probe_attempts
+        stats["enriched_probe_paths"] = enriched_probe_count
+        context.manager.update_metadata(context.record)
 
     def _collect_hosts(self, context: PipelineContext) -> Dict[str, Dict[str, object]]:
         host_info: Dict[str, Dict[str, object]] = {}
@@ -252,6 +273,74 @@ class APIReconStage(Stage):
             if isinstance(score, int):
                 info["score"] = max(int(info.get("score", 0)), score)
         return host_info
+
+    def _build_host_enriched_paths(
+        self,
+        context: PipelineContext,
+        host_info: Dict[str, Dict[str, object]],
+    ) -> Dict[str, List[str]]:
+        per_host: Dict[str, set[str]] = {host: set() for host in host_info}
+        candidate_urls: List[str] = []
+        for host, info in host_info.items():
+            urls = info.get("urls") or []
+            if isinstance(urls, list):
+                for value in urls:
+                    if isinstance(value, str):
+                        candidate_urls.append(value)
+        js_endpoints = context.get_data("js_endpoints", []) or []
+        if isinstance(js_endpoints, list):
+            for value in js_endpoints:
+                if isinstance(value, str):
+                    candidate_urls.append(value)
+        for entry in read_jsonl(context.record.paths.results_jsonl):
+            if entry.get("type") != "url":
+                continue
+            source = str(entry.get("source") or "").lower()
+            if source not in {"js-intel", "ws-grpc", "api-spec", "api-recon"}:
+                continue
+            url_value = entry.get("url")
+            if isinstance(url_value, str):
+                candidate_urls.append(url_value)
+        for value in candidate_urls:
+            try:
+                parsed = urlparse(value)
+            except ValueError:
+                continue
+            host = str(parsed.hostname or "")
+            if not host or host not in per_host:
+                continue
+            norm = self._normalize_probe_path(parsed.path)
+            if not norm:
+                continue
+            per_host[host].add(norm)
+            if "/api/" in norm:
+                base = norm.split("/api/", 1)[0] + "/api"
+                per_host[host].add(f"{base}/openapi.json")
+                per_host[host].add(f"{base}/docs")
+            if "graphql" in norm:
+                per_host[host].add("/graphql")
+                per_host[host].add("/graphiql")
+            if "grpc" in norm:
+                per_host[host].add("/grpc.health.v1.Health/Check")
+        max_enriched = max(0, int(getattr(context.runtime_config, "api_recon_max_enriched_paths", 40)))
+        if max_enriched <= 0:
+            return {}
+        return {host: sorted(paths)[:max_enriched] for host, paths in per_host.items() if paths}
+
+    def _normalize_probe_path(self, path: str) -> str:
+        value = str(path or "").strip()
+        if not value:
+            return ""
+        if not value.startswith("/"):
+            value = "/" + value
+        if value.endswith("/") and len(value) > 1:
+            value = value[:-1]
+        if value in {"/", "/index.html"}:
+            return ""
+        lowered = value.lower()
+        if any(token in lowered for token in ("swagger", "openapi", "api-docs", "graphql", "grpc", "/api/")):
+            return value
+        return ""
 
     @staticmethod
     def _rank_hosts(
