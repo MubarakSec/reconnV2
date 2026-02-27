@@ -122,7 +122,8 @@ class DependencyResolver:
         "ssrf_validator": {"extended_validation"},
         "open_redirect_validator": {"extended_validation"},
         "auth_bypass_validator": {"extended_validation"},
-        "exploit_validation": {"idor_validator", "ssrf_validator", "open_redirect_validator", "auth_bypass_validator"},
+        "secret_exposure_validator": {"extended_validation"},
+        "exploit_validation": {"idor_validator", "ssrf_validator", "open_redirect_validator", "auth_bypass_validator", "secret_exposure_validator"},
         "screenshots": {"exploit_validation"},
         "finalize": {"screenshots"},
     }

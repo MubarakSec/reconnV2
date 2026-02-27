@@ -44,6 +44,7 @@ FINDING_STAGE_BY_SOURCE = {
     "graphql-exploit": "graphql_exploit",
     "auth-matrix": "auth_matrix",
     "idor-stage": "idor_probe",
+    "secret-validator": "secret_exposure_validator",
     "cloud-discovery": "cloud_asset_discovery",
     "cms-scan": "cms_scan",
     "nmap": "nmap_scan",

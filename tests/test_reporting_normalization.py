@@ -52,6 +52,7 @@ def test_infer_replay_stage_and_rerun_command():
     assert reporting.infer_replay_stage({"source": "idor-validator"}) == "idor_validator"
     assert reporting.infer_replay_stage({"source": "ssrf-validator"}) == "ssrf_validator"
     assert reporting.infer_replay_stage({"source": "auth-bypass-validator"}) == "auth_bypass_validator"
+    assert reporting.infer_replay_stage({"source": "secret-validator"}) == "secret_exposure_validator"
     assert reporting.infer_replay_stage({"finding_type": "open_redirect"}) == "extended_validation"
     assert reporting.build_finding_rerun_command("job123", {"source": "dalfox"}) == (
         "recon-cli rerun job123 --stages vuln_scan --keep-results"

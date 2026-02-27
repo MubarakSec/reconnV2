@@ -489,7 +489,7 @@ def _stage_overrides(selected: List[str]) -> Dict[str, Any]:
             "enable_exploit_validation",
         ])
     if "secrets" not in selected_set:
-        disable(["enable_secrets"])
+        disable(["enable_secrets", "enable_secret_exposure_validator"])
     return overrides
 
 
