@@ -234,6 +234,56 @@ class TestGenerateHtmlReport:
             assert "confidence=verified" in content
             assert "recon-cli rerun test_job --stages vuln_scan --keep-results" in content
 
+    def test_html_hunter_mode_includes_triage_hints(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            job_dir.mkdir()
+
+            (job_dir / "metadata.json").write_text(json.dumps({
+                "job_id": "test_job",
+                "status": "finished",
+                "stats": {}
+            }))
+            (job_dir / "spec.json").write_text(json.dumps({
+                "job_id": "test_job",
+                "target": "example.com",
+                "profile": "passive"
+            }))
+
+            results = [
+                {
+                    "type": "finding",
+                    "title": "dup-issue",
+                    "tags": ["ssrf:confirmed", "duplicate"],
+                    "source": "extended-validation",
+                    "severity": "high",
+                    "proof": "seen before",
+                    "url": "https://example.com/path",
+                },
+                {
+                    "type": "finding",
+                    "title": "oos-issue",
+                    "tags": ["ssrf:confirmed"],
+                    "source": "extended-validation",
+                    "severity": "high",
+                    "proof": "confirmed",
+                    "url": "https://cdn.other.net/asset",
+                },
+            ]
+            with (job_dir / "results.jsonl").open("w") as f:
+                for r in results:
+                    f.write(json.dumps(r) + "\n")
+
+            output_path = Path(tmpdir) / "report.html"
+            config = ReportConfig(language="en", hunter_mode=True)
+            generate_html_report(job_dir, output_path, config)
+
+            content = output_path.read_text()
+            assert "Triage Hints" in content
+            assert "Likely Duplicates" in content
+            assert "Likely Out of Scope" in content
+            assert "host_mismatch:cdn.other.net" in content
+
     def test_handles_arabic_content(self):
         """Handles Arabic text in results."""
         with tempfile.TemporaryDirectory() as tmpdir:

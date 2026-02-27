@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.reporting import (
@@ -301,6 +302,10 @@ def _generate_html(
             "rerun_cmd": "أمر إعادة التشغيل",
             "source": "المصدر",
             "submission_summary": "ملخص جاهز للتبليغ",
+            "triage_hints": "مؤشرات الفرز",
+            "duplicate_hints": "مرشحات التكرار",
+            "out_scope_hints": "مرشحات خارج النطاق",
+            "reason": "السبب",
             "generated": "تم إنشاؤه في",
         },
         "en": {
@@ -335,6 +340,10 @@ def _generate_html(
             "rerun_cmd": "Rerun Command",
             "source": "Source",
             "submission_summary": "Submission Summary",
+            "triage_hints": "Triage Hints",
+            "duplicate_hints": "Likely Duplicates",
+            "out_scope_hints": "Likely Out of Scope",
+            "reason": "Reason",
             "generated": "Generated at",
         }
     }
@@ -629,6 +638,7 @@ def _generate_html(
 
         <!-- Hunter Mode -->
         {_generate_hunter_section(stats.get("top_findings", []), t, colors, job_id) if config.hunter_mode else ""}
+        {_generate_triage_hints_section(stats.get("top_findings", []), t, colors, spec.get("target")) if config.hunter_mode else ""}
 
         <!-- الاكتشافات -->
         {_generate_findings_section(stats["findings"], t, colors) if stats["findings"] else ""}
@@ -816,6 +826,81 @@ def _generate_hunter_section(findings: List[Dict], t: Dict, colors: Dict, job_id
             <h3>🧭 {t["top_actionable"]} ({len(findings)})</h3>
             <div class="findings-list">
                 {"".join(items)}
+            </div>
+        </div>
+    '''
+
+
+def _generate_triage_hints_section(findings: List[Dict], t: Dict, colors: Dict, target: object) -> str:
+    if not findings:
+        return ""
+
+    duplicate_tokens = {"duplicate", "dupe", "already-reported", "known-issue"}
+    oos_tokens = {"out-of-scope", "out_of_scope", "oos", "third-party", "third_party", "cdn", "shared"}
+    target_host = str(target or "").strip().lower()
+    target_host = target_host.replace("https://", "").replace("http://", "").split("/")[0]
+
+    duplicate_rows = []
+    oos_rows = []
+    for finding in findings:
+        tags = {
+            str(tag).strip().lower()
+            for tag in (finding.get("tags") or [])
+            if isinstance(tag, str) and str(tag).strip()
+        }
+        title = finding.get("title") or finding.get("name") or finding.get("description") or "Finding"
+        location = finding.get("url") or finding.get("hostname") or finding.get("host") or ""
+        if tags & duplicate_tokens:
+            duplicate_rows.append((title, str(location), "tag:duplicate"))
+
+        oos_reason = ""
+        if tags & oos_tokens:
+            oos_reason = "tag:oos"
+        else:
+            host = str(finding.get("hostname") or "").strip().lower()
+            if not host and isinstance(location, str) and location.startswith(("http://", "https://")):
+                try:
+                    host = (urlparse(location).hostname or "").lower()
+                except ValueError:
+                    host = ""
+            if target_host and host and host != target_host and not host.endswith(f".{target_host}"):
+                oos_reason = f"host_mismatch:{host}"
+        if oos_reason:
+            oos_rows.append((title, str(location), oos_reason))
+
+    if not duplicate_rows and not oos_rows:
+        return ""
+
+    duplicate_html = ""
+    if duplicate_rows:
+        duplicate_html = f'''
+            <div class="card">
+                <h3>{t["duplicate_hints"]} ({len(duplicate_rows)})</h3>
+                <table>
+                    <tr><th>{t["details"]}</th><th>URL/Host</th><th>{t["reason"]}</th></tr>
+                    {"".join(f"<tr><td>{_truncate_text(row[0], 120)}</td><td>{_truncate_text(row[1], 120)}</td><td>{row[2]}</td></tr>" for row in duplicate_rows[:10])}
+                </table>
+            </div>
+        '''
+
+    oos_html = ""
+    if oos_rows:
+        oos_html = f'''
+            <div class="card">
+                <h3>{t["out_scope_hints"]} ({len(oos_rows)})</h3>
+                <table>
+                    <tr><th>{t["details"]}</th><th>URL/Host</th><th>{t["reason"]}</th></tr>
+                    {"".join(f"<tr><td>{_truncate_text(row[0], 120)}</td><td>{_truncate_text(row[1], 120)}</td><td>{row[2]}</td></tr>" for row in oos_rows[:10])}
+                </table>
+            </div>
+        '''
+
+    return f'''
+        <div class="card" style="margin-bottom: 30px;">
+            <h3>🧪 {t["triage_hints"]}</h3>
+            <div class="grid">
+                {duplicate_html}
+                {oos_html}
             </div>
         </div>
     '''

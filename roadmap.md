@@ -51,7 +51,7 @@
 - [x] Output “Top 10 Actionable Bugs” with proof links and rerun commands.
 - [x] Add one-click rerun command per finding (stage-scoped replay).
 - [x] Add concise submission-ready summaries per finding.
-- [ ] Add report sections for duplicates/out-of-scope filtering hints.
+- [x] Add report sections for duplicates/out-of-scope filtering hints.
 - [ ] Add end-to-end tests for hunter-mode report generation.
 - [ ] **Done when:** output is directly usable for triage and bug bounty submission workflow.
 
