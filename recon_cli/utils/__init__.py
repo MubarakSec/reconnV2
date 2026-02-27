@@ -16,6 +16,7 @@ This package contains various helper utilities:
 - config_migrate: Configuration migration
 - error_aggregator: Error grouping
 - error_recovery: Graceful degradation and partial results
+- error_taxonomy: Stable failure classification codes
 - diff: Scan comparison
 - reporter: Report generation
 - notify: Notifications
@@ -51,6 +52,7 @@ __all__ = [
     "config_migrate",
     "error_aggregator",
     "error_recovery",
+    "error_taxonomy",
     "diff",
     "reporter",
     "pdf_reporter",

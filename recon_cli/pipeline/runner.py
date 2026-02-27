@@ -14,6 +14,7 @@ from recon_cli.pipeline.stages import PIPELINE_STAGES, Stage, StageError, StageR
 from recon_cli.pipeline.parallel import DependencyResolver
 from recon_cli.utils.notify import send_pipeline_notification
 from recon_cli.utils import time as time_utils
+from recon_cli.utils.error_taxonomy import classify_exception
 # Stage plugin loader lives on the plugins package to avoid name collisions.
 import recon_cli.plugins as plugins_module
 from recon_cli import metrics
@@ -33,6 +34,45 @@ class PipelineRunner:
 
     def register_stage(self, stage: Stage) -> None:
         self.stages.append(stage)
+
+    @staticmethod
+    def _record_error_event(context: PipelineContext, exc: Exception, *, stage: Optional[str] = None) -> dict[str, object]:
+        classification = classify_exception(exc)
+        stats = context.record.metadata.stats.setdefault("error_taxonomy", {})
+        events = stats.setdefault("events", [])
+        code = str(classification.get("code") or "unknown.unhandled")
+        event = {
+            "timestamp": time_utils.iso_now(),
+            "stage": stage or context.record.metadata.stage,
+            "code": code,
+            "category": classification.get("category"),
+            "retryable": bool(classification.get("retryable")),
+            "message": str(exc),
+            "root_message": classification.get("root_message"),
+            "exception_type": classification.get("exception_type"),
+            "root_exception_type": classification.get("root_exception_type"),
+        }
+        events.append(event)
+        if len(events) > 100:
+            del events[:-100]
+        counts = stats.setdefault("counts", {})
+        counts[code] = int(counts.get(code, 0)) + 1
+        stats["last"] = event
+        context.manager.update_metadata(context.record)
+        return classification
+
+    @staticmethod
+    def _generate_partial_summary(context: PipelineContext, error: Exception) -> None:
+        try:
+            summary.generate_summary(context)
+            partial = context.record.metadata.stats.setdefault("partial_results", {})
+            partial["generated_after_failure"] = True
+            partial["last_failure_at"] = time_utils.iso_now()
+            partial["failure_stage"] = context.record.metadata.stage
+            partial["failure_message"] = str(error)
+            context.manager.update_metadata(context.record)
+        except Exception as summary_exc:  # pragma: no cover - defensive path
+            context.logger.warning("Failed to generate partial summary: %s", summary_exc)
 
     def _resolve_stages(self, stage_names: Optional[Sequence[str]]) -> list[Stage]:
         if not stage_names:
@@ -74,6 +114,7 @@ class PipelineRunner:
         selected_stages = self._resolve_stages(stages)
         context.mark_started()
         error: Exception | None = None
+        error_recorded = False
         try:
             use_parallel = bool(getattr(context.runtime_config, "parallel_stages", False))
             if use_parallel:
@@ -96,15 +137,23 @@ class PipelineRunner:
                     ran = stage.run(context)
                     progress[-1]["status"] = "completed" if ran else "skipped"
                 except StageError as exc:
+                    classification = self._record_error_event(context, exc, stage=stage.name)
+                    error_recorded = True
                     progress[-1]["status"] = "failed"
                     progress[-1]["error"] = str(exc)
-                    context.mark_error(str(exc))
+                    progress[-1]["error_code"] = classification.get("code")
+                    progress[-1]["error_category"] = classification.get("category")
+                    context.mark_error(f"[{classification.get('code')}] {exc}")
                     error = exc
                     raise
                 except Exception as exc:
+                    classification = self._record_error_event(context, exc, stage=stage.name)
+                    error_recorded = True
                     progress[-1]["status"] = "failed"
                     progress[-1]["error"] = str(exc)
-                    context.mark_error(str(exc))
+                    progress[-1]["error_code"] = classification.get("code")
+                    progress[-1]["error_category"] = classification.get("category")
+                    context.mark_error(f"[{classification.get('code')}] {exc}")
                     error = exc
                     raise
                 finally:
@@ -114,6 +163,9 @@ class PipelineRunner:
             summary.generate_summary(context)
         except Exception as exc:
             error = error or exc
+            if not error_recorded:
+                self._record_error_event(context, error, stage=context.record.metadata.stage)
+            self._generate_partial_summary(context, error)
             raise
         finally:
             status = "finished" if error is None else "failed"
@@ -203,6 +255,7 @@ class PipelineRunner:
                     }
                     results_by_name: dict[str, object] = {}
                     errors: list[Exception] = []
+                    first_failure_code: Optional[str] = None
                     for future, name in future_map.items():
                         try:
                             results_by_name[name] = future.result()
@@ -218,14 +271,21 @@ class PipelineRunner:
                         result = results_by_name.get(name)
                         entry["finished_at"] = finished_at
                         if isinstance(result, Exception):
+                            classification = self._record_error_event(context, result, stage=name)
                             entry["status"] = "failed"
                             entry["error"] = str(result)
+                            entry["error_code"] = classification.get("code")
+                            entry["error_category"] = classification.get("category")
+                            if first_failure_code is None:
+                                first_failure_code = str(classification.get("code") or "")
                         else:
                             entry["status"] = "completed" if bool(result) else "skipped"
                     context.manager.update_metadata(context.record)
 
                     if errors:
                         message = str(errors[0])
+                        if first_failure_code:
+                            message = f"[{first_failure_code}] {message}"
                         context.mark_error(message)
                         raise errors[0]
 
@@ -290,6 +350,7 @@ class PipelineRunner:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 errors: list[Exception] = []
+                first_failure_code: Optional[str] = None
                 finished_at = time_utils.iso_now()
                 for name, result in zip(batch, results):
                     entry = progress_map.get(name)
@@ -297,8 +358,13 @@ class PipelineRunner:
                         continue
                     entry["finished_at"] = finished_at
                     if isinstance(result, Exception):
+                        classification = self._record_error_event(context, result, stage=name)
                         entry["status"] = "failed"
                         entry["error"] = str(result)
+                        entry["error_code"] = classification.get("code")
+                        entry["error_category"] = classification.get("category")
+                        if first_failure_code is None:
+                            first_failure_code = str(classification.get("code") or "")
                         errors.append(result)
                     else:
                         entry["status"] = "completed" if result else "skipped"
@@ -306,6 +372,8 @@ class PipelineRunner:
 
                 if errors:
                     message = str(errors[0])
+                    if first_failure_code:
+                        message = f"[{first_failure_code}] {message}"
                     context.mark_error(message)
                     raise errors[0]
 

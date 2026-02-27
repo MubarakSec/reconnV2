@@ -66,3 +66,9 @@ def test_pipeline_records_failure(tmp_path: Path):
     with pytest.raises(StageError):
         runner.run(ctx)
     assert record.metadata.error
+    taxonomy = record.metadata.stats.get("error_taxonomy", {})
+    assert taxonomy.get("last", {}).get("code")
+    assert taxonomy.get("counts")
+    partial = record.metadata.stats.get("partial_results", {})
+    assert partial.get("generated_after_failure") is True
+    assert record.paths.results_txt.read_text(encoding="utf-8").strip()
