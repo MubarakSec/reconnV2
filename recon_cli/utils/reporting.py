@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from typing import Dict, Iterable, List
+from urllib.parse import urlparse
 
 
 FINDING_TYPES = {
@@ -95,6 +97,74 @@ POC_EXPECTED_BY_TYPE = {
     "upload_directory_listing": "Uploaded/accessible directory listing is exposed with sensitive content paths.",
     "auth_matrix_issue": "Cross-role access matrix shows forbidden action permitted.",
 }
+
+
+def _extract_host(entry: Dict[str, object]) -> str:
+    host = str(entry.get("hostname") or entry.get("host") or "").strip()
+    if host:
+        return host
+    url = str(entry.get("url") or "").strip()
+    if not url:
+        return ""
+    try:
+        return str(urlparse(url).hostname or "").strip()
+    except ValueError:
+        return ""
+
+
+def _is_private_host(host: str) -> bool:
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host in {"localhost"} or host.endswith(".local")
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+def compute_risk_score(entry: Dict[str, object]) -> int:
+    severity = resolve_severity(entry)
+    severity_base = {
+        "critical": 65,
+        "high": 50,
+        "medium": 35,
+        "low": 20,
+        "info": 10,
+    }.get(severity, 10)
+
+    host = _extract_host(entry)
+    exposure_score = 5 if _is_private_host(host) else 15
+
+    confidence = resolve_confidence_label(entry)
+    exploitability_score = {
+        "verified": 20,
+        "high": 14,
+        "medium": 8,
+        "low": 3,
+    }.get(confidence, 3)
+    if has_proof(entry):
+        exploitability_score += 6
+
+    tokens = {
+        str(tag).lower()
+        for tag in (entry.get("tags") or [])
+        if isinstance(tag, str)
+    }
+    context_blob = " ".join(
+        [
+            str(entry.get("title") or ""),
+            str(entry.get("name") or ""),
+            str(entry.get("url") or ""),
+            str(entry.get("description") or ""),
+            " ".join(sorted(tokens)),
+        ]
+    ).lower()
+    business_terms = {"auth", "admin", "api", "payment", "account", "billing"}
+    business_hits = sum(1 for term in business_terms if term in context_blob)
+    business_score = min(15, business_hits * 4)
+
+    total = severity_base + exposure_score + exploitability_score + business_score
+    return int(max(0, min(100, total)))
 
 
 def resolve_severity(entry: Dict[str, object]) -> str:
@@ -214,7 +284,8 @@ def rank_findings(
             return -1
         return confidence_order.get(value.lower(), -1)
 
-    def _key(entry: Dict[str, object]) -> tuple[int, int, int, int, int]:
+    def _key(entry: Dict[str, object]) -> tuple[int, int, int, int, int, int]:
+        risk_score = compute_risk_score(entry)
         score = int(entry.get("score", 0) or 0)
         severity = resolve_severity(entry)
         priority = str(entry.get("priority") or severity)
@@ -222,6 +293,7 @@ def rank_findings(
         verified = 1 if confidence == "verified" else 0
         proof = 1 if has_proof(entry) else 0
         return (
+            risk_score,
             verified,
             proof,
             _confidence_rank(confidence),
@@ -334,6 +406,7 @@ def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, ob
         "title": title,
         "target": target,
         "source": source,
+        "risk_score": compute_risk_score(entry),
         "proof": proof,
         "repro_cmd": repro_cmd,
         "poc_steps": [

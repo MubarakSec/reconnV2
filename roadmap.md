@@ -29,9 +29,9 @@
 - [ ] **Done when:** each supported vuln class has explicit confirmation logic, not just detection.
 
 ## Phase 4: Bounty-Centric Prioritization
-- [ ] Add risk score formula: severity + exposure + exploitability + business context.
-- [ ] Prioritize sensitive asset types (`auth`, `admin`, `api`, `payment`, `account`).
-- [ ] Add internet exposure weighting (publicly reachable > internal-only).
+- [x] Add risk score formula: severity + exposure + exploitability + business context.
+- [x] Prioritize sensitive asset types (`auth`, `admin`, `api`, `payment`, `account`).
+- [x] Add internet exposure weighting (publicly reachable > internal-only).
 - [ ] Add recency/novelty weighting to surface newly introduced risks.
 - [ ] Add “top targets first” queue mode for high-value attack surface.
 - [ ] Add tests that validate ranking determinism and priority ordering.

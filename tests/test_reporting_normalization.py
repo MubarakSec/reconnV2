@@ -88,3 +88,25 @@ def test_build_triage_entry_fields():
     assert entry["asset_context"]["endpoint"] == "https://example.com/search?q=1"
     assert entry["asset_context"]["auth_requirement"] in {"unknown", "likely_required", "public"}
     assert entry["impact_hypothesis"]
+
+
+def test_compute_risk_score_prioritizes_verified_public_auth():
+    high_value = {
+        "type": "finding",
+        "finding_type": "sql_injection",
+        "source": "sqlmap",
+        "title": "SQLi in admin account API",
+        "url": "https://example.com/api/admin/account?id=1",
+        "severity": "high",
+        "tags": ["sqli:confirmed"],
+    }
+    low_value = {
+        "type": "finding",
+        "finding_type": "sql_injection",
+        "source": "sqlmap",
+        "title": "SQLi internal test",
+        "url": "https://10.0.0.5/internal",
+        "severity": "medium",
+        "tags": [],
+    }
+    assert reporting.compute_risk_score(high_value) > reporting.compute_risk_score(low_value)
