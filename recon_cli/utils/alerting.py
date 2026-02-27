@@ -955,7 +955,7 @@ class AlertManager:
             name="Test Notification",
             message="🎉 This is a test notification from ReconnV2!",
             severity=AlertSeverity.INFO,
-            source="web-dashboard",
+            source="recon-cli",
             labels={"type": "test"},
         )
         

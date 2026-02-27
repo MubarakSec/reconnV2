@@ -5,7 +5,7 @@ This package provides comprehensive tools for security reconnaissance:
 - Multi-stage scanning pipeline with parallel execution
 - Vulnerability and secret detection
 - Integration with external tools (nuclei, subfinder, httpx, naabu, dalfox, etc.)
-- REST API and Web Dashboard
+- REST API
 - Extensible plugin system
 - Prometheus metrics and distributed tracing
 - Multi-channel alerting (Slack, Discord, Telegram, Email)
@@ -47,7 +47,6 @@ _LAZY_SUBMODULES = {
     "tools",
     "users",
     "utils",
-    "web",
 }
 
 __all__ = [
@@ -73,7 +72,6 @@ __all__ = [
     "db",
     "learning",
     "takeover",
-    "web",
     # New improvements
     "exceptions",
     "settings",

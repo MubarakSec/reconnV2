@@ -1165,21 +1165,6 @@ def serve(
         raise typer.Exit(code=1)
 
 
-@app.command("dashboard")
-def dashboard(
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind"),
-    port: int = typer.Option(8080, "--port", help="Port to bind"),
-) -> None:
-    """Start the web dashboard."""
-    try:
-        from recon_cli.web.app import run_dashboard
-        run_dashboard(host=host, port=port)
-    except ImportError as e:
-        typer.echo(f"❌ Missing dependencies: {e}", err=True)
-        typer.echo("Run: pip install fastapi uvicorn jinja2", err=True)
-        raise typer.Exit(code=1)
-
-
 @app.command("notify")
 def notify(
     message: str = typer.Argument("", help="Message to send"),
@@ -1570,41 +1555,6 @@ def generate_report(
 
 
 # ============================================================================
-# WEB DASHBOARD
-# ============================================================================
-
-@app.command("web")
-def start_web(
-    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
-    port: int = typer.Option(8080, "--port", "-p", help="Port to bind to"),
-    reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
-) -> None:
-    """Start the web dashboard."""
-    try:
-        import uvicorn
-        from recon_cli.web.app import app as web_app, WEB_AVAILABLE
-        
-        if not WEB_AVAILABLE:
-            typer.secho("Web dependencies not installed. Run: pip install fastapi uvicorn", fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-        
-        rich_print(f"[bold cyan]🌐 Starting ReconnV2 Web Dashboard[/bold cyan]")
-        rich_print(f"   URL: http://{host}:{port}")
-        rich_print(f"   Press Ctrl+C to stop\n")
-        
-        uvicorn.run(
-            "recon_cli.web.app:app",
-            host=host,
-            port=port,
-            reload=reload,
-            log_level="info",
-        )
-    except ImportError:
-        typer.secho("Web dependencies not installed. Run: pip install fastapi uvicorn", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-
-# ============================================================================
 # QUICK START HELPER
 # ============================================================================
 
@@ -1634,18 +1584,14 @@ def quickstart_guide() -> None:
    recon report <job_id> --format html --output report.html
    recon report <job_id> --executive  # Summary only
 
-[bold]7. Start Web Dashboard[/bold]
-   recon web --port 8080
-   Then open http://localhost:8080
-
-[bold]8. List All Jobs[/bold]
+[bold]7. List All Jobs[/bold]
    recon list
    recon list --status finished
 
-[bold]9. Install Shell Completions[/bold]
+[bold]8. Install Shell Completions[/bold]
    recon completions --install
 
-[bold]10. Get Help[/bold]
+[bold]9. Get Help[/bold]
    recon --help
    recon scan --help
 
