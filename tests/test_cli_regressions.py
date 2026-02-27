@@ -362,6 +362,14 @@ def test_status_includes_last_failed_stage_and_log_path(tmp_path: Path, monkeypa
     assert "log_path" in result.stdout
 
 
+def test_target_priority_score_prefers_sensitive_targets(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    low = manager.create_job(target="static.example.com", profile="passive")
+    high = manager.create_job(target="api-admin.example.com", profile="full")
+    assert cli._target_priority_score(high) > cli._target_priority_score(low)
+
+
 def test_report_hunter_mode_generates_actionable_html(tmp_path: Path, monkeypatch):
     _configure_test_home(tmp_path, monkeypatch)
     manager = JobManager()

@@ -188,6 +188,27 @@ def _auto_allow_ip(target_value: str) -> bool:
     return validation.is_ip(candidate)
 
 
+def _target_priority_score(record: JobRecord) -> int:
+    target = str(getattr(record.spec, "target", "") or "").lower()
+    profile = str(getattr(record.spec, "profile", "") or "").lower()
+    score = 0
+    for token, weight in (
+        ("auth", 6),
+        ("admin", 6),
+        ("api", 5),
+        ("payment", 5),
+        ("account", 5),
+        ("billing", 4),
+    ):
+        if token in target:
+            score += weight
+    if profile in {"full", "deep"}:
+        score += 2
+    if "staging" in target or "dev" in target or "test" in target:
+        score -= 2
+    return score
+
+
 def _run_async_command(coro):
     """Run coroutine in an isolated loop without mutating global loop state."""
     loop = asyncio.new_event_loop()
@@ -367,6 +388,11 @@ def worker_run(
         min=1,
         help="Number of worker loops to run concurrently",
     ),
+    top_targets_first: bool = typer.Option(
+        False,
+        "--top-targets-first",
+        help="Prioritize queued jobs targeting high-value assets (auth/admin/api/payment/account)",
+    ),
 ) -> None:
     """Run the job worker loop that pulls queued scans and executes the pipeline."""
     manager = JobManager()
@@ -381,7 +407,20 @@ def worker_run(
             if not queued:
                 time.sleep(poll_interval)
                 continue
-            job_id = queued[0]
+            if top_targets_first:
+                scored: list[tuple[int, str]] = []
+                for candidate in queued:
+                    candidate_record = manager.load_job(candidate)
+                    if not candidate_record:
+                        continue
+                    scored.append((_target_priority_score(candidate_record), candidate))
+                if scored:
+                    scored.sort(reverse=True)
+                    job_id = scored[0][1]
+                else:
+                    job_id = queued[0]
+            else:
+                job_id = queued[0]
             record = lifecycle.move_to_running(job_id, owner=name)
             if not record:
                 time.sleep(0.2)
