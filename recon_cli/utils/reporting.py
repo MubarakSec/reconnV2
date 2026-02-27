@@ -82,6 +82,20 @@ IMPACT_HINTS = {
     "auth_matrix_issue": "indicates broken authorization boundaries",
 }
 
+POC_EXPECTED_BY_TYPE = {
+    "sql_injection": "The command reports injectable parameter(s) with DB fingerprint evidence.",
+    "xss": "The payload is reflected/executed in browser context or scanner confirms execution.",
+    "subdomain_takeover": "Service fingerprint and DNS state indicate claimable takeover condition.",
+    "open_redirect": "Response redirects to attacker-controlled destination.",
+    "lfi": "Response includes local file content patterns (e.g. /etc/passwd).",
+    "ssrf": "Out-of-band interaction or internal fetch evidence confirms server-side request.",
+    "xxe": "XML parser expansion leads to file/interaction evidence.",
+    "graphql_authz": "Unauthorized GraphQL query returns data across privilege boundary.",
+    "exposed_secret": "Secret pattern is present in response/body and hash/metadata confirms match.",
+    "upload_directory_listing": "Uploaded/accessible directory listing is exposed with sensitive content paths.",
+    "auth_matrix_issue": "Cross-role access matrix shows forbidden action permitted.",
+}
+
 
 def resolve_severity(entry: Dict[str, object]) -> str:
     severity = str(entry.get("severity") or "").lower()
@@ -293,6 +307,11 @@ def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, ob
     confidence = resolve_confidence_label(entry)
     proof = _proof_text(entry)
     repro_cmd = str(entry.get("repro_cmd") or "").strip() or build_finding_rerun_command(job_id, entry)
+    hostname = str(entry.get("hostname") or entry.get("host") or "")
+    endpoint = str(entry.get("url") or "")
+    auth_requirement = _infer_auth_requirement(entry)
+    environment = _infer_environment(hostname, endpoint)
+    impact_hypothesis = IMPACT_HINTS.get(finding_type, "can expose additional attack surface and business risk")
     raw_id = "|".join(
         [
             str(job_id),
@@ -317,9 +336,50 @@ def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, ob
         "source": source,
         "proof": proof,
         "repro_cmd": repro_cmd,
+        "poc_steps": [
+            {
+                "command": repro_cmd,
+                "expected_success": POC_EXPECTED_BY_TYPE.get(
+                    finding_type,
+                    "The command reproduces the behavior and yields evidence aligned with the finding.",
+                ),
+            }
+        ],
+        "asset_context": {
+            "host": hostname,
+            "endpoint": endpoint,
+            "auth_requirement": auth_requirement,
+            "environment": environment,
+        },
+        "impact_hypothesis": impact_hypothesis,
         "submission_summary": build_submission_summary(entry),
         "tags": [str(tag) for tag in tags if isinstance(tag, str)],
     }
+
+
+def _infer_auth_requirement(entry: Dict[str, object]) -> str:
+    tags = {
+        str(tag).strip().lower()
+        for tag in (entry.get("tags") or [])
+        if isinstance(tag, str)
+    }
+    if any(token in tags for token in {"auth", "authenticated", "admin", "privileged"}):
+        return "likely_required"
+    url = str(entry.get("url") or "").lower()
+    if any(token in url for token in ("/admin", "/account", "/settings", "/profile", "/api/private")):
+        return "likely_required"
+    if any(token in tags for token in {"public", "unauthenticated"}):
+        return "public"
+    return "unknown"
+
+
+def _infer_environment(hostname: str, endpoint: str) -> str:
+    value = f"{hostname} {endpoint}".lower()
+    if any(token in value for token in ("staging", "stage.", "dev.", "test.", "qa.")):
+        return "non_prod"
+    if value:
+        return "prod_or_unknown"
+    return "unknown"
 
 
 def is_secret(entry: Dict[str, object]) -> bool:

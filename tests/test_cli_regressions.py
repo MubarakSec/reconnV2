@@ -214,6 +214,9 @@ def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):
     assert payload["proof"] == "verified"
     assert payload["repro_cmd"].startswith("recon-cli rerun")
     assert payload["finding_id"].startswith("fnd_")
+    assert payload["poc_steps"]
+    assert payload["asset_context"]["endpoint"] == "https://example.com/profile"
+    assert payload["impact_hypothesis"]
 
 
 def test_rerun_restart_clears_checkpoints_and_results(tmp_path: Path, monkeypatch):

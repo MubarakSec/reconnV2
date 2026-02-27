@@ -11,9 +11,9 @@
 
 ## Phase 2: Exploitable Finding Output
 - [ ] For each high/critical finding, generate reproducible request/response artifacts.
-- [ ] Attach PoC steps (exact command + expected success condition).
-- [ ] Include affected asset context (host, endpoint, auth requirement, environment).
-- [ ] Add impact hypothesis template (why it matters from bounty perspective).
+- [x] Attach PoC steps (exact command + expected success condition).
+- [x] Include affected asset context (host, endpoint, auth requirement, environment).
+- [x] Add impact hypothesis template (why it matters from bounty perspective).
 - [x] Add structured export format for triage (`finding_id`, `severity`, `proof`, `repro_cmd`).
 - [ ] Add tests to ensure artifact generation for every verified high/critical finding.
 - [ ] **Done when:** a hunter can reproduce top findings directly from output without extra digging.

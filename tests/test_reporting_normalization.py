@@ -70,6 +70,7 @@ def test_build_triage_entry_fields():
             "source": "sqlmap",
             "title": "SQLi in search",
             "url": "https://example.com/search?q=1",
+            "hostname": "example.com",
             "severity": "critical",
             "tags": ["sqli:confirmed"],
         },
@@ -81,3 +82,9 @@ def test_build_triage_entry_fields():
     assert entry["finding_type"] == "sql_injection"
     assert entry["proof"] == "verified"
     assert entry["repro_cmd"].startswith("recon-cli rerun job123 --stages vuln_scan")
+    assert entry["poc_steps"][0]["command"] == entry["repro_cmd"]
+    assert "injectable parameter" in entry["poc_steps"][0]["expected_success"].lower()
+    assert entry["asset_context"]["host"] == "example.com"
+    assert entry["asset_context"]["endpoint"] == "https://example.com/search?q=1"
+    assert entry["asset_context"]["auth_requirement"] in {"unknown", "likely_required", "public"}
+    assert entry["impact_hypothesis"]
