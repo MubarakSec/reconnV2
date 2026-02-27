@@ -24,7 +24,7 @@ from recon_cli.pipeline.stages import PIPELINE_STAGES
 from recon_cli.utils import fs
 from recon_cli.utils import validation
 from recon_cli.utils.jsonl import read_jsonl
-from recon_cli.utils.sanitizer import redact
+from recon_cli.utils.sanitizer import redact, redact_json_value
 from recon_cli.active import modules as active_modules
 from recon_cli.tools.executor import CommandExecutor
 
@@ -999,6 +999,7 @@ def export(
                     "request": entry.get("request"),
                     "response": entry.get("response"),
                 }
+                artifact_payload = redact_json_value(artifact_payload)
                 artifact_path.write_text(
                     json.dumps(artifact_payload, indent=2, sort_keys=True),
                     encoding="utf-8",
@@ -1045,13 +1046,14 @@ def report(
         if verified_only or proof_required or hunter_mode:
             typer.echo("verified-only/proof-required filters are only supported for html reports", err=True)
             raise typer.Exit(code=2)
-        typer.echo(record.paths.results_txt.read_text(encoding="utf-8"))
+        payload = record.paths.results_txt.read_text(encoding="utf-8")
+        typer.echo(redact(payload) or payload)
         return
     if fmt == "md":
         if verified_only or proof_required or hunter_mode:
             typer.echo("verified-only/proof-required filters are only supported for html reports", err=True)
             raise typer.Exit(code=2)
-        content = record.paths.results_txt.read_text(encoding="utf-8")
+        content = redact(record.paths.results_txt.read_text(encoding="utf-8")) or ""
         md_lines = ["# recon-cli report", f"Job: {job_id}", "", "```", content.strip(), "```"]
         typer.echo("\n".join(md_lines))
         return
@@ -1077,7 +1079,8 @@ def report(
         "metadata": record.metadata.to_dict(),
         "stats": record.metadata.stats,
     }
-    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    safe_payload = redact_json_value(payload)
+    typer.echo(json.dumps(safe_payload, indent=2, sort_keys=True))
 
 
 @app.command("verify-job")

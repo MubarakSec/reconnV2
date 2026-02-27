@@ -140,6 +140,32 @@ class TestGenerateHtmlReport:
             assert "vulnerable.example.com" in content
             assert "api.example.com" in content
 
+    def test_html_redacts_sensitive_tokens(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_dir = Path(tmpdir) / "job"
+            job_dir.mkdir()
+
+            (job_dir / "metadata.json").write_text(json.dumps({
+                "job_id": "test_job",
+                "status": "finished",
+                "stats": {},
+            }))
+            results = [
+                {"type": "url", "url": "https://example.com/profile?token=abc123"},
+                {"type": "finding", "title": "auth leak", "severity": "high", "proof": "Authorization: Bearer xyz987"},
+            ]
+            with (job_dir / "results.jsonl").open("w") as f:
+                for item in results:
+                    f.write(json.dumps(item) + "\n")
+
+            output_path = Path(tmpdir) / "report.html"
+            generate_html_report(job_dir, output_path)
+
+            content = output_path.read_text()
+            assert "abc123" not in content
+            assert "xyz987" not in content
+            assert "***" in content
+
     def test_html_includes_quality_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 _PLACEHOLDER = "***"
 
@@ -64,4 +64,24 @@ def redact(text: str | None) -> str | None:
     return redacted
 
 
-__all__ = ["redact"]
+def redact_json_value(value: Any) -> Any:
+    """Recursively redact sensitive material from structured payloads."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, list):
+        return [redact_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [redact_json_value(item) for item in value]
+    if isinstance(value, dict):
+        redacted_dict: Dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = redact(str(key)) if not isinstance(key, str) else key
+            if isinstance(safe_key, str) and safe_key.lower() in _SENSITIVE_KEYS:
+                redacted_dict[safe_key] = _PLACEHOLDER
+                continue
+            redacted_dict[safe_key] = redact_json_value(item)
+        return redacted_dict
+    return value
+
+
+__all__ = ["redact", "redact_json_value"]

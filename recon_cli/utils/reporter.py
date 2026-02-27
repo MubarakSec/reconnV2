@@ -22,6 +22,7 @@ from recon_cli.utils.reporting import (
     resolve_confidence_label,
     resolve_severity,
 )
+from recon_cli.utils.sanitizer import redact
 
 
 @dataclass
@@ -137,7 +138,8 @@ def generate_html_report(
     if output_path is None:
         output_path = job_dir / "report.html"
     
-    output_path.write_text(html, encoding="utf-8")
+    safe_html = redact(html) or html
+    output_path.write_text(safe_html, encoding="utf-8")
     
     return output_path
 

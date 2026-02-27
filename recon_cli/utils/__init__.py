@@ -24,7 +24,7 @@ This package contains various helper utilities:
 """
 
 from recon_cli.utils.time import iso_now, utc_now
-from recon_cli.utils.sanitizer import redact
+from recon_cli.utils.sanitizer import redact, redact_json_value
 from recon_cli.utils.validation import validate_target
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "utc_now",
     # Sanitizer
     "redact",
+    "redact_json_value",
     # Validation
     "validate_target",
     # Modules
@@ -62,4 +63,3 @@ __all__ = [
     "logging",
     "performance",
 ]
-
