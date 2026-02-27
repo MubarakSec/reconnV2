@@ -6,7 +6,7 @@
 - [x] Add `--verified-only` output mode.
 - [x] Add `--proof-required` mode to suppress unverified high-risk claims.
 - [x] Add result quality metrics (noise ratio, duplicate ratio, verified ratio).
-- [ ] Add tests for dedupe collisions and confidence classification edge cases.
+- [x] Add tests for dedupe collisions and confidence classification edge cases.
 - [ ] **Done when:** repeated runs produce stable, low-noise findings with measurable improvement.
 
 ## Phase 2: Exploitable Finding Output

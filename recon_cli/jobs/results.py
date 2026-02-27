@@ -6,13 +6,39 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional
+from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.jsonl import JsonlWriter, read_jsonl
+from recon_cli.utils.reporting import is_finding, resolve_confidence_label
 from recon_cli.jobs.manager import JobManager
 
 
 def dedupe_key(payload: Dict[str, object]) -> tuple:
+    def _url_path_and_params(value: object) -> tuple[object, tuple]:
+        if not isinstance(value, str) or not value:
+            return None, ()
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            return None, ()
+        path = parsed.path or ""
+        params = tuple(sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)))
+        return path, params
+
+    def _parameter_hint(entry: Dict[str, object]) -> object:
+        for key in ("parameter", "param", "name"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                return value
+        details = entry.get("details")
+        if isinstance(details, dict):
+            for key in ("parameter", "param", "name"):
+                value = details.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return None
+
     ptype = payload.get("type")
     if ptype == "hostname":
         return (ptype, payload.get("hostname"))
@@ -33,7 +59,19 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
     if ptype == "asset_enrichment":
         return (ptype, payload.get("hostname"), payload.get("ip"))
     if ptype == "finding":
-        return (ptype, payload.get("description"), payload.get("hostname"))
+        url_value = payload.get("url") or payload.get("matched_at")
+        path_fp, query_param_fp = _url_path_and_params(url_value)
+        return (
+            ptype,
+            payload.get("finding_type"),
+            payload.get("template_id") or payload.get("template") or payload.get("templateID"),
+            url_value,
+            path_fp,
+            query_param_fp,
+            payload.get("hostname"),
+            payload.get("description") or payload.get("title"),
+            _parameter_hint(payload),
+        )
     if ptype == "cms":
         return (ptype, payload.get("hostname"), payload.get("cms"), payload.get("source"))
     if ptype == "learning_prediction":
@@ -94,6 +132,8 @@ class ResultsTracker:
                 self._seen.add(key)
                 self._records[key] = payload
                 self._order.append(key)
+                self.stats["records_seen"] += 1
+                self.stats["records_unique"] += 1
                 ptype = payload.get("type")
                 if ptype:
                     self.stats[f"type:{ptype}"] += 1
@@ -102,14 +142,22 @@ class ResultsTracker:
         with self._lock:
             if self.allow and not self.allow(payload):
                 return False
+            if isinstance(payload, dict):
+                payload = self._normalize_payload(payload)
             key = dedupe_key(payload)
+            self.stats["records_seen"] += 1
             if key in self._seen:
+                self.stats["records_duplicate"] += 1
+                ptype = payload.get("type")
+                if ptype:
+                    self.stats[f"duplicate:{ptype}"] += 1
                 merged = self._merge_entries(self._records.get(key, {}), payload)
                 if merged != self._records.get(key):
                     self._records[key] = merged
                     self._rewrite_all()
                 return True
             self._seen.add(key)
+            self.stats["records_unique"] += 1
             payload.setdefault("timestamp", time_utils.iso_now())
             self._records[key] = payload
             self._order.append(key)
@@ -139,6 +187,7 @@ class ResultsTracker:
             for payload in payloads:
                 if not isinstance(payload, dict):
                     continue
+                payload = self._normalize_payload(payload)
                 key = dedupe_key(payload)
                 if key in self._seen:
                     merged = self._merge_entries(self._records.get(key, {}), payload)
@@ -148,6 +197,8 @@ class ResultsTracker:
                 self._seen.add(key)
                 self._records[key] = payload
                 self._order.append(key)
+                self.stats["records_seen"] += 1
+                self.stats["records_unique"] += 1
                 ptype = payload.get("type")
                 if ptype:
                     self.stats[f"type:{ptype}"] += 1
@@ -187,6 +238,25 @@ class ResultsTracker:
             except ValueError:
                 return -1
         return -1
+
+    @staticmethod
+    def _confidence_rank(value: object) -> int:
+        order = ["low", "medium", "high", "verified"]
+        if isinstance(value, str):
+            try:
+                return order.index(value.lower())
+            except ValueError:
+                return -1
+        return -1
+
+    @staticmethod
+    def _normalize_payload(payload: Dict[str, object]) -> Dict[str, object]:
+        normalized = dict(payload)
+        if is_finding(normalized):
+            label = resolve_confidence_label(normalized)
+            if label:
+                normalized["confidence_label"] = label
+        return normalized
 
     def _merge_entries(self, existing: Dict[str, object], new: Dict[str, object]) -> Dict[str, object]:
         merged = dict(existing)
@@ -235,10 +305,26 @@ class ResultsTracker:
                 if new_rank > existing_rank:
                     merged["priority"] = value
                 continue
+            if key == "confidence":
+                try:
+                    merged_value = float(merged.get("confidence", 0.0))
+                    new_value = float(value)
+                    merged["confidence"] = max(merged_value, new_value)
+                except (TypeError, ValueError):
+                    merged["confidence"] = merged.get("confidence", value)
+                continue
+            if key == "confidence_label":
+                existing_rank = self._confidence_rank(merged.get("confidence_label"))
+                new_rank = self._confidence_rank(value)
+                if new_rank > existing_rank:
+                    merged["confidence_label"] = value
+                continue
             if key == "timestamp":
                 continue
             if key not in merged or merged.get(key) in (None, "", []):
                 merged[key] = value
+        if is_finding(merged):
+            merged["confidence_label"] = resolve_confidence_label(merged)
         return merged
 
     def _rewrite_all(self) -> None:

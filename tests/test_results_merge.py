@@ -15,6 +15,9 @@ def test_results_tracker_merges_duplicates(tmp_path: Path):
     assert set(entry.get("tags", [])) == {"a", "b"}
     assert entry.get("score") == 30
     assert "ffuf" in entry.get("sources", [])
+    assert tracker.stats.get("records_seen") == 2
+    assert tracker.stats.get("records_unique") == 1
+    assert tracker.stats.get("records_duplicate") == 1
 
 
 def test_results_tracker_keeps_distinct_idor_suspects(tmp_path: Path):
@@ -52,3 +55,65 @@ def test_results_tracker_keeps_distinct_idor_suspects(tmp_path: Path):
     )
     entries = [e for e in read_jsonl(path) if e.get("type") == "idor_suspect"]
     assert len(entries) == 3
+
+
+def test_results_tracker_distinguishes_findings_by_url(tmp_path: Path):
+    path = tmp_path / "results.jsonl"
+    tracker = ResultsTracker(path)
+    tracker.append(
+        {
+            "type": "finding",
+            "finding_type": "xss",
+            "description": "Reflected XSS",
+            "hostname": "example.com",
+            "url": "https://example.com/a",
+            "severity": "high",
+        }
+    )
+    tracker.append(
+        {
+            "type": "finding",
+            "finding_type": "xss",
+            "description": "Reflected XSS",
+            "hostname": "example.com",
+            "url": "https://example.com/b",
+            "severity": "high",
+        }
+    )
+    entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
+    assert len(entries) == 2
+
+
+def test_results_tracker_sets_confidence_label(tmp_path: Path):
+    path = tmp_path / "results.jsonl"
+    tracker = ResultsTracker(path)
+    tracker.append(
+        {
+            "type": "finding",
+            "finding_type": "open_redirect",
+            "description": "Open redirect",
+            "hostname": "example.com",
+            "url": "https://example.com/redirect",
+            "tags": ["redirect", "confirmed"],
+        }
+    )
+    entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
+    assert entries[0].get("confidence_label") == "verified"
+
+
+def test_results_tracker_keeps_findings_with_different_parameters(tmp_path: Path):
+    path = tmp_path / "results.jsonl"
+    tracker = ResultsTracker(path)
+    base = {
+        "type": "finding",
+        "finding_type": "sql_injection",
+        "description": "SQLi",
+        "hostname": "example.com",
+        "url": "https://example.com/search?q=1",
+        "source": "sqlmap",
+        "severity": "high",
+    }
+    tracker.append({**base, "parameter": "q"})
+    tracker.append({**base, "parameter": "id", "url": "https://example.com/search?id=1"})
+    entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
+    assert len(entries) == 2

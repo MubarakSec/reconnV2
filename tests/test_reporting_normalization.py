@@ -36,6 +36,17 @@ def test_resolve_confidence_label_and_verified():
     assert reporting.is_verified_finding({"severity": "high"}) is False
 
 
+def test_resolve_confidence_label_edge_cases():
+    # Explicit label must win over heuristics.
+    assert reporting.resolve_confidence_label(
+        {"confidence_label": "low", "tags": ["ssrf:confirmed"], "source": "extended-validation"}
+    ) == "low"
+    # Exploit-validation source should be treated as verified.
+    assert reporting.resolve_confidence_label({"source": "exploit-validation"}) == "verified"
+    # Non-string tags should be ignored safely.
+    assert reporting.resolve_confidence_label({"tags": [None, 7, "confirmed"]}) == "verified"
+
+
 def test_infer_replay_stage_and_rerun_command():
     assert reporting.infer_replay_stage({"source": "dalfox"}) == "vuln_scan"
     assert reporting.infer_replay_stage({"finding_type": "open_redirect"}) == "extended_validation"
