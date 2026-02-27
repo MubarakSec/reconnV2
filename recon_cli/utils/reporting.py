@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import shlex
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List
 from urllib.parse import parse_qsl, urlparse
@@ -433,9 +434,11 @@ def _rerun_command_prefix() -> str:
 def build_finding_rerun_command(job_id: str, entry: Dict[str, object]) -> str:
     stage = infer_replay_stage(entry)
     prefix = _rerun_command_prefix()
+    job_token = shlex.quote(str(job_id or "").strip() or "JOB_ID")
     if stage:
-        return f"{prefix} rerun {job_id} --stages {stage} --keep-results"
-    return f"{prefix} rerun {job_id} --restart"
+        stage_token = shlex.quote(str(stage))
+        return f"{prefix} rerun {job_token} --stages {stage_token} --keep-results"
+    return f"{prefix} rerun {job_token} --restart"
 
 
 def build_submission_summary(entry: Dict[str, object]) -> str:
