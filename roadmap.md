@@ -23,7 +23,7 @@
 - [ ] Add dedicated IDOR validator (object ownership/access control checks).
 - [x] Add auth-bypass validator (forced-browse and privilege-boundary checks).
 - [x] Add open-redirect validator (redirect chain and sink confirmation).
-- [ ] Add subdomain takeover validator hardening (fingerprint + DNS state + claimability).
+- [x] Add subdomain takeover validator hardening (fingerprint + DNS state + claimability).
 - [ ] Add secret exposure validator (live token sanity checks with safe guards).
 - [ ] Add tests per validator with real/false-positive fixtures.
 - [ ] **Done when:** each supported vuln class has explicit confirmation logic, not just detection.

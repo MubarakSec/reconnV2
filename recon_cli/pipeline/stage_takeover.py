@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -67,6 +67,7 @@ class TakeoverStage(Stage):
         findings = 0
         skipped_no_cname = 0
         cname_matches = 0
+        suppressed_low_confidence = 0
         if require_cname and dns is None:
             context.logger.warning("dnspython not available; skipping takeover checks (require_cname enabled)")
             note_missing_tool(context, "dnspython")
@@ -81,6 +82,7 @@ class TakeoverStage(Stage):
         for host in hosts[:max_hosts]:
             checked += 1
             cname_chain = self._resolve_cname_chain(host, dns_timeout) if dns is not None else []
+            dns_state = self._evaluate_dns_state(host, cname_chain, dns_timeout)
             if require_cname and not cname_chain:
                 skipped_no_cname += 1
                 continue
@@ -90,22 +92,38 @@ class TakeoverStage(Stage):
             finding = detector.check_host(host, providers=providers if providers else None)
             if not finding:
                 continue
+            claimability = self._assess_claimability(finding.provider, providers, dns_state)
+            if claimability["level"] == "low":
+                suppressed_low_confidence += 1
+                continue
             payload = {
                 "type": "finding",
                 "finding_type": "subdomain_takeover",
                 "source": "takeover-check",
                 "hostname": finding.hostname,
-                "description": "Potential subdomain takeover detected",
+                "description": f"Potential subdomain takeover detected ({claimability['level']} claimability)",
                 "details": {
                     "provider": finding.provider,
                     "evidence": finding.evidence,
                     "cname_chain": cname_chain,
+                    "status_code": int(getattr(finding, "status_code", 0) or 0),
+                    "matched_url": str(getattr(finding, "matched_url", "") or ""),
+                    "dns_state": dns_state,
+                    "claimability": claimability,
                 },
-                "tags": ["takeover", "subdomain", f"provider:{finding.provider}"],
-                "score": 90,
-                "priority": "critical",
-                "severity": "critical",
+                "tags": [
+                    "takeover",
+                    "subdomain",
+                    f"provider:{finding.provider}",
+                    f"claimability:{claimability['level']}",
+                ],
+                "score": int(claimability["score"]),
+                "priority": str(claimability["priority"]),
+                "severity": str(claimability["severity"]),
+                "confidence_label": str(claimability["confidence"]),
             }
+            if claimability["level"] == "high":
+                payload["tags"].append("confirmed")
             if context.results.append(payload):
                 findings += 1
 
@@ -113,6 +131,7 @@ class TakeoverStage(Stage):
         stats["checked"] = checked
         stats["findings"] = findings
         stats["max_hosts"] = max_hosts
+        stats["suppressed_low_confidence"] = suppressed_low_confidence
         if require_cname:
             stats["skipped_no_cname"] = skipped_no_cname
         if cname_matches:
@@ -146,6 +165,59 @@ class TakeoverStage(Stage):
                 break
             current = next_name
         return chain
+
+    def _evaluate_dns_state(self, hostname: str, cname_chain: List[str], timeout: int) -> Dict[str, object]:
+        if dns is None:
+            return {"state": "unknown", "dangling": False, "target": hostname}
+        target = cname_chain[-1] if cname_chain else hostname
+        resolved = self._target_has_address(target, timeout)
+        if cname_chain:
+            state = "cname_resolved" if resolved else "cname_unresolved"
+        else:
+            state = "resolved" if resolved else "unresolved"
+        return {"state": state, "dangling": not resolved, "target": target}
+
+    def _target_has_address(self, hostname: str, timeout: int) -> bool:
+        if dns is None:
+            return False
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = timeout
+        resolver.lifetime = timeout
+        for record_type in ("A", "AAAA"):
+            try:
+                answers = resolver.resolve(hostname, record_type)
+            except Exception:
+                continue
+            for _ in answers:
+                return True
+        return False
+
+    def _assess_claimability(self, provider: str, providers: Set[str], dns_state: Dict[str, object]) -> Dict[str, object]:
+        dns_provider_match = bool(providers and provider in providers)
+        dns_dangling = bool(dns_state.get("dangling"))
+        if dns_provider_match and dns_dangling:
+            return {
+                "level": "high",
+                "confidence": "verified",
+                "score": 95,
+                "priority": "critical",
+                "severity": "critical",
+            }
+        if dns_provider_match or dns_dangling:
+            return {
+                "level": "medium",
+                "confidence": "high",
+                "score": 86,
+                "priority": "high",
+                "severity": "high",
+            }
+        return {
+            "level": "low",
+            "confidence": "medium",
+            "score": 70,
+            "priority": "medium",
+            "severity": "medium",
+        }
 
     @staticmethod
     def _match_providers(cname_chain: List[str]) -> Set[str]:

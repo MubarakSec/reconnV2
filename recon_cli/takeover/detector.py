@@ -43,6 +43,8 @@ class TakeoverFinding:
     hostname: str
     provider: str
     evidence: str
+    status_code: int = 0
+    matched_url: str = ""
 
 
 class TakeoverDetector:
@@ -65,7 +67,12 @@ class TakeoverDetector:
                     continue
                 for snippet in fp.get("responses", []):
                     if snippet.lower() in body.lower():
-                        return TakeoverFinding(hostname=hostname, provider=fp["provider"], evidence=snippet)
+                        return TakeoverFinding(
+                            hostname=hostname,
+                            provider=fp["provider"],
+                            evidence=snippet,
+                            status_code=int(resp.status_code or 0),
+                            matched_url=url,
+                        )
         return None
-
 
