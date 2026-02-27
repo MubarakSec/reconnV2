@@ -47,6 +47,7 @@ from recon_cli.pipeline.stage_scanner import ScannerStage
 from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
 from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_exploit_validation import ExploitValidationStage
+from recon_cli.pipeline.stage_open_redirect_validator import OpenRedirectValidatorStage
 from recon_cli.pipeline.stage_screenshots import ScreenshotStage
 from recon_cli.pipeline.stage_finalize import FinalizeStage
 
@@ -95,6 +96,7 @@ PIPELINE_STAGES: List[Stage] = [
     ScannerStage(),
     VerifyFindingsStage(),
     ExtendedValidationStage(),
+    OpenRedirectValidatorStage(),
     ExploitValidationStage(),
     ScreenshotStage(),
     FinalizeStage(),

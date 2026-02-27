@@ -22,7 +22,7 @@
 - [ ] Add dedicated SSRF validator (outbound callback + internal target checks).
 - [ ] Add dedicated IDOR validator (object ownership/access control checks).
 - [ ] Add auth-bypass validator (forced-browse and privilege-boundary checks).
-- [ ] Add open-redirect validator (redirect chain and sink confirmation).
+- [x] Add open-redirect validator (redirect chain and sink confirmation).
 - [ ] Add subdomain takeover validator hardening (fingerprint + DNS state + claimability).
 - [ ] Add secret exposure validator (live token sanity checks with safe guards).
 - [ ] Add tests per validator with real/false-positive fixtures.

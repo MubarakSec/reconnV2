@@ -482,6 +482,7 @@ def _stage_overrides(selected: List[str]) -> Dict[str, Any]:
             "auto_scanners",
             "enable_verification",
             "enable_extended_validation",
+            "enable_open_redirect_validator",
             "enable_exploit_validation",
         ])
     if "secrets" not in selected_set:
