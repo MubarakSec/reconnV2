@@ -60,7 +60,7 @@
 - [ ] Add strict input validation for all web/API mutation endpoints.
 - [ ] Add sensitive data redaction checks in logs/reports/artifacts.
 - [ ] Add safe-failure behavior (partial results + clear error taxonomy).
-- [ ] Add dependency health checks in `doctor` for all critical scanners/modules.
+- [x] Add dependency health checks in `doctor` for all critical scanners/modules.
 - [x] Add CI gates: quality thresholds + regression suites for false positives.
 
 ## Operational Reliability and Job Control

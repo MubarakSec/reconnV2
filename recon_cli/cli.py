@@ -726,6 +726,8 @@ def doctor(
     python_dep_checks = [
         ("dnspython", "dns", "pip install dnspython"),
         ("playwright", "playwright", "pip install playwright"),
+        ("requests", "requests", "pip install requests"),
+        ("pyyaml", "yaml", "pip install pyyaml"),
     ]
     def _collect_python_health(
         *, emit_warnings: bool
@@ -779,8 +781,14 @@ def doctor(
         typer.echo("== Dependency Fix Attempts ==")
         attempted = False
 
+        package_by_label = {
+            "dnspython": "dnspython",
+            "playwright": "playwright",
+            "requests": "requests",
+            "pyyaml": "pyyaml",
+        }
         for package_label in missing_python:
-            package_name = "dnspython" if package_label == "dnspython" else "playwright"
+            package_name = package_by_label.get(package_label, package_label)
             attempted = True
             typer.echo(f"[fix] Installing python package: {package_name}")
             install = subprocess.run(

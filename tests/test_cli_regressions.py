@@ -79,6 +79,8 @@ def test_doctor_reports_python_dependency_section():
     assert "== Python Dependency Health ==" in result.stdout
     assert "dnspython" in result.stdout
     assert "playwright" in result.stdout
+    assert "requests" in result.stdout
+    assert "pyyaml" in result.stdout
 
 
 def test_doctor_fix_deps_attempts_installs(monkeypatch):
