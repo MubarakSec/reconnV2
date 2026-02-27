@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -68,6 +69,18 @@ class _JobsBaseProxy:
 
 
 JOBS_BASE = _JobsBaseProxy(config.JOBS_ROOT)
+MAX_API_TARGETS = max(1, int(os.environ.get("RECON_MAX_TARGETS_PER_JOB", "200")))
+MAX_API_TARGET_LENGTH = 2048
+MAX_API_STAGE_ITEMS = 128
+MAX_API_TOKEN_ITEMS = 128
+MAX_API_TOKEN_LENGTH = 64
+MAX_API_OPTIONS_BYTES = 65_536
+MAX_API_OPTIONS_DEPTH = 4
+MAX_API_OPTIONS_LIST_ITEMS = 256
+MAX_API_OPTIONS_KEYS = 128
+MAX_API_OPTIONS_STRING_LENGTH = 4096
+SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+SAFE_STAGE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 def _patch_httpx_asyncclient() -> None:
@@ -134,6 +147,7 @@ if FASTAPI_AVAILABLE:
         finished_at: Optional[str] = None
         error: Optional[str] = None
         stats: Dict[str, Any] = Field(default_factory=dict)
+        quality: Dict[str, Any] = Field(default_factory=dict)
 
     class JobListResponse(BaseModel):
         """قائمة المهام"""
@@ -228,6 +242,116 @@ def create_app() -> "FastAPI":
     def _validate_job_id_or_400(job_id: str) -> None:
         if not JobManager.is_safe_job_id(job_id):
             raise HTTPException(status_code=400, detail="Invalid job_id")
+
+    def _normalize_profile_or_400(profile: str) -> str:
+        normalized = str(profile or "").strip().lower()
+        if not normalized:
+            raise HTTPException(status_code=400, detail="profile is required")
+        if len(normalized) > MAX_API_TOKEN_LENGTH or not SAFE_TOKEN_RE.fullmatch(normalized):
+            raise HTTPException(status_code=400, detail="Invalid profile value")
+        available_profiles = set(config.available_profiles().keys())
+        fallback_profiles = {"passive", "full", "safe", "aggressive"}
+        allowed_profiles = available_profiles or fallback_profiles
+        if normalized not in allowed_profiles:
+            allowed_display = ", ".join(sorted(allowed_profiles))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown profile '{normalized}'. Allowed: {allowed_display}",
+            )
+        return normalized
+
+    def _normalize_token_list_or_400(
+        values: List[str],
+        *,
+        field_name: str,
+        max_items: int,
+        pattern: re.Pattern[str],
+    ) -> List[str]:
+        if len(values) > max_items:
+            raise HTTPException(status_code=400, detail=f"{field_name} exceeds max items ({max_items})")
+        normalized: List[str] = []
+        seen = set()
+        for raw in values:
+            if not isinstance(raw, str):
+                raise HTTPException(status_code=400, detail=f"{field_name} must contain strings only")
+            token = raw.strip()
+            if not token:
+                continue
+            if len(token) > MAX_API_TOKEN_LENGTH or not pattern.fullmatch(token):
+                raise HTTPException(status_code=400, detail=f"Invalid {field_name} value '{token}'")
+            if token not in seen:
+                seen.add(token)
+                normalized.append(token)
+        return normalized
+
+    def _normalize_targets_or_400(targets: List[str], *, allow_ip: bool) -> List[str]:
+        if not targets:
+            raise HTTPException(status_code=400, detail="targets is required")
+        if len(targets) > MAX_API_TARGETS:
+            raise HTTPException(status_code=400, detail=f"Too many targets (max {MAX_API_TARGETS})")
+        normalized: List[str] = []
+        seen = set()
+        for raw in targets:
+            if not isinstance(raw, str):
+                raise HTTPException(status_code=400, detail="targets must contain strings only")
+            target = raw.strip()
+            if not target:
+                raise HTTPException(status_code=400, detail="targets cannot contain empty values")
+            if len(target) > MAX_API_TARGET_LENGTH:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"target too long (max {MAX_API_TARGET_LENGTH} chars)",
+                )
+            try:
+                clean = validation.validate_target(target, allow_ip=allow_ip)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid target '{target}': {exc}") from exc
+            if clean not in seen:
+                seen.add(clean)
+                normalized.append(clean)
+        return normalized
+
+    def _validate_option_value(value: Any, *, path: str, depth: int) -> Any:
+        if depth > MAX_API_OPTIONS_DEPTH:
+            raise HTTPException(status_code=400, detail=f"options nesting too deep at {path}")
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        if isinstance(value, str):
+            if len(value) > MAX_API_OPTIONS_STRING_LENGTH:
+                raise HTTPException(status_code=400, detail=f"options value too long at {path}")
+            return value
+        if isinstance(value, list):
+            if len(value) > MAX_API_OPTIONS_LIST_ITEMS:
+                raise HTTPException(status_code=400, detail=f"options list too large at {path}")
+            return [
+                _validate_option_value(item, path=f"{path}[{idx}]", depth=depth + 1)
+                for idx, item in enumerate(value)
+            ]
+        if isinstance(value, dict):
+            if len(value) > MAX_API_OPTIONS_KEYS:
+                raise HTTPException(status_code=400, detail=f"options object too large at {path}")
+            clean_obj: Dict[str, Any] = {}
+            for raw_key, raw_value in value.items():
+                if not isinstance(raw_key, str):
+                    raise HTTPException(status_code=400, detail=f"options keys must be strings at {path}")
+                key = raw_key.strip()
+                if not key or len(key) > MAX_API_TOKEN_LENGTH or not SAFE_TOKEN_RE.fullmatch(key):
+                    raise HTTPException(status_code=400, detail=f"Invalid options key '{raw_key}' at {path}")
+                clean_obj[key] = _validate_option_value(raw_value, path=f"{path}.{key}", depth=depth + 1)
+            return clean_obj
+        raise HTTPException(status_code=400, detail=f"Unsupported options value at {path}")
+
+    def _normalize_options_or_400(options: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(options, dict):
+            raise HTTPException(status_code=400, detail="options must be an object")
+        cleaned = _validate_option_value(options, path="options", depth=0)
+        try:
+            serialized = json.dumps(cleaned, separators=(",", ":"))
+        except TypeError as exc:
+            raise HTTPException(status_code=400, detail=f"options contain unsupported values: {exc}") from exc
+        if len(serialized.encode("utf-8")) > MAX_API_OPTIONS_BYTES:
+            raise HTTPException(status_code=413, detail=f"options payload too large (max {MAX_API_OPTIONS_BYTES} bytes)")
+        return cleaned
     
     # ───────────────────────────────────────────────────────
     #                      Endpoints
@@ -392,6 +516,7 @@ def create_app() -> "FastAPI":
                 finished_at=metadata.finished_at,
                 error=metadata.error,
                 stats=metadata.stats,
+                quality=metadata.stats.get("quality", {}) if isinstance(metadata.stats, dict) else {},
             ))
         jobs.sort(key=lambda x: x.job_id, reverse=True)
         total = len(jobs)
@@ -422,6 +547,7 @@ def create_app() -> "FastAPI":
             finished_at=record.metadata.finished_at,
             error=record.metadata.error,
             stats=record.metadata.stats,
+            quality=record.metadata.stats.get("quality", {}) if isinstance(record.metadata.stats, dict) else {},
         )
     
     @app.get("/api/jobs/{job_id}/results")
@@ -475,24 +601,39 @@ def create_app() -> "FastAPI":
         """إنشاء فحص جديد"""
         manager = app.state.manager
 
-        if not request.target:
+        raw_target = request.target if isinstance(request.target, str) else ""
+        if not raw_target.strip():
             raise HTTPException(status_code=400, detail="target is required")
-        allow_ip = request.allow_ip
+        allow_ip = bool(request.allow_ip)
         try:
-            if validation.is_ip(validation._coerce_hostname(request.target)):
+            if validation.is_ip(validation._coerce_hostname(raw_target)):
                 allow_ip = True
         except Exception:
-            allow_ip = request.allow_ip
+            allow_ip = bool(request.allow_ip)
+        target = _normalize_targets_or_400([raw_target], allow_ip=allow_ip)[0]
+        profile = _normalize_profile_or_400(request.profile)
+        scanners = _normalize_token_list_or_400(
+            request.scanners,
+            field_name="scanners",
+            max_items=MAX_API_TOKEN_ITEMS,
+            pattern=SAFE_TOKEN_RE,
+        )
+        active_modules = _normalize_token_list_or_400(
+            request.active_modules,
+            field_name="active_modules",
+            max_items=MAX_API_TOKEN_ITEMS,
+            pattern=SAFE_TOKEN_RE,
+        )
         
         try:
             record = manager.create_job(
-                target=request.target,
-                profile=request.profile,
+                target=target,
+                profile=profile,
                 inline=request.inline,
                 force=request.force,
                 allow_ip=allow_ip,
-                scanners=request.scanners if request.scanners else None,
-                active_modules=request.active_modules if request.active_modules else None,
+                scanners=scanners if scanners else None,
+                active_modules=active_modules if active_modules else None,
             )
             
             if request.inline:
@@ -502,8 +643,8 @@ def create_app() -> "FastAPI":
             return JobResponse(
                 job_id=record.spec.job_id,
                 status="queued",
-                target=request.target,
-                profile=request.profile,
+                target=target,
+                profile=profile,
                 stage=None,
                 queued_at=record.metadata.queued_at,
                 started_at=None,
@@ -511,8 +652,10 @@ def create_app() -> "FastAPI":
                 error=None,
                 stats={}
             )
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/jobs")
     async def create_job(
@@ -523,13 +666,22 @@ def create_app() -> "FastAPI":
         """إنشاء مهمة"""
         await _maybe_authenticate(x_api_key)
         lifecycle = JobLifecycle(manager=app.state.manager)
-        if not request.targets:
-            raise HTTPException(status_code=400, detail="targets is required")
+        options = _normalize_options_or_400(request.options)
+        allow_ip = bool(options.get("allow_ip"))
+        if "allow_ip" in options and not isinstance(options.get("allow_ip"), bool):
+            raise HTTPException(status_code=400, detail="options.allow_ip must be a boolean")
+        targets = _normalize_targets_or_400(request.targets, allow_ip=allow_ip)
+        stages = _normalize_token_list_or_400(
+            request.stages,
+            field_name="stages",
+            max_items=MAX_API_STAGE_ITEMS,
+            pattern=SAFE_STAGE_RE,
+        )
         try:
             job_id = lifecycle.create_job(
-                targets=request.targets,
-                stages=request.stages,
-                options=request.options,
+                targets=targets,
+                stages=stages,
+                options=options,
             )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

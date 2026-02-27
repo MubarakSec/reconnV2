@@ -192,3 +192,61 @@ def test_retry_api_rejects_invalid_job_id(tmp_path: Path, monkeypatch: pytest.Mo
     client = TestClient(fastapi_app)
     resp = client.post("/api/jobs/%2E%2E/retry")
     assert resp.status_code == 400
+
+
+def test_scan_api_rejects_unknown_payload_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post(
+        "/api/scan",
+        json={"target": "example.com", "profile": "passive", "scanMode": "queued", "evil": "value"},
+    )
+    assert resp.status_code == 400
+    assert "Unsupported scan payload keys" in resp.json().get("detail", "")
+
+
+def test_scan_api_rejects_invalid_stage_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post(
+        "/api/scan",
+        json={"target": "example.com", "profile": "passive", "scanMode": "queued", "stages": ["web", "oops"]},
+    )
+    assert resp.status_code == 400
+    assert "Invalid stage" in resp.json().get("detail", "")
+
+
+def test_save_settings_api_rejects_invalid_general_log_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post("/api/settings", json={"general": {"log_level": "verbose"}})
+    assert resp.status_code == 400
+    assert "general.log_level" in resp.json().get("detail", "")
+
+
+def test_notification_api_rejects_missing_telegram_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from recon_cli.web.app import app as fastapi_app
+
+    _configure_test_home(tmp_path, monkeypatch)
+    client = TestClient(fastapi_app)
+    resp = client.post("/api/test-notification", json={"channel": "telegram"})
+    assert resp.status_code == 400
+    assert "bot_token" in resp.json().get("detail", "")

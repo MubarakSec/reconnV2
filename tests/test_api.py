@@ -107,6 +107,16 @@ class TestAPIScan:
             # Either creates job or returns validation error
             assert response.status_code in [200, 201, 422, 500]
 
+    def test_scan_rejects_invalid_scanner_token(self):
+        """Invalid scanner names are rejected."""
+        client = TestClient(app)
+        response = client.post(
+            "/api/scan",
+            json={"target": "example.com", "profile": "passive", "scanners": ["bad token"]},
+        )
+        assert response.status_code == 400
+        assert "Invalid scanners value" in response.json().get("detail", "")
+
 
 class TestAPIResults:
     """Tests for /api/jobs/{id}/results endpoint."""
@@ -188,3 +198,25 @@ class TestAPIResponseFormat:
         response = client.options("/api/status")
         # CORS may or may not be configured
         assert response.status_code in [200, 405]
+
+
+class TestAPIMutationValidation:
+    """Tests for stricter validation on mutation endpoints."""
+
+    def test_create_job_rejects_empty_target_entries(self):
+        client = TestClient(app)
+        response = client.post(
+            "/api/jobs",
+            json={"targets": ["example.com", "   "], "stages": [], "options": {}},
+        )
+        assert response.status_code == 400
+        assert "empty values" in response.json().get("detail", "")
+
+    def test_create_job_rejects_non_boolean_allow_ip(self):
+        client = TestClient(app)
+        response = client.post(
+            "/api/jobs",
+            json={"targets": ["example.com"], "stages": [], "options": {"allow_ip": "yes"}},
+        )
+        assert response.status_code == 400
+        assert "allow_ip" in response.json().get("detail", "")

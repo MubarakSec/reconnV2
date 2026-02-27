@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import json
+import re
 import uuid
 
 try:
@@ -18,13 +19,32 @@ from recon_cli import config
 from recon_cli.jobs.manager import JobManager
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.reporting import categorize_results, is_finding
+from recon_cli.utils import validation
 
 MAX_WEB_TARGETS = 1000
 MAX_TARGET_LENGTH = 2048
 MAX_SETTINGS_BYTES = 262_144
 MAX_OUTPUT_DOWNLOAD_BYTES = 25 * 1024 * 1024
+MAX_SCAN_PAYLOAD_BYTES = 1_048_576
+MAX_NOTIFICATION_PAYLOAD_BYTES = 8_192
 ALLOWED_SCAN_MODES = {"queued", "immediate"}
 ALLOWED_NOTIFICATION_CHANNELS = {"telegram", "slack", "discord", "email"}
+ALLOWED_STAGE_GROUPS = {"dns", "subdomains", "ports", "web", "vulnerabilities", "secrets"}
+ALLOWED_RESOLVERS = {"default", "cloudflare", "google", "custom"}
+ALLOWED_SCAN_KEYS = {
+    "target",
+    "targets",
+    "profile",
+    "stages",
+    "threads",
+    "timeout",
+    "rate_limit",
+    "resolvers",
+    "scanMode",
+    "notify",
+    "passive",
+}
+SAFE_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 
 # Paths
 WEB_DIR = Path(__file__).parent
@@ -150,6 +170,276 @@ def _normalize_targets(data: Dict[str, Any]) -> List[str]:
     return deduped
 
 
+async def _parse_json_object_or_400(request, *, max_bytes: int, error_prefix: str = "Invalid request payload") -> Dict[str, Any]:
+    body = await request.body()
+    if len(body) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Payload too large (max {max_bytes} bytes)")
+    try:
+        data = json.loads(body.decode("utf-8") if body else "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=error_prefix) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail=error_prefix)
+    return data
+
+
+def _normalize_profile_or_400(profile: Any) -> str:
+    normalized = str(profile or "").strip().lower()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="profile is required")
+    if len(normalized) > 64 or not SAFE_PROFILE_RE.fullmatch(normalized):
+        raise HTTPException(status_code=400, detail="Invalid profile")
+    available_profiles = set(config.available_profiles().keys())
+    fallback_profiles = {"passive", "full", "safe", "aggressive"}
+    allowed_profiles = available_profiles or fallback_profiles
+    if normalized not in allowed_profiles:
+        allowed = ", ".join(sorted(allowed_profiles))
+        raise HTTPException(status_code=400, detail=f"Unknown profile '{normalized}'. Allowed: {allowed}")
+    return normalized
+
+
+def _normalize_bool_or_400(value: Any, *, field_name: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a boolean")
+    return value
+
+
+def _parse_bounded_int_or_400(
+    value: Any,
+    *,
+    field_name: str,
+    minimum: int,
+    maximum: int,
+) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an integer")
+    if value < minimum or value > maximum:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be between {minimum} and {maximum}")
+    return value
+
+
+def _normalize_stage_groups_or_400(stages: Any) -> List[str]:
+    if stages is None:
+        return []
+    if not isinstance(stages, list):
+        raise HTTPException(status_code=400, detail="stages must be a list")
+    if len(stages) > len(ALLOWED_STAGE_GROUPS):
+        raise HTTPException(status_code=400, detail=f"Too many stages (max {len(ALLOWED_STAGE_GROUPS)})")
+    normalized: List[str] = []
+    seen = set()
+    for raw_stage in stages:
+        if not isinstance(raw_stage, str):
+            raise HTTPException(status_code=400, detail="stages must contain strings only")
+        stage = raw_stage.strip().lower()
+        if stage not in ALLOWED_STAGE_GROUPS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid stage '{raw_stage}'. Allowed: {', '.join(sorted(ALLOWED_STAGE_GROUPS))}",
+            )
+        if stage not in seen:
+            seen.add(stage)
+            normalized.append(stage)
+    return normalized
+
+
+def _normalize_and_validate_targets_or_400(data: Dict[str, Any]) -> List[str]:
+    raw_targets = data.get("targets")
+    if raw_targets is not None and not isinstance(raw_targets, (list, str)):
+        raise HTTPException(status_code=400, detail="targets must be a list or newline-delimited string")
+    if isinstance(raw_targets, list) and any(not isinstance(item, str) for item in raw_targets):
+        raise HTTPException(status_code=400, detail="targets must contain strings only")
+    raw_target = data.get("target")
+    if raw_target is not None and not isinstance(raw_target, str):
+        raise HTTPException(status_code=400, detail="target must be a string")
+
+    targets = _normalize_targets(data)
+    if not targets:
+        raise HTTPException(status_code=400, detail="Target is required")
+    if len(targets) > MAX_WEB_TARGETS:
+        raise HTTPException(status_code=400, detail=f"Too many targets (max {MAX_WEB_TARGETS})")
+    if any(len(target) > MAX_TARGET_LENGTH for target in targets):
+        raise HTTPException(status_code=400, detail=f"Target too long (max {MAX_TARGET_LENGTH} chars)")
+
+    validated: List[str] = []
+    seen = set()
+    for raw_target in targets:
+        coerced = validation._coerce_hostname(raw_target)
+        allow_ip = validation.is_ip(coerced)
+        try:
+            normalized = validation.validate_target(raw_target, allow_ip=allow_ip)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid target '{raw_target}': {exc}") from exc
+        if normalized not in seen:
+            seen.add(normalized)
+            validated.append(normalized)
+    return validated
+
+
+def _sanitize_text_or_400(value: Any, *, field_name: str, max_length: int, required: bool = False) -> str:
+    if value is None:
+        if required:
+            raise HTTPException(status_code=400, detail=f"{field_name} is required")
+        return ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a string")
+    normalized = value.strip()
+    if required and not normalized:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    if len(normalized) > max_length:
+        raise HTTPException(status_code=400, detail=f"{field_name} exceeds max length {max_length}")
+    return normalized
+
+
+def _validate_settings_payload_or_400(data: Dict[str, Any]) -> Dict[str, Any]:
+    allowed_top_level = {"notifications", "general", "profiles"}
+    unexpected = sorted(set(data.keys()) - allowed_top_level)
+    if unexpected:
+        raise HTTPException(status_code=400, detail=f"Unsupported settings keys: {', '.join(unexpected)}")
+
+    normalized: Dict[str, Any] = {}
+    notifications = data.get("notifications", {})
+    if notifications is not None:
+        if not isinstance(notifications, dict):
+            raise HTTPException(status_code=400, detail="notifications must be an object")
+        allowed_channels = {"telegram", "slack", "discord", "email"}
+        unknown_channels = sorted(set(notifications.keys()) - allowed_channels)
+        if unknown_channels:
+            raise HTTPException(status_code=400, detail=f"Unsupported notification channels: {', '.join(unknown_channels)}")
+
+        normalized_notifications: Dict[str, Any] = {}
+        telegram = notifications.get("telegram", {})
+        if telegram is not None:
+            if not isinstance(telegram, dict):
+                raise HTTPException(status_code=400, detail="notifications.telegram must be an object")
+            normalized_notifications["telegram"] = {
+                "enabled": _normalize_bool_or_400(telegram.get("enabled"), field_name="notifications.telegram.enabled", default=False),
+                "bot_token": _sanitize_text_or_400(telegram.get("bot_token"), field_name="notifications.telegram.bot_token", max_length=512),
+                "chat_id": _sanitize_text_or_400(telegram.get("chat_id"), field_name="notifications.telegram.chat_id", max_length=128),
+            }
+
+        for channel in ("slack", "discord"):
+            channel_data = notifications.get(channel, {})
+            if channel_data is None:
+                continue
+            if not isinstance(channel_data, dict):
+                raise HTTPException(status_code=400, detail=f"notifications.{channel} must be an object")
+            normalized_notifications[channel] = {
+                "enabled": _normalize_bool_or_400(
+                    channel_data.get("enabled"),
+                    field_name=f"notifications.{channel}.enabled",
+                    default=False,
+                ),
+                "webhook_url": _sanitize_text_or_400(
+                    channel_data.get("webhook_url"),
+                    field_name=f"notifications.{channel}.webhook_url",
+                    max_length=1024,
+                ),
+            }
+
+        email = notifications.get("email", {})
+        if email is not None:
+            if not isinstance(email, dict):
+                raise HTTPException(status_code=400, detail="notifications.email must be an object")
+            smtp_port = _parse_bounded_int_or_400(
+                email.get("smtp_port"),
+                field_name="notifications.email.smtp_port",
+                minimum=1,
+                maximum=65535,
+            )
+            normalized_notifications["email"] = {
+                "enabled": _normalize_bool_or_400(email.get("enabled"), field_name="notifications.email.enabled", default=False),
+                "smtp_host": _sanitize_text_or_400(email.get("smtp_host"), field_name="notifications.email.smtp_host", max_length=255),
+                "smtp_port": smtp_port if smtp_port is not None else 587,
+                "to": _sanitize_text_or_400(email.get("to"), field_name="notifications.email.to", max_length=320),
+            }
+        normalized["notifications"] = normalized_notifications
+
+    general = data.get("general", {})
+    if general is not None:
+        if not isinstance(general, dict):
+            raise HTTPException(status_code=400, detail="general must be an object")
+        log_level = _sanitize_text_or_400(general.get("log_level"), field_name="general.log_level", max_length=16)
+        if log_level and log_level.lower() not in {"debug", "info", "warning", "error", "critical"}:
+            raise HTTPException(status_code=400, detail="general.log_level must be one of: debug, info, warning, error, critical")
+        default_profile = _sanitize_text_or_400(general.get("default_profile"), field_name="general.default_profile", max_length=64)
+        if default_profile:
+            _normalize_profile_or_400(default_profile)
+        retention_days = _parse_bounded_int_or_400(
+            general.get("retention_days"),
+            field_name="general.retention_days",
+            minimum=1,
+            maximum=3650,
+        )
+        normalized["general"] = {
+            "default_profile": default_profile,
+            "log_level": log_level.lower() if log_level else "",
+            "auto_cleanup": _normalize_bool_or_400(general.get("auto_cleanup"), field_name="general.auto_cleanup", default=False),
+            "retention_days": retention_days if retention_days is not None else 30,
+        }
+
+    profiles = data.get("profiles")
+    if profiles is not None:
+        if not isinstance(profiles, list):
+            raise HTTPException(status_code=400, detail="profiles must be a list")
+        if len(profiles) > 200:
+            raise HTTPException(status_code=400, detail="profiles list exceeds max items (200)")
+        normalized_profiles: List[str] = []
+        seen_profiles = set()
+        for raw_profile in profiles:
+            if not isinstance(raw_profile, str):
+                raise HTTPException(status_code=400, detail="profiles must contain strings only")
+            profile_name = _normalize_profile_or_400(raw_profile)
+            if profile_name not in seen_profiles:
+                seen_profiles.add(profile_name)
+                normalized_profiles.append(profile_name)
+        normalized["profiles"] = normalized_profiles
+
+    return normalized
+
+
+def _validate_notification_payload_or_400(data: Dict[str, Any]) -> Dict[str, Any]:
+    channel = _sanitize_text_or_400(data.get("channel"), field_name="channel", max_length=32, required=True).lower()
+    if channel not in ALLOWED_NOTIFICATION_CHANNELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid channel '{channel}'. Allowed: {', '.join(sorted(ALLOWED_NOTIFICATION_CHANNELS))}",
+        )
+    if channel == "telegram":
+        required_keys = {"channel", "bot_token", "chat_id"}
+        unexpected = sorted(set(data.keys()) - required_keys)
+        if unexpected:
+            raise HTTPException(status_code=400, detail=f"Unsupported telegram payload keys: {', '.join(unexpected)}")
+        return {
+            "channel": channel,
+            "bot_token": _sanitize_text_or_400(data.get("bot_token"), field_name="bot_token", max_length=512, required=True),
+            "chat_id": _sanitize_text_or_400(data.get("chat_id"), field_name="chat_id", max_length=128, required=True),
+        }
+    if channel in {"slack", "discord"}:
+        required_keys = {"channel", "webhook_url"}
+        unexpected = sorted(set(data.keys()) - required_keys)
+        if unexpected:
+            raise HTTPException(status_code=400, detail=f"Unsupported {channel} payload keys: {', '.join(unexpected)}")
+        webhook_url = _sanitize_text_or_400(data.get("webhook_url"), field_name="webhook_url", max_length=1024, required=True)
+        if not webhook_url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="webhook_url must start with http:// or https://")
+        return {"channel": channel, "webhook_url": webhook_url}
+    required_keys = {"channel", "smtp_host", "smtp_port", "to"}
+    unexpected = sorted(set(data.keys()) - required_keys)
+    if unexpected:
+        raise HTTPException(status_code=400, detail=f"Unsupported email payload keys: {', '.join(unexpected)}")
+    smtp_port = _parse_bounded_int_or_400(data.get("smtp_port"), field_name="smtp_port", minimum=1, maximum=65535)
+    return {
+        "channel": channel,
+        "smtp_host": _sanitize_text_or_400(data.get("smtp_host"), field_name="smtp_host", max_length=255, required=True),
+        "smtp_port": smtp_port if smtp_port is not None else 587,
+        "to": _sanitize_text_or_400(data.get("to"), field_name="to", max_length=320, required=True),
+    }
+
+
 def _stage_overrides(selected: List[str]) -> Dict[str, Any]:
     selected_set = {str(item).lower() for item in selected}
     overrides: Dict[str, Any] = {}
@@ -252,6 +542,13 @@ if WEB_AVAILABLE:
         
         if not record:
             raise HTTPException(status_code=404, detail="Job not found")
+
+        stats = record.metadata.stats or {}
+        quality = stats.get("quality") if isinstance(stats, dict) else None
+        display_stats = {
+            key: value for key, value in stats.items()
+            if key not in {"quality"} and not isinstance(value, (dict, list))
+        }
         
         job = {
             "id": job_id,
@@ -261,8 +558,9 @@ if WEB_AVAILABLE:
             "started_at": record.metadata.started_at,
             "finished_at": record.metadata.finished_at,
             "stage": record.metadata.stage,
-            "stats": record.metadata.stats,
+            "stats": display_stats,
             "error": record.metadata.error,
+            "quality": quality,
         }
         
         results = get_job_results(job_id)
@@ -481,44 +779,46 @@ if WEB_AVAILABLE:
     async def start_scan_api(request: Request):
         """Start a new scan from web interface."""
         try:
-            data = await request.json()
-            if not isinstance(data, dict):
-                raise HTTPException(status_code=400, detail="Invalid request payload")
-            targets = _normalize_targets(data)
-            profile = data.get("profile", "passive")
-            scan_mode = data.get("scanMode", "queued")
-            stages = data.get("stages") if isinstance(data.get("stages"), list) else []
-            passive_only = bool(data.get("passive", False))
+            data = await _parse_json_object_or_400(request, max_bytes=MAX_SCAN_PAYLOAD_BYTES)
+            unexpected = sorted(set(data.keys()) - ALLOWED_SCAN_KEYS)
+            if unexpected:
+                raise HTTPException(status_code=400, detail=f"Unsupported scan payload keys: {', '.join(unexpected)}")
 
-            if not targets:
-                raise HTTPException(status_code=400, detail="Target is required")
-            if len(targets) > MAX_WEB_TARGETS:
-                raise HTTPException(status_code=400, detail=f"Too many targets (max {MAX_WEB_TARGETS})")
-            if any(len(target) > MAX_TARGET_LENGTH for target in targets):
-                raise HTTPException(status_code=400, detail=f"Target too long (max {MAX_TARGET_LENGTH} chars)")
+            targets = _normalize_and_validate_targets_or_400(data)
+            profile = _normalize_profile_or_400(data.get("profile", "passive"))
+            scan_mode = _sanitize_text_or_400(data.get("scanMode", "queued"), field_name="scanMode", max_length=32).lower()
+            stages = _normalize_stage_groups_or_400(data.get("stages"))
+            passive_only = _normalize_bool_or_400(data.get("passive"), field_name="passive", default=False)
+            _normalize_bool_or_400(data.get("notify"), field_name="notify", default=False)
+
             if scan_mode not in ALLOWED_SCAN_MODES:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid scanMode '{scan_mode}'. Allowed: {', '.join(sorted(ALLOWED_SCAN_MODES))}",
+                )
+            resolvers = _sanitize_text_or_400(data.get("resolvers", "default"), field_name="resolvers", max_length=32).lower()
+            if resolvers not in ALLOWED_RESOLVERS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid resolvers '{resolvers}'. Allowed: {', '.join(sorted(ALLOWED_RESOLVERS))}",
                 )
 
             if passive_only:
                 profile = "passive"
 
             runtime_overrides: Dict[str, Any] = {}
-            threads = data.get("threads")
-            if isinstance(threads, int) and threads > 0:
+            threads = _parse_bounded_int_or_400(data.get("threads"), field_name="threads", minimum=1, maximum=500)
+            if threads is not None:
                 runtime_overrides["httpx_threads"] = threads
                 runtime_overrides["ffuf_threads"] = max(5, int(threads // 2))
-            timeout = data.get("timeout")
-            if isinstance(timeout, int) and timeout > 0:
+            timeout = _parse_bounded_int_or_400(data.get("timeout"), field_name="timeout", minimum=5, maximum=3600)
+            if timeout is not None:
                 runtime_overrides["timeout_http"] = timeout
-            rate_limit = data.get("rate_limit")
-            if isinstance(rate_limit, int) and rate_limit > 0:
+            rate_limit = _parse_bounded_int_or_400(data.get("rate_limit"), field_name="rate_limit", minimum=1, maximum=5000)
+            if rate_limit is not None:
                 runtime_overrides["requests_per_second"] = rate_limit
                 runtime_overrides["per_host_limit"] = max(1, int(rate_limit // 4))
 
-            resolvers = data.get("resolvers")
             if resolvers in {"cloudflare", "google"}:
                 resolver_lines = [
                     "1.1.1.1" if resolvers == "cloudflare" else "8.8.8.8",
@@ -659,10 +959,13 @@ if WEB_AVAILABLE:
     async def save_settings_api(request: Request):
         """Save settings."""
         try:
-            data = await request.json()
-            if not isinstance(data, dict):
-                raise HTTPException(status_code=400, detail="Settings payload must be a JSON object")
-            serialized = json.dumps(data, indent=2)
+            data = await _parse_json_object_or_400(
+                request,
+                max_bytes=MAX_SETTINGS_BYTES,
+                error_prefix="Settings payload must be a JSON object",
+            )
+            normalized = _validate_settings_payload_or_400(data)
+            serialized = json.dumps(normalized, indent=2)
             if len(serialized.encode("utf-8")) > MAX_SETTINGS_BYTES:
                 raise HTTPException(status_code=413, detail=f"Settings payload too large (max {MAX_SETTINGS_BYTES} bytes)")
             config_file = Path(config.CONFIG_DIR) / "settings.json"
@@ -678,21 +981,15 @@ if WEB_AVAILABLE:
     async def test_notification_api(request: Request):
         """Test notification channel."""
         try:
-            data = await request.json()
-            if not isinstance(data, dict):
-                raise HTTPException(status_code=400, detail="Invalid request payload")
-            channel = data.get("channel")
-            if channel not in ALLOWED_NOTIFICATION_CHANNELS:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid channel '{channel}'. Allowed: {', '.join(sorted(ALLOWED_NOTIFICATION_CHANNELS))}",
-                )
+            data = await _parse_json_object_or_400(request, max_bytes=MAX_NOTIFICATION_PAYLOAD_BYTES)
+            payload = _validate_notification_payload_or_400(data)
+            channel = payload["channel"]
             
             # Import alerting module
             from recon_cli.utils.alerting import AlertManager
             
             manager = AlertManager()
-            success = await manager.send_test(channel, data)
+            success = await manager.send_test(channel, payload)
             
             if success:
                 return {"success": True, "message": f"Test notification sent to {channel}"}
