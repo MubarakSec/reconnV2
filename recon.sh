@@ -953,6 +953,48 @@ show_schema() {
     pause_screen
 }
 
+show_trace() {
+    echo ""
+    echo -ne "${CYAN}Job ID (optional, leave blank for last trace): ${NC}"
+    local job_id=""
+    read -r job_id
+
+    echo -ne "${CYAN}Show last N events [8]: ${NC}"
+    local events=""
+    read -r events
+    events="${events:-8}"
+    if ! [[ "$events" =~ ^[0-9]+$ ]]; then
+        events="8"
+    fi
+
+    local -a cmd=("$PYTHON_BIN" -m recon_cli trace)
+    if [ -n "$job_id" ]; then
+        cmd+=("$job_id")
+    fi
+    cmd+=(--events "$events")
+
+    if ask_yes_no "Output JSON?" "N"; then
+        cmd+=(--json)
+    fi
+
+    run_scan_command "${cmd[@]}"
+    pause_screen
+}
+
+cache_stats() {
+    run_recon cache-stats
+    pause_screen
+}
+
+cache_clear() {
+    if ask_yes_no "Clear all cached data?" "N"; then
+        run_recon cache-clear
+    else
+        print_warn "Cache clear cancelled"
+    fi
+    pause_screen
+}
+
 show_main_menu() {
     echo -e "${WHITE}==================== Scan Profiles ====================${NC}"
     echo -e "${WHITE}[1]${NC} Quick scan"
@@ -984,7 +1026,10 @@ show_main_menu() {
     echo -e "${WHITE}[24]${NC} Quickstart guide"
     echo -e "${WHITE}[25]${NC} Web dashboard"
     echo -e "${WHITE}[26]${NC} Shell completions"
-    echo -e "${WHITE}[27]${NC} Show schema (JSON)"
+    echo -e "${WHITE}[27]${NC} Trace summary"
+    echo -e "${WHITE}[28]${NC} Show schema (JSON)"
+    echo -e "${WHITE}[29]${NC} Cache stats"
+    echo -e "${WHITE}[30]${NC} Cache clear"
     echo -e "${WHITE}[0]${NC} Exit"
     echo ""
     echo -ne "${MAGENTA}Choose: ${NC}"
@@ -1031,7 +1076,10 @@ main() {
             24) run_quickstart ;;
             25) start_web_dashboard ;;
             26) setup_completions ;;
-            27) show_schema ;;
+            27) show_trace ;;
+            28) show_schema ;;
+            29) cache_stats ;;
+            30) cache_clear ;;
             0|q|Q)
                 echo ""
                 print_ok "Bye"
