@@ -88,6 +88,34 @@ def _print_job(record: JobRecord) -> None:
     rich_print(f"  error             : {metadata.error}")
 
 
+def _resolve_trace_paths(record: Optional[JobRecord] = None) -> tuple[Optional[Path], Optional[Path]]:
+    from recon_cli.utils.last_run import (
+        artifacts_last_events_path,
+        artifacts_last_trace_path,
+        resolve_pointer_target,
+    )
+
+    if record is not None:
+        return record.paths.artifact("trace.json"), record.paths.artifact("trace_events.jsonl")
+
+    trace_path = resolve_pointer_target(artifacts_last_trace_path())
+    events_path = resolve_pointer_target(artifacts_last_events_path())
+    if trace_path is not None and events_path is None:
+        candidate = trace_path.with_name("trace_events.jsonl")
+        if candidate.exists():
+            events_path = candidate
+    return trace_path, events_path
+
+
+def _event_preview(attributes: Dict[str, Any]) -> str:
+    if not attributes:
+        return ""
+    preview = json.dumps(redact_json_value(attributes), sort_keys=True)
+    if len(preview) > 140:
+        preview = preview[:137] + "..."
+    return preview
+
+
 def _truncate_file(path: Path) -> None:
     try:
         path.write_text("", encoding="utf-8")
@@ -454,6 +482,85 @@ def status(job_id: str) -> None:
     manager = JobManager()
     record = _load_job_or_exit(manager, job_id)
     _print_job(record)
+
+
+@app.command()
+def trace(
+    job_id: Optional[str] = typer.Argument(None, help="Job to inspect. Defaults to the last trace."),
+    events: int = typer.Option(8, "--events", min=0, help="Show the last N trace events"),
+    as_json: bool = typer.Option(False, "--json", help="Emit trace data as JSON for automation"),
+) -> None:
+    """Show a job trace summary and recent events."""
+    manager = JobManager()
+    record = _load_job_or_exit(manager, job_id) if job_id else None
+    trace_path, events_path = _resolve_trace_paths(record)
+    if trace_path is None or not trace_path.exists():
+        typer.echo("Trace artifact not found", err=True)
+        raise typer.Exit(code=1)
+
+    trace_payload = fs.read_json(trace_path, default={})
+    if not isinstance(trace_payload, dict) or not trace_payload:
+        typer.echo("Trace artifact is empty or invalid", err=True)
+        raise typer.Exit(code=1)
+
+    event_rows: List[Dict[str, Any]] = []
+    if events > 0 and events_path is not None and events_path.exists():
+        event_rows = [row for row in read_jsonl(events_path) if isinstance(row, dict)][-events:]
+
+    if as_json:
+        payload: Dict[str, Any] = {"trace": redact_json_value(trace_payload)}
+        if event_rows:
+            payload["events"] = redact_json_value(event_rows)
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    attrs = trace_payload.get("attributes", {})
+    stats = trace_payload.get("stats", {})
+    span_counts = stats.get("span_counts_by_type", {}) if isinstance(stats, dict) else {}
+    spans = trace_payload.get("spans", [])
+    stage_spans = [span for span in spans if isinstance(span, dict) and span.get("span_type") == "stage"]
+
+    rich_print(f"[bold]Trace {trace_payload.get('trace_id', '-') }[/bold]")
+    rich_print(f"  job_id            : {attrs.get('job_id', '-')}")
+    rich_print(f"  target            : {attrs.get('target', '-')}")
+    rich_print(f"  profile           : {attrs.get('profile', '-')}")
+    rich_print(f"  status            : {trace_payload.get('status', '-')}")
+    rich_print(f"  duration_ms       : {trace_payload.get('duration_ms', '-')}")
+    rich_print(f"  started_at        : {trace_payload.get('started_at', '-')}")
+    rich_print(f"  finished_at       : {trace_payload.get('finished_at', '-')}")
+    rich_print(f"  spans             : {stats.get('span_count', 0)}")
+    rich_print(f"  events            : {stats.get('event_count', 0)}")
+    rich_print(f"  span_types        : {json.dumps(span_counts, sort_keys=True)}")
+    rich_print(f"  trace_path        : {trace_path}")
+    rich_print(f"  events_path       : {events_path or '-'}")
+    if trace_payload.get("error"):
+        rich_print(f"  error             : {trace_payload.get('error')}")
+
+    if stage_spans:
+        rich_print("[bold]Stage Spans[/bold]")
+        for span in stage_spans:
+            attributes = span.get("attributes", {}) if isinstance(span.get("attributes"), dict) else {}
+            detail_parts = []
+            if attributes.get("skip_reason"):
+                detail_parts.append(f"skip={attributes.get('skip_reason')}")
+            if attributes.get("error_code"):
+                detail_parts.append(f"error_code={attributes.get('error_code')}")
+            if attributes.get("attempts") is not None:
+                detail_parts.append(f"attempts={attributes.get('attempts')}")
+            detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+            rich_print(
+                f"  - {span.get('name')} ({span.get('status')}) "
+                f"{span.get('duration_ms', '-')}ms{detail}"
+            )
+
+    if event_rows:
+        rich_print("[bold]Recent Events[/bold]")
+        for row in event_rows:
+            preview = _event_preview(row.get("attributes", {}))
+            if preview:
+                rich_print(f"  - {row.get('timestamp')} {row.get('name')}: {preview}")
+            else:
+                rich_print(f"  - {row.get('timestamp')} {row.get('name')}")
 
 
 @app.command("tail-logs")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import json
 import re
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
@@ -40,6 +42,7 @@ _ASSIGN_PATTERN = re.compile(r"(?i)(\b(?:{keys})\b\s*(?:=|:)\s*)([^\s,'\";]+)".f
 _QUERY_PATTERN = re.compile(r'(?i)((?:\?|&)(?:{keys})=)([^&\s]+)'.format(keys=_KEY_PATTERN))
 _BEARER_PATTERN = re.compile(r'(?i)(bearer\s+)([A-Za-z0-9._\-]+)')
 _BASIC_PATTERN = re.compile(r'(?i)(basic\s+)([A-Za-z0-9+/=]+)')
+_CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 _REPLACEMENTS: Sequence[Tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = (
     (_HEADER_PATTERN, lambda m: f"{m.group(1)}{_PLACEHOLDER}"),
@@ -84,4 +87,23 @@ def redact_json_value(value: Any) -> Any:
     return value
 
 
-__all__ = ["redact", "redact_json_value"]
+def sanitize_text(value: Any, *, collapse_ws: bool = False) -> str:
+    """Normalize untrusted text for user-facing output."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        text = json.dumps(redact_json_value(value), ensure_ascii=True, separators=(",", ":"))
+    else:
+        text = redact(str(value)) or ""
+    text = _CONTROL_CHARS_PATTERN.sub(" ", text)
+    if collapse_ws:
+        text = " ".join(text.split())
+    return text
+
+
+def escape_html_text(value: Any, *, collapse_ws: bool = False) -> str:
+    """Escape untrusted text for HTML or ReportLab paragraph contexts."""
+    return html.escape(sanitize_text(value, collapse_ws=collapse_ws), quote=True)
+
+
+__all__ = ["redact", "redact_json_value", "sanitize_text", "escape_html_text"]

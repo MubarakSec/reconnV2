@@ -12,6 +12,7 @@ import recon_cli.cli as cli
 import recon_cli.completions as completions
 from recon_cli import config
 from recon_cli.jobs.manager import JobManager
+from recon_cli.utils.last_run import update_last_trace_pointers
 
 
 def test_schema_command_outputs_json():
@@ -183,6 +184,84 @@ def test_serve_defaults_to_loopback(monkeypatch):
     assert captured["app"] is api_app.app
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8080
+
+
+def test_trace_command_uses_last_pointer(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    trace_path = record.paths.artifact("trace.json")
+    events_path = record.paths.artifact("trace_events.jsonl")
+    trace_payload = {
+        "trace_id": "trace-last-123",
+        "status": "finished",
+        "duration_ms": 125.4,
+        "started_at": "2026-03-10T00:00:00Z",
+        "finished_at": "2026-03-10T00:00:01Z",
+        "attributes": {"job_id": record.spec.job_id, "target": "example.com", "profile": "passive"},
+        "stats": {"span_count": 1, "event_count": 2, "span_counts_by_type": {"stage": 1}},
+        "spans": [
+            {
+                "name": "http_probe",
+                "span_type": "stage",
+                "status": "completed",
+                "duration_ms": 50.0,
+                "attributes": {"attempts": 1},
+            }
+        ],
+    }
+    trace_path.write_text(json.dumps(trace_payload), encoding="utf-8")
+    events_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"timestamp": "2026-03-10T00:00:00Z", "name": "trace.started", "attributes": {}}),
+                json.dumps({"timestamp": "2026-03-10T00:00:01Z", "name": "trace.finished", "attributes": {"status": "finished"}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    update_last_trace_pointers(trace_path, events_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["trace", "--events", "1"])
+    assert result.exit_code == 0
+    assert "Trace trace-last-123" in result.stdout
+    assert "http_probe (completed)" in result.stdout
+    assert "trace.finished" in result.stdout
+
+
+def test_trace_command_outputs_json_for_job(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+    trace_path = record.paths.artifact("trace.json")
+    events_path = record.paths.artifact("trace_events.jsonl")
+    trace_path.write_text(
+        json.dumps(
+            {
+                "trace_id": "trace-job-456",
+                "status": "failed",
+                "error": "boom",
+                "attributes": {"job_id": record.spec.job_id, "target": "example.com", "profile": "passive"},
+                "stats": {"span_count": 1, "event_count": 1, "span_counts_by_type": {"stage": 1}},
+                "spans": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    events_path.write_text(
+        json.dumps({"timestamp": "2026-03-10T00:00:02Z", "name": "trace.finished", "attributes": {"status": "failed"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["trace", record.spec.job_id, "--json", "--events", "1"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["trace"]["trace_id"] == "trace-job-456"
+    assert payload["trace"]["attributes"]["job_id"] == record.spec.job_id
+    assert payload["events"][0]["name"] == "trace.finished"
 
 
 def _configure_test_home(tmp_path: Path, monkeypatch) -> None:

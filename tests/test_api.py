@@ -10,6 +10,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
+from recon_cli.api import schema as api_schema, schema_json
 from recon_cli.api.app import app, JOBS_BASE
 
 
@@ -47,6 +48,41 @@ class TestAPIStats:
         for key in ("queued", "running", "finished", "failed", "total"):
             assert key in data
         assert data["total"] == data["queued"] + data["running"] + data["finished"] + data["failed"]
+
+
+class TestAPISchema:
+    """Tests for machine-readable schema export."""
+
+    def test_schema_exports_real_contracts(self):
+        """Schema export includes JSON Schema plus auth hints."""
+        data = api_schema()
+        spec_schema = data["job_spec_schema"]
+        metadata_schema = data["job_metadata_schema"]
+
+        assert data["job_spec"]["target"] == "string"
+        assert spec_schema["type"] == "object"
+        assert spec_schema["additionalProperties"] is False
+        assert spec_schema["properties"]["target"]["type"] == "string"
+        assert spec_schema["properties"]["options"]["additionalProperties"] is True
+
+        assert metadata_schema["type"] == "object"
+        assert sorted(metadata_schema["required"]) == ["job_id", "queued_at"]
+        assert metadata_schema["properties"]["stats"]["additionalProperties"] is True
+
+        auth = data["api_auth"]
+        assert auth["POST /api/scan"]["x_api_key"] == "required"
+        assert auth["POST /api/scan"]["permissions"] == ["api:access", "jobs:create"]
+        assert auth["GET /api/jobs"]["x_api_key"] == "optional"
+
+        assert "/api/scan" in data["openapi"]["paths"]
+        assert "/api/jobs/{job_id}" in data["openapi"]["paths"]
+
+    def test_schema_json_is_valid_json(self):
+        """schema_json returns parseable JSON."""
+        data = json.loads(schema_json())
+        assert data["schema_version"] == "2026-03-10"
+        assert "job_spec_schema" in data
+        assert "openapi" in data
 
 
 class TestAPIJobs:

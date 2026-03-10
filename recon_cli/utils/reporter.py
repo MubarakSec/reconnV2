@@ -23,7 +23,7 @@ from recon_cli.utils.reporting import (
     resolve_confidence_label,
     resolve_severity,
 )
-from recon_cli.utils.sanitizer import redact
+from recon_cli.utils.sanitizer import escape_html_text, redact, sanitize_text
 
 
 @dataclass
@@ -372,12 +372,23 @@ def _generate_html(
             </div>
         '''
 
+    target_value = _escape_html(spec.get("target", "N/A"))
+    profile_value = _escape_html(spec.get("profile", "N/A"))
+    status_value = _escape_html(metadata.get("status", "N/A"))
+    job_id_value = _escape_html(job_id or "N/A")
+    by_type_rows = "".join(
+        f'<tr><td>{_escape_html(k)}</td><td>{v}</td></tr>'
+        for k, v in stats["by_type"].items()
+    )
+    hostname_rows = "".join(f'<tr><td>{_escape_html(host)}</td></tr>' for host in stats.get("hostnames_list", []))
+    url_rows = "".join(f'<tr><td>{_escape_html(url)}</td></tr>' for url in stats.get("urls_list", []))
+
     html = f'''<!DOCTYPE html>
 <html lang="{config.language}" {rtl}>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{config.title}</title>
+    <title>{_escape_html(config.title)}</title>
     <style>
         * {{
             margin: 0;
@@ -574,10 +585,10 @@ def _generate_html(
         <div class="header">
             <h1>🔍 {t["title"]}</h1>
             <div class="meta">
-                <strong>{t["target"]}:</strong> {spec.get("target", "N/A")} |
-                <strong>{t["profile"]}:</strong> {spec.get("profile", "N/A")} |
-                <strong>{t["status"]}:</strong> {metadata.get("status", "N/A")} |
-                <strong>ID:</strong> {job_id or "N/A"}
+                <strong>{t["target"]}:</strong> {target_value} |
+                <strong>{t["profile"]}:</strong> {profile_value} |
+                <strong>{t["status"]}:</strong> {status_value} |
+                <strong>ID:</strong> {job_id_value}
             </div>
         </div>
         
@@ -615,7 +626,7 @@ def _generate_html(
                 <h3>{t["by_type"]}</h3>
                 <table>
                     <tr><th>النوع</th><th>العدد</th></tr>
-                    {"".join(f'<tr><td>{k}</td><td>{v}</td></tr>' for k, v in stats["by_type"].items())}
+                    {by_type_rows}
                 </table>
             </div>
         </div>
@@ -626,14 +637,14 @@ def _generate_html(
                 <h3>{t["hostnames"]}</h3>
                 <table>
                     <tr><th>Hostname</th></tr>
-                    {"".join(f'<tr><td>{host}</td></tr>' for host in stats.get("hostnames_list", []))}
+                    {hostname_rows}
                 </table>
             </div>
             <div class="card">
                 <h3>{t["urls"]}</h3>
                 <table>
                     <tr><th>URL</th></tr>
-                    {"".join(f'<tr><td>{url}</td></tr>' for url in stats.get("urls_list", []))}
+                    {url_rows}
                 </table>
             </div>
         </div>
@@ -758,8 +769,8 @@ def _generate_secrets_section(secrets: List[Dict], t: Dict, colors: Dict) -> str
     for secret in secrets[:20]:  # أول 20 فقط
         rows.append(f'''
             <tr>
-                <td>{secret.get("pattern", "N/A")}</td>
-                <td>{secret.get("url", secret.get("source", "N/A"))[:50]}...</td>
+                <td>{_escape_html(secret.get("pattern", "N/A"))}</td>
+                <td>{_escape_html(secret.get("url", secret.get("source", "N/A")), 50)}</td>
                 <td><span class="severity-badge severity-high">High</span></td>
             </tr>
         ''')
@@ -776,16 +787,17 @@ def _generate_secrets_section(secrets: List[Dict], t: Dict, colors: Dict) -> str
 
 
 def _truncate_text(value: object, limit: int = 220) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (dict, list)):
-        text = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
-    else:
-        text = str(value)
-    text = " ".join(text.split())
+    text = sanitize_text(value, collapse_ws=True)
     if len(text) > limit:
         return f"{text[: max(0, limit - 3)]}..."
     return text
+
+
+def _escape_html(value: object, limit: int | None = None, *, collapse_ws: bool = True) -> str:
+    text = sanitize_text(value, collapse_ws=collapse_ws)
+    if limit is not None and len(text) > limit:
+        text = f"{text[: max(0, limit - 3)]}..."
+    return escape_html_text(text, collapse_ws=False)
 
 
 def _extract_proof(entry: Dict[str, object], t: Dict[str, str]) -> tuple[str, str]:
@@ -816,14 +828,14 @@ def _generate_hunter_section(findings: List[Dict], t: Dict, colors: Dict, job_id
             <div class="finding-item">
                 <div class="finding-title">
                     <span class="severity-badge severity-{severity}">{severity.upper()}</span>
-                    {title}
+                    {_escape_html(title)}
                 </div>
-                <div><strong>{t["confidence"]}:</strong> {confidence}</div>
-                {f'<div><strong>{t["source"]}:</strong> {source}</div>' if source else ''}
-                {f'<div><strong>URL:</strong> {url}</div>' if url else ''}
-                {f'<div><strong>{proof_label}:</strong> <code>{proof_value}</code></div>' if proof_value else ''}
-                <div><strong>{t["submission_summary"]}:</strong> {submission_summary}</div>
-                {f'<div><strong>{t["rerun_cmd"]}:</strong> <code>{rerun_cmd}</code></div>' if rerun_cmd else ''}
+                <div><strong>{t["confidence"]}:</strong> {_escape_html(confidence)}</div>
+                {f'<div><strong>{t["source"]}:</strong> {_escape_html(source)}</div>' if source else ''}
+                {f'<div><strong>URL:</strong> {_escape_html(url)}</div>' if url else ''}
+                {f'<div><strong>{_escape_html(proof_label)}:</strong> <code>{_escape_html(proof_value)}</code></div>' if proof_value else ''}
+                <div><strong>{t["submission_summary"]}:</strong> {_escape_html(submission_summary)}</div>
+                {f'<div><strong>{t["rerun_cmd"]}:</strong> <code>{_escape_html(rerun_cmd)}</code></div>' if rerun_cmd else ''}
             </div>
         ''')
     return f'''
@@ -883,7 +895,7 @@ def _generate_triage_hints_section(findings: List[Dict], t: Dict, colors: Dict, 
                 <h3>{t["duplicate_hints"]} ({len(duplicate_rows)})</h3>
                 <table>
                     <tr><th>{t["details"]}</th><th>URL/Host</th><th>{t["reason"]}</th></tr>
-                    {"".join(f"<tr><td>{_truncate_text(row[0], 120)}</td><td>{_truncate_text(row[1], 120)}</td><td>{row[2]}</td></tr>" for row in duplicate_rows[:10])}
+                    {"".join(f"<tr><td>{_escape_html(row[0], 120)}</td><td>{_escape_html(row[1], 120)}</td><td>{_escape_html(row[2])}</td></tr>" for row in duplicate_rows[:10])}
                 </table>
             </div>
         '''
@@ -895,7 +907,7 @@ def _generate_triage_hints_section(findings: List[Dict], t: Dict, colors: Dict, 
                 <h3>{t["out_scope_hints"]} ({len(oos_rows)})</h3>
                 <table>
                     <tr><th>{t["details"]}</th><th>URL/Host</th><th>{t["reason"]}</th></tr>
-                    {"".join(f"<tr><td>{_truncate_text(row[0], 120)}</td><td>{_truncate_text(row[1], 120)}</td><td>{row[2]}</td></tr>" for row in oos_rows[:10])}
+                    {"".join(f"<tr><td>{_escape_html(row[0], 120)}</td><td>{_escape_html(row[1], 120)}</td><td>{_escape_html(row[2])}</td></tr>" for row in oos_rows[:10])}
                 </table>
             </div>
         '''
@@ -918,14 +930,14 @@ def _generate_findings_section(findings: List[Dict], t: Dict, colors: Dict) -> s
     
     items = []
     for finding in findings[:20]:  # أول 20 فقط
-        severity = finding.get("severity", "info")
+        severity = resolve_severity(finding)
         items.append(f'''
             <div class="finding-item">
                 <div class="finding-title">
                     <span class="severity-badge severity-{severity}">{severity.upper()}</span>
-                    {finding.get("title", finding.get("name", "Finding"))}
+                    {_escape_html(finding.get("title", finding.get("name", "Finding")))}
                 </div>
-                <div>{finding.get("description", finding.get("url", ""))[:200]}</div>
+                <div>{_escape_html(finding.get("description", finding.get("url", "")), 200)}</div>
             </div>
         ''')
     
@@ -944,14 +956,14 @@ def _generate_vuln_section(findings: List[Dict], t: Dict, colors: Dict) -> str:
         return ""
     items = []
     for finding in findings[:20]:
-        severity = finding.get("priority", "medium")
+        severity = resolve_severity(finding)
         items.append(f'''
             <div class="finding-item">
                 <div class="finding-title">
                     <span class="severity-badge severity-{severity}">{severity.upper()}</span>
-                    {finding.get("description", "Vulnerability")}
+                    {_escape_html(finding.get("description", "Vulnerability"))}
                 </div>
-                <div>{finding.get("url", "")}</div>
+                <div>{_escape_html(finding.get("url", ""))}</div>
             </div>
         ''')
     return f'''
@@ -971,10 +983,10 @@ def _generate_waf_section(findings: List[Dict], t: Dict, colors: Dict) -> str:
     for finding in findings[:15]:
         rows.append(f'''
             <tr>
-                <td>{finding.get("hostname", "N/A")}</td>
-                <td>{finding.get("details", {}).get("baseline_status", "")}</td>
-                <td>{finding.get("details", {}).get("alternate_status", "")}</td>
-                <td>{finding.get("details", {}).get("url", "")}</td>
+                <td>{_escape_html(finding.get("hostname", "N/A"))}</td>
+                <td>{_escape_html(finding.get("details", {}).get("baseline_status", ""))}</td>
+                <td>{_escape_html(finding.get("details", {}).get("alternate_status", ""))}</td>
+                <td>{_escape_html(finding.get("details", {}).get("url", ""))}</td>
             </tr>
         ''')
     return f'''
@@ -995,12 +1007,12 @@ def _generate_services_section(services: List[Dict], t: Dict, colors: Dict) -> s
     for svc in services[:20]:
         rows.append(f'''
             <tr>
-                <td>{svc.get("hostname", "N/A")}</td>
-                <td>{svc.get("port", "")}</td>
-                <td>{svc.get("protocol", "")}</td>
-                <td>{svc.get("service", "")}</td>
-                <td>{svc.get("product", "")}</td>
-                <td>{svc.get("version", "")}</td>
+                <td>{_escape_html(svc.get("hostname", "N/A"))}</td>
+                <td>{_escape_html(svc.get("port", ""))}</td>
+                <td>{_escape_html(svc.get("protocol", ""))}</td>
+                <td>{_escape_html(svc.get("service", ""))}</td>
+                <td>{_escape_html(svc.get("product", ""))}</td>
+                <td>{_escape_html(svc.get("version", ""))}</td>
             </tr>
         ''')
     return f'''
@@ -1022,10 +1034,10 @@ def _generate_auth_section(forms: List[Dict], t: Dict, colors: Dict) -> str:
         inputs = ", ".join(item.get("name") for item in form.get("inputs", []) if isinstance(item, dict) and item.get("name"))
         rows.append(f'''
             <tr>
-                <td>{form.get("url", "")}</td>
-                <td>{form.get("action", "")}</td>
-                <td>{form.get("method", "")}</td>
-                <td>{inputs}</td>
+                <td>{_escape_html(form.get("url", ""))}</td>
+                <td>{_escape_html(form.get("action", ""))}</td>
+                <td>{_escape_html(form.get("method", ""))}</td>
+                <td>{_escape_html(inputs)}</td>
             </tr>
         ''')
     return f'''
@@ -1046,9 +1058,9 @@ def _generate_api_section(apis: List[Dict], t: Dict, colors: Dict) -> str:
     for api in apis[:20]:
         rows.append(f'''
             <tr>
-                <td>{api.get("hostname", "")}</td>
-                <td>{api.get("url", "")}</td>
-                <td>{",".join(api.get("tags", []))}</td>
+                <td>{_escape_html(api.get("hostname", ""))}</td>
+                <td>{_escape_html(api.get("url", ""))}</td>
+                <td>{_escape_html(",".join(api.get("tags", [])))}</td>
             </tr>
         ''')
     return f'''
@@ -1072,9 +1084,9 @@ def _generate_param_section(params: List[Dict], t: Dict, colors: Dict) -> str:
             example = param["examples"][0]
         rows.append(f'''
             <tr>
-                <td>{param.get("name", "")}</td>
-                <td>{param.get("count", "")}</td>
-                <td>{example}</td>
+                <td>{_escape_html(param.get("name", ""))}</td>
+                <td>{_escape_html(param.get("count", ""))}</td>
+                <td>{_escape_html(example)}</td>
             </tr>
         ''')
     return f'''
@@ -1095,7 +1107,7 @@ def _generate_js_section(urls: List[Dict], t: Dict, colors: Dict) -> str:
     for entry in urls[:20]:
         rows.append(f'''
             <tr>
-                <td>{entry.get("url", "")}</td>
+                <td>{_escape_html(entry.get("url", ""))}</td>
             </tr>
         ''')
     return f'''
@@ -1116,10 +1128,11 @@ def _generate_screenshots_section(shots: List[Dict], t: Dict, colors: Dict) -> s
     for shot in shots[:12]:
         path = shot.get("screenshot_path", "")
         url = shot.get("final_url") or shot.get("url") or ""
+        safe_path = _escape_html(path)
         cards.append(f'''
             <div class="shot-card">
-                <a href="{path}" target="_blank"><img src="{path}" alt="screenshot" /></a>
-                <div class="shot-caption">{url}</div>
+                <a href="{safe_path}" target="_blank"><img src="{safe_path}" alt="screenshot" /></a>
+                <div class="shot-caption">{_escape_html(url)}</div>
             </div>
         ''')
     return f'''

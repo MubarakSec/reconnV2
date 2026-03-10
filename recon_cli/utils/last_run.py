@@ -24,6 +24,21 @@ def artifacts_last_events_path() -> Path:
     return config.RECON_HOME / "artifacts" / "last-trace-events.jsonl"
 
 
+def resolve_pointer_target(pointer_path: Path) -> Path | None:
+    if not os.path.lexists(pointer_path):
+        return None
+    try:
+        if pointer_path.is_symlink():
+            return pointer_path.resolve(strict=False)
+        if pointer_path.is_file():
+            raw = pointer_path.read_text(encoding="utf-8").strip()
+            if raw:
+                return Path(raw)
+    except OSError:
+        return None
+    return None
+
+
 def update_last_job_pointer(job_path: Path) -> Path:
     return _replace_pointer(jobs_last_path(), Path(job_path))
 

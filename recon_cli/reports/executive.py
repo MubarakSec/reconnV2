@@ -21,6 +21,8 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 
+from recon_cli.utils.sanitizer import escape_html_text
+
 __all__ = [
     "RiskLevel",
     "RiskScore",
@@ -387,7 +389,7 @@ class ExecutiveSummary:
         html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>{self.title} - Executive Summary</title>
+    <title>{escape_html_text(self.title)} - Executive Summary</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; padding: 40px; }}
@@ -429,8 +431,8 @@ class ExecutiveSummary:
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 {self.title}</h1>
-            <p class="meta">Generated: {self.generated_at.strftime('%Y-%m-%d %H:%M:%S')} | Author: {self.author}</p>
+            <h1>📊 {escape_html_text(self.title)}</h1>
+            <p class="meta">Generated: {self.generated_at.strftime('%Y-%m-%d %H:%M:%S')} | Author: {escape_html_text(self.author)}</p>
         </div>
         
         <div class="grid">
@@ -484,9 +486,9 @@ class ExecutiveSummary:
             <div class="findings-list">
                 {''.join(f'''
                 <div class="finding {kf.severity}">
-                    <h4>{kf.title}</h4>
-                    <span class="badge">{kf.severity}</span>
-                    <p>{kf.impact[:200]}...</p>
+                    <h4>{escape_html_text(kf.title)}</h4>
+                    <span class="badge">{escape_html_text(kf.severity)}</span>
+                    <p>{escape_html_text(kf.impact[:200] + ('...' if kf.impact else ''))}</p>
                 </div>
                 ''' for kf in self.key_findings[:5])}
             </div>
@@ -495,7 +497,7 @@ class ExecutiveSummary:
         <div class="card recommendations" style="margin-top: 20px;">
             <h3>💡 Recommendations</h3>
             <ol>
-                {''.join(f'<li><strong>{rec.title}</strong>: {rec.description}</li>' for rec in self.recommendations[:5])}
+                {''.join(f'<li><strong>{escape_html_text(rec.title)}</strong>: {escape_html_text(rec.description)}</li>' for rec in self.recommendations[:5])}
             </ol>
         </div>
     </div>
