@@ -11,6 +11,7 @@ from typing import Any, Dict, Generator, List, Optional
 
 from recon_cli.utils import fs, time as time_utils
 from recon_cli.utils.jsonl import JsonlWriter
+from recon_cli.utils.last_run import update_last_trace_pointers
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,99 @@ class PipelineTraceSpan:
         }
 
 
+class PipelineTraceProcessor:
+    """Processor interface for pipeline trace events and snapshots."""
+
+    def on_event(self, payload: Dict[str, Any]) -> None:
+        return None
+
+    def on_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        return None
+
+    def shutdown(self) -> None:
+        return None
+
+
+class SynchronousMultiTraceProcessor(PipelineTraceProcessor):
+    """Fan out trace events/snapshots to multiple processors."""
+
+    def __init__(self, processors: Optional[List[PipelineTraceProcessor]] = None) -> None:
+        self._processors: tuple = tuple(processors or [])
+        self._lock = threading.Lock()
+
+    def add_processor(self, processor: PipelineTraceProcessor) -> None:
+        with self._lock:
+            self._processors += (processor,)
+
+    def set_processors(self, processors: List[PipelineTraceProcessor]) -> None:
+        with self._lock:
+            self._processors = tuple(processors)
+
+    def on_event(self, payload: Dict[str, Any]) -> None:
+        for processor in self._processors:
+            processor.on_event(payload)
+
+    def on_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        for processor in self._processors:
+            processor.on_snapshot(snapshot)
+
+    def shutdown(self) -> None:
+        for processor in self._processors:
+            processor.shutdown()
+
+
+class PipelineTraceExporter:
+    """Exporter interface for pipeline trace payloads."""
+
+    def export_event(self, payload: Dict[str, Any]) -> None:
+        return None
+
+    def export_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class ArtifactTraceExporter(PipelineTraceExporter):
+    """Default exporter that persists the existing trace artifacts."""
+
+    def __init__(self, trace_path: Path, events_path: Path) -> None:
+        self.trace_path = trace_path
+        self.events_path = events_path
+        self._writer = JsonlWriter(events_path)
+        self._writer.__enter__()
+        self._closed = False
+
+    def export_event(self, payload: Dict[str, Any]) -> None:
+        self._writer.write(payload)
+
+    def export_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        fs.write_json(self.trace_path, snapshot)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._writer.__exit__(None, None, None)
+
+
+class ExporterTraceProcessor(PipelineTraceProcessor):
+    """Processor that forwards recorder output to a concrete exporter."""
+
+    def __init__(self, exporter: PipelineTraceExporter) -> None:
+        self.exporter = exporter
+
+    def on_event(self, payload: Dict[str, Any]) -> None:
+        self.exporter.export_event(payload)
+
+    def on_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        self.exporter.export_snapshot(snapshot)
+
+    def shutdown(self) -> None:
+        self.exporter.close()
+
+
 class PipelineTraceRecorder:
     def __init__(
         self,
@@ -85,6 +179,7 @@ class PipelineTraceRecorder:
         execution_profile: Optional[str] = None,
         stages: Optional[List[str]] = None,
         parallel_enabled: bool = False,
+        processor: Optional[PipelineTraceProcessor] = None,
     ) -> None:
         self.trace_path = trace_path
         self.events_path = events_path
@@ -109,8 +204,7 @@ class PipelineTraceRecorder:
         }
         if execution_profile:
             self.attributes["execution_profile"] = execution_profile
-        self._writer = JsonlWriter(events_path)
-        self._writer.__enter__()
+        self._processor = processor or ExporterTraceProcessor(ArtifactTraceExporter(trace_path, events_path))
         self.emit(
             "trace.started",
             {
@@ -236,7 +330,8 @@ class PipelineTraceRecorder:
                 },
             )
             self._persist_snapshot_locked()
-            self._writer.__exit__(None, None, None)
+            self._processor.shutdown()
+            update_last_trace_pointers(self.trace_path, self.events_path)
             return self.to_dict()
 
     @property
@@ -282,15 +377,15 @@ class PipelineTraceRecorder:
             "timestamp": time_utils.iso_now(),
             "attributes": dict(attributes),
         }
-        self._writer.write(payload)
         self._events_count += 1
+        self._processor.on_event(payload)
 
     def _persist_snapshot_locked(self) -> None:
         snapshot = self.to_dict()
         snapshot["artifacts"] = {
             "events": self.events_path.name,
         }
-        fs.write_json(self.trace_path, snapshot)
+        self._processor.on_snapshot(snapshot)
 
     def _span_counts_by_type(self) -> Dict[str, int]:
         counts: Dict[str, int] = {}

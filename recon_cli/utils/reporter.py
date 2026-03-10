@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from recon_cli.utils.jsonl import read_jsonl
+from recon_cli.utils.last_run import update_last_report_pointer
 from recon_cli.utils.reporting import (
     build_finding_rerun_command,
     build_submission_summary,
@@ -138,8 +139,10 @@ def generate_html_report(
     if output_path is None:
         output_path = job_dir / "report.html"
     
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     safe_html = redact(html) or html
     output_path.write_text(safe_html, encoding="utf-8")
+    update_last_report_pointer(output_path)
     
     return output_path
 

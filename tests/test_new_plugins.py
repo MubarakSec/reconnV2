@@ -46,6 +46,28 @@ class TestPluginMetadata:
         assert result["plugin_type"] == "scanner"
         assert result["tags"] == ["test", "demo"]
 
+    def test_metadata_to_dict_exports_strict_config_schema(self):
+        from recon_cli.plugins import PluginMetadata
+
+        meta = PluginMetadata(
+            name="SchemaPlugin",
+            version="1.0.0",
+            description="Plugin with config schema",
+            config_schema={
+                "api_key": {"type": "str", "required": True},
+                "timeout": {"type": "int", "default": 30},
+            },
+        )
+
+        payload = meta.to_dict()
+        config_schema = payload["config_schema"]
+
+        assert config_schema["type"] == "object"
+        assert config_schema["additionalProperties"] is False
+        assert "api_key" in config_schema["properties"]
+        assert "timeout" in config_schema["properties"]
+        assert "api_key" in config_schema["required"]
+
 
 class TestPluginResult:
     """Tests for PluginResult"""
@@ -206,6 +228,103 @@ class TestPluginInterface:
         
         plugin = ConfigPlugin({"api_key": "test123"})
         assert plugin.validate_config() is True
+        assert plugin.config == {"api_key": "test123"}
+
+    def test_validate_config_applies_defaults(self):
+        from recon_cli.plugins import ScannerPlugin, PluginMetadata, PluginType
+
+        class ConfigPlugin(ScannerPlugin):
+            METADATA = PluginMetadata(
+                name="ConfigPlugin",
+                version="1.0.0",
+                description="Plugin with defaults",
+                plugin_type=PluginType.SCANNER,
+                config_schema={
+                    "timeout": {"type": "int", "default": 15},
+                    "enabled": {"type": "bool", "default": True},
+                },
+            )
+
+            def scan(self, target, options=None):
+                return []
+
+        plugin = ConfigPlugin({})
+        assert plugin.validate_config() is True
+        assert plugin.config["timeout"] == 15
+        assert plugin.config["enabled"] is True
+
+    def test_validate_config_rejects_type_mismatch(self):
+        from recon_cli.plugins import ScannerPlugin, PluginMetadata, PluginType
+
+        class ConfigPlugin(ScannerPlugin):
+            METADATA = PluginMetadata(
+                name="ConfigPlugin",
+                version="1.0.0",
+                description="Plugin with typed config",
+                plugin_type=PluginType.SCANNER,
+                config_schema={
+                    "timeout": {"type": "int", "required": True},
+                },
+            )
+
+            def scan(self, target, options=None):
+                return []
+
+        plugin = ConfigPlugin({"timeout": "fast"})
+        assert plugin.validate_config() is False
+        assert plugin.config_error is not None
+        assert "timeout" in plugin.config_error
+
+    def test_validate_config_rejects_extra_fields(self):
+        from recon_cli.plugins import ScannerPlugin, PluginMetadata, PluginType
+
+        class ConfigPlugin(ScannerPlugin):
+            METADATA = PluginMetadata(
+                name="ConfigPlugin",
+                version="1.0.0",
+                description="Plugin with strict config",
+                plugin_type=PluginType.SCANNER,
+                config_schema={
+                    "api_key": {"type": "str", "required": True},
+                },
+            )
+
+            def scan(self, target, options=None):
+                return []
+
+        plugin = ConfigPlugin({"api_key": "test123", "unexpected": True})
+        assert plugin.validate_config() is False
+        assert plugin.config_error is not None
+        assert "unexpected" in plugin.config_error
+
+    def test_validate_config_supports_nested_objects(self):
+        from recon_cli.plugins import ScannerPlugin, PluginMetadata, PluginType
+
+        class ConfigPlugin(ScannerPlugin):
+            METADATA = PluginMetadata(
+                name="NestedPlugin",
+                version="1.0.0",
+                description="Plugin with nested config",
+                plugin_type=PluginType.SCANNER,
+                config_schema={
+                    "auth": {
+                        "type": "object",
+                        "properties": {
+                            "token": {"type": "str", "required": True},
+                            "retries": {"type": "int", "default": 2},
+                        },
+                        "required": ["token"],
+                    }
+                },
+            )
+
+            def scan(self, target, options=None):
+                return []
+
+        plugin = ConfigPlugin({"auth": {"token": "abc"}})
+        assert plugin.validate_config() is True
+        assert plugin.config["auth"]["token"] == "abc"
+        assert plugin.config["auth"]["retries"] == 2
 
 
 class TestPluginLoader:
@@ -265,6 +384,37 @@ class TestPluginLoader:
         
         assert result.success is False
         assert "not found" in result.error
+
+    def test_load_plugin_surfaces_validation_errors(self, tmp_path):
+        from recon_cli.plugins import PluginLoader, PluginMetadata, PluginType, ScannerPlugin
+
+        class ConfigPlugin(ScannerPlugin):
+            METADATA = PluginMetadata(
+                name="ConfigPlugin",
+                version="1.0.0",
+                description="Plugin with typed config",
+                plugin_type=PluginType.SCANNER,
+                config_schema={"timeout": {"type": "int", "required": True}},
+            )
+
+            def scan(self, target, options=None):
+                return []
+
+        loader = PluginLoader()
+        loader.plugins["ConfigPlugin"] = MagicMock(
+            plugin_class=ConfigPlugin,
+            metadata=ConfigPlugin.METADATA,
+            path=tmp_path / "plugin.py",
+            status=None,
+            instance=None,
+            error=None,
+        )
+
+        plugin = loader.load_plugin("ConfigPlugin", {"timeout": "fast"})
+
+        assert plugin is None
+        assert loader.plugins["ConfigPlugin"].error is not None
+        assert "timeout" in loader.plugins["ConfigPlugin"].error
 
 
 class TestPluginRegistrySingleton:

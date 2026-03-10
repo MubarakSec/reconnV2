@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from collections import defaultdict
 
+from recon_cli.utils.last_run import update_last_report_pointer
 from recon_cli.utils.reporting import resolve_severity, resolve_finding_type
 
 __all__ = [
@@ -218,6 +219,7 @@ class ReportGenerator:
                 output_path.write_text(content)
             else:
                 output_path.write_bytes(content.encode() if isinstance(content, str) else content)
+            update_last_report_pointer(output_path)
         
         return content
     

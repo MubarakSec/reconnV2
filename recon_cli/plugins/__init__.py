@@ -8,12 +8,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Literal, Optional, Type, TYPE_CHECKING
 import importlib.util
 import inspect
 import json
 import logging
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,215 @@ class PluginStatus(Enum):
     LOADING = "loading"
 
 
+_EMPTY_OBJECT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": False,
+}
+
+_TYPE_NAME_MAP: Dict[str, Any] = {
+    "str": str,
+    "string": str,
+    "int": int,
+    "integer": int,
+    "float": float,
+    "number": float,
+    "bool": bool,
+    "boolean": bool,
+    "list": list,
+    "array": list,
+    "dict": dict,
+    "object": dict,
+    "any": Any,
+}
+
+
+class PluginConfigError(ValueError):
+    """Raised when plugin configuration does not satisfy its declared schema."""
+
+
+def _normalize_type_name(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in _TYPE_NAME_MAP:
+            if lowered in {"str", "string"}:
+                return "string"
+            if lowered in {"int", "integer"}:
+                return "integer"
+            if lowered in {"float", "number"}:
+                return "number"
+            if lowered in {"bool", "boolean"}:
+                return "boolean"
+            if lowered in {"list", "array"}:
+                return "array"
+            if lowered in {"dict", "object"}:
+                return "object"
+            return lowered
+        raise PluginConfigError(f"Unsupported schema type: {value}")
+    raise PluginConfigError(f"Unsupported schema type declaration: {value!r}")
+
+
+def _is_schema_object(schema: Dict[str, Any]) -> bool:
+    return (
+        isinstance(schema, dict)
+        and (
+            schema.get("type") == "object"
+            or isinstance(schema.get("properties"), dict)
+        )
+    )
+
+
+def _normalize_property_schema(spec: Any) -> Dict[str, Any]:
+    if isinstance(spec, str):
+        spec = {"type": spec}
+    elif not isinstance(spec, dict):
+        inferred_type = type(spec).__name__
+        spec = {"type": inferred_type, "default": spec}
+
+    normalized_type = _normalize_type_name(spec.get("type"))
+    if normalized_type is None:
+        if "properties" in spec:
+            normalized_type = "object"
+        elif "items" in spec:
+            normalized_type = "array"
+        elif "enum" in spec and spec["enum"]:
+            normalized_type = _normalize_type_name(type(spec["enum"][0]).__name__)
+
+    if normalized_type == "object":
+        return _normalize_object_schema(spec)
+    if normalized_type == "array":
+        items = spec.get("items", {"type": "string"})
+        normalized: Dict[str, Any] = {"type": "array", "items": _normalize_property_schema(items)}
+        for key in ("description", "default", "minItems", "maxItems"):
+            if key in spec:
+                normalized[key] = spec[key]
+        return normalized
+
+    normalized = {"type": normalized_type or "string"}
+    for key in ("description", "default", "enum", "minimum", "maximum", "minLength", "maxLength", "pattern"):
+        if key in spec:
+            normalized[key] = spec[key]
+    return normalized
+
+
+def _normalize_object_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    if not schema:
+        return dict(_EMPTY_OBJECT_SCHEMA)
+
+    properties_source: Dict[str, Any]
+    required_source: List[str] = []
+    if _is_schema_object(schema):
+        properties_source = dict(schema.get("properties", {}))
+        raw_required = schema.get("required", [])
+        if isinstance(raw_required, list):
+            required_source = [str(item) for item in raw_required]
+    else:
+        properties_source = dict(schema)
+
+    properties: Dict[str, Any] = {}
+    required: List[str] = list(required_source)
+    for key, raw_spec in properties_source.items():
+        properties[str(key)] = _normalize_property_schema(raw_spec)
+        if isinstance(raw_spec, dict) and raw_spec.get("required", False) and str(key) not in required:
+            required.append(str(key))
+
+    normalized: Dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": bool(schema.get("additionalProperties", False)) if _is_schema_object(schema) else False,
+    }
+    if "description" in schema:
+        normalized["description"] = schema["description"]
+    return normalized
+
+
+def _literal_annotation(enum_values: List[Any]) -> Any:
+    return Literal[tuple(enum_values)]
+
+
+def _annotation_from_schema(schema: Dict[str, Any], model_name: str) -> Any:
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        return _literal_annotation(enum_values)
+
+    schema_type = schema.get("type")
+    if schema_type == "string":
+        return str
+    if schema_type == "integer":
+        return int
+    if schema_type == "number":
+        return float
+    if schema_type == "boolean":
+        return bool
+    if schema_type == "array":
+        item_schema = schema.get("items", {"type": "string"})
+        return list[_annotation_from_schema(item_schema, f"{model_name}Item")]
+    if schema_type == "object":
+        properties = schema.get("properties", {})
+        if not properties:
+            return Dict[str, Any]
+        return _model_from_object_schema(model_name, schema)
+    return Any
+
+
+def _field_from_schema(field_name: str, schema: Dict[str, Any], *, required: bool, model_name: str) -> tuple[Any, Any]:
+    annotation = _annotation_from_schema(schema, f"{model_name}_{field_name.title()}")
+    field_kwargs: Dict[str, Any] = {}
+    if "description" in schema:
+        field_kwargs["description"] = schema["description"]
+    if "minimum" in schema:
+        field_kwargs["ge"] = schema["minimum"]
+    if "maximum" in schema:
+        field_kwargs["le"] = schema["maximum"]
+    if "pattern" in schema:
+        field_kwargs["pattern"] = schema["pattern"]
+    min_length = schema.get("minLength", schema.get("minItems"))
+    max_length = schema.get("maxLength", schema.get("maxItems"))
+    if min_length is not None:
+        field_kwargs["min_length"] = min_length
+    if max_length is not None:
+        field_kwargs["max_length"] = max_length
+
+    if "default" in schema:
+        default = schema["default"]
+    elif required:
+        return annotation, Field(**field_kwargs)
+    else:
+        annotation = annotation | None
+        default = None
+    return annotation, Field(default=default, **field_kwargs)
+
+
+def _model_from_object_schema(model_name: str, schema: Dict[str, Any]) -> type[BaseModel]:
+    normalized = _normalize_object_schema(schema)
+    properties = normalized.get("properties", {})
+    required = set(normalized.get("required", []))
+    field_definitions = {
+        field_name: _field_from_schema(field_name, field_schema, required=field_name in required, model_name=model_name)
+        for field_name, field_schema in properties.items()
+    }
+    return create_model(
+        model_name,
+        __config__=ConfigDict(extra="allow" if normalized.get("additionalProperties") else "forbid"),
+        **field_definitions,
+    )
+
+
+def build_plugin_config_model(plugin_name: str, schema: Dict[str, Any]) -> type[BaseModel]:
+    """Build a strict Pydantic model from plugin shorthand/full config schema."""
+    return _model_from_object_schema(f"{plugin_name}Config", schema)
+
+
+def build_plugin_config_json_schema(plugin_name: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a machine-facing JSON schema that matches plugin config validation."""
+    model = build_plugin_config_model(plugin_name, schema)
+    return model.model_json_schema()
+
+
 @dataclass
 class PluginMetadata:
     """Plugin metadata"""
@@ -50,6 +260,9 @@ class PluginMetadata:
     dependencies: List[str] = field(default_factory=list)
     config_schema: Dict[str, Any] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
+
+    def config_json_schema(self) -> Dict[str, Any]:
+        return build_plugin_config_json_schema(self.name, self.config_schema)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -59,7 +272,7 @@ class PluginMetadata:
             "author": self.author,
             "plugin_type": self.plugin_type.value,
             "dependencies": self.dependencies,
-            "config_schema": self.config_schema,
+            "config_schema": self.config_json_schema(),
             "tags": self.tags,
         }
 
@@ -93,6 +306,7 @@ class PluginInterface(ABC):
         self.config = config or {}
         self.logger = logging.getLogger(f"plugin.{self.METADATA.name}")
         self._initialized = False
+        self._config_error: Optional[str] = None
     
     @abstractmethod
     def execute(self, context: Dict[str, Any]) -> PluginResult:
@@ -128,20 +342,25 @@ class PluginInterface(ABC):
         Returns:
             True if configuration is valid
         """
-        schema = self.METADATA.config_schema
-        if not schema:
-            return True
-        
-        for key, requirements in schema.items():
-            if requirements.get("required", False) and key not in self.config:
-                self.logger.error(f"Missing required config: {key}")
-                return False
-        
+        try:
+            model = build_plugin_config_model(self.METADATA.name, self.METADATA.config_schema)
+            validated = model.model_validate(self.config)
+        except (PluginConfigError, ValidationError) as exc:
+            self._config_error = str(exc)
+            self.logger.error("Plugin config validation failed for %s: %s", self.METADATA.name, exc)
+            return False
+
+        self._config_error = None
+        self.config = validated.model_dump(exclude_none=True)
         return True
     
     @property
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def config_error(self) -> Optional[str]:
+        return self._config_error
 
 
 class ScannerPlugin(PluginInterface):
@@ -468,7 +687,7 @@ class PluginLoader:
             # Validate config
             if not instance.validate_config():
                 loaded.status = PluginStatus.ERROR
-                loaded.error = "Configuration validation failed"
+                loaded.error = instance.config_error or "Configuration validation failed"
                 return None
             
             # Initialize

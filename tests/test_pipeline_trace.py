@@ -13,6 +13,13 @@ from recon_cli.pipeline.runner import PipelineRunner
 from recon_cli.pipeline.stage_base import Stage, StageError
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
+from recon_cli.utils.pipeline_trace import (
+    ArtifactTraceExporter,
+    ExporterTraceProcessor,
+    PipelineTraceProcessor,
+    PipelineTraceRecorder,
+    SynchronousMultiTraceProcessor,
+)
 
 
 class DummyManager:
@@ -164,3 +171,59 @@ def test_pipeline_trace_records_tool_execution_spans(tmp_path: Path) -> None:
     assert ok_span["status"] == "completed"
     assert failed_span["status"] == "failed"
     assert failed_span.get("attributes", {}).get("returncode") == 1
+
+
+def test_pipeline_trace_supports_custom_processors(tmp_path: Path) -> None:
+    class MemoryProcessor(PipelineTraceProcessor):
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+            self.snapshots: list[dict] = []
+            self.closed = False
+
+        def on_event(self, payload: dict) -> None:
+            self.events.append(payload)
+
+        def on_snapshot(self, snapshot: dict) -> None:
+            self.snapshots.append(snapshot)
+
+        def shutdown(self) -> None:
+            self.closed = True
+
+    trace_path = tmp_path / "trace.json"
+    events_path = tmp_path / "trace_events.jsonl"
+    memory = MemoryProcessor()
+    processor = SynchronousMultiTraceProcessor(
+        [
+            memory,
+            ExporterTraceProcessor(ArtifactTraceExporter(trace_path, events_path)),
+        ]
+    )
+    recorder = PipelineTraceRecorder(
+        trace_path,
+        events_path,
+        job_id="job-processor",
+        target="example.com",
+        profile="passive",
+        processor=processor,
+    )
+
+    span = recorder.start_span("stage", span_type="stage")
+    span.add_event("checkpoint", {"step": 1})
+    span.finish(status="completed")
+    recorder.close(status="finished")
+
+    assert memory.closed is True
+    event_names = [item.get("name") for item in memory.events]
+    assert event_names == [
+        "trace.started",
+        "span.started",
+        "span.event",
+        "span.finished",
+        "trace.finished",
+    ]
+    assert memory.snapshots[-1]["status"] == "finished"
+
+    trace_summary = fs.read_json(trace_path, default={})
+    trace_events = read_jsonl(events_path)
+    assert trace_summary.get("status") == "finished"
+    assert [entry.get("name") for entry in trace_events] == event_names

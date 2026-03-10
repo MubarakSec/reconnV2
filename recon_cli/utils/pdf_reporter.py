@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
 
+from recon_cli.utils.last_run import update_last_report_pointer
 from recon_cli.utils.reporting import is_finding, resolve_confidence_label
 
 @dataclass
@@ -86,15 +87,18 @@ class PDFReporter:
         Returns:
             Path to generated PDF
         """
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.use_weasyprint:
-            return self._generate_with_weasyprint(job_data, output_path, results)
+            generated_path = self._generate_with_weasyprint(job_data, output_path, results)
         elif self.use_reportlab:
-            return self._generate_with_reportlab(job_data, output_path, results)
+            generated_path = self._generate_with_reportlab(job_data, output_path, results)
         else:
             raise RuntimeError(
                 "No PDF library available. Install with: "
                 "pip install weasyprint or pip install reportlab"
             )
+        update_last_report_pointer(generated_path)
+        return generated_path
     
     def _generate_with_weasyprint(
         self,

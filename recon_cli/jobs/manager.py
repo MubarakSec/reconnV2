@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from recon_cli import config
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.utils import fs, time as time_utils
+from recon_cli.utils.last_run import clear_job_pointers, refresh_job_pointers
 
 
 @dataclass
@@ -240,7 +241,9 @@ class JobManager:
         paths.results_jsonl.touch(exist_ok=True)
         paths.results_txt.touch(exist_ok=True)
         self._apply_permissions(paths)
-        return JobRecord(spec=spec, metadata=metadata, paths=paths)
+        record = JobRecord(spec=spec, metadata=metadata, paths=paths)
+        refresh_job_pointers(paths.root)
+        return record
 
     def load_job(self, job_id: str) -> Optional[JobRecord]:
         root = self._find_job_dir(job_id)
@@ -286,12 +289,14 @@ class JobManager:
         destination.mkdir(parents=True, exist_ok=True)
         target = destination / src.name
         shutil.move(str(src), str(target))
+        refresh_job_pointers(target)
         return target
 
     def remove_job(self, job_id: str) -> bool:
         root = self._find_job_dir(job_id)
         if not root:
             return False
+        clear_job_pointers(root)
         shutil.rmtree(root, ignore_errors=True)
         return True
 
