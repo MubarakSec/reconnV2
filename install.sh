@@ -6,6 +6,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+cd "$PROJECT_DIR"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -59,6 +63,13 @@ check_python() {
     fi
 }
 
+has_projectdiscovery_httpx() {
+    if ! command -v httpx >/dev/null 2>&1; then
+        return 1
+    fi
+    httpx -h 2>&1 | grep -q -- "-tech-detect"
+}
+
 # Install system dependencies
 install_system_deps() {
     echo -e "\n${BLUE}[*] Installing system dependencies...${NC}"
@@ -110,7 +121,7 @@ install_go_tools() {
     fi
     
     # httpx (if not from apt)
-    if ! command -v httpx &> /dev/null; then
+    if ! has_projectdiscovery_httpx; then
         echo -e "${YELLOW}[*] Installing httpx...${NC}"
         go install github.com/projectdiscovery/httpx/cmd/httpx@latest 2>/dev/null || true
     fi
@@ -134,10 +145,10 @@ install_python_deps() {
     
     # Install package
     echo -e "${YELLOW}[*] Installing ReconnV2...${NC}"
-    pip install -e . -q
-    
+    pip install -e ".[api]" -q
+
     # Install optional dependencies
-    pip install playwright -q 2>/dev/null || true
+    pip install dnspython playwright -q 2>/dev/null || true
     
     echo -e "${GREEN}[✓] Python dependencies installed${NC}"
 }
@@ -172,9 +183,10 @@ create_aliases() {
     
     ALIAS_FILE="$HOME/.recon_aliases"
     
-    cat > "$ALIAS_FILE" << 'ALIASES'
+    cat > "$ALIAS_FILE" << ALIASES
 # ReconnV2 Aliases
-alias recon='cd ~/reconnV2 && source .venv/bin/activate && recon-cli'
+RECONN_HOME="$PROJECT_DIR"
+alias recon='cd "$RECONN_HOME" && source .venv/bin/activate && recon-cli'
 alias recon-scan='recon scan'
 alias recon-quick='recon scan --profile quick --inline'
 alias recon-full='recon scan --profile full --inline'
@@ -184,13 +196,13 @@ alias recon-status='recon status'
 
 # Quick functions
 quick-recon() {
-    cd ~/reconnV2 && source .venv/bin/activate
-    recon-cli scan "$1" --profile passive --inline
+    cd "$RECONN_HOME" && source .venv/bin/activate
+    recon-cli scan "\$1" --profile passive --inline
 }
 
 deep-recon() {
-    cd ~/reconnV2 && source .venv/bin/activate
-    recon-cli scan "$1" --profile deep --scanner nuclei --inline
+    cd "$RECONN_HOME" && source .venv/bin/activate
+    recon-cli scan "\$1" --profile deep --scanner nuclei --inline
 }
 ALIASES
 
@@ -219,7 +231,7 @@ create_wrapper() {
     
     $SUDO tee $WRAPPER > /dev/null << WRAPPER
 #!/bin/bash
-cd "$(dirname "$(readlink -f "$0")")/../reconnV2" 2>/dev/null || cd ~/reconnV2
+cd "$PROJECT_DIR" 2>/dev/null || exit 1
 source .venv/bin/activate 2>/dev/null
 exec python -m recon_cli "\$@"
 WRAPPER
@@ -241,6 +253,14 @@ verify_installation() {
     # Check tools
     tools=("subfinder" "amass" "nuclei" "httpx" "waybackurls")
     for tool in "${tools[@]}"; do
+        if [ "$tool" = "httpx" ]; then
+            if has_projectdiscovery_httpx; then
+                echo -e "${GREEN}[✓] $tool${NC}"
+            else
+                echo -e "${YELLOW}[!] $tool (not found - optional)${NC}"
+            fi
+            continue
+        fi
         if command -v $tool &> /dev/null; then
             echo -e "${GREEN}[✓] $tool${NC}"
         else

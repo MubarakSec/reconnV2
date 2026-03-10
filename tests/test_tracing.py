@@ -79,7 +79,8 @@ class TestSpanContext:
         
         ctx = SpanContext.from_headers(headers)
         
-        assert ctx.trace_id == "trace123" or ctx is not None
+        assert ctx.trace_id == "trace123"
+        assert ctx.span_id == "span456"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -440,7 +441,8 @@ class TestContextPropagation:
         headers = {}
         tracer.inject(headers)
         
-        assert "x-trace-id" in headers or "traceparent" in headers
+        assert "x-trace-id" in headers
+        assert "x-span-id" in headers
     
     def test_extract_headers(self):
         """استخراج من headers"""
@@ -453,7 +455,8 @@ class TestContextPropagation:
         
         ctx = tracer.extract(headers)
         
-        assert ctx is not None or True  # Depends on implementation
+        assert ctx.trace_id == "abc123"
+        assert ctx.span_id == "span456"
     
     @pytest.mark.asyncio
     async def test_propagate_across_async(self):

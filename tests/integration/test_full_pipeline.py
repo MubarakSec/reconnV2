@@ -355,7 +355,7 @@ class TestJobLifecycle:
         )
         
         assert job_id is not None
-        assert (pipeline_dir / "jobs" / "queued" / job_id).exists() or True
+        assert (pipeline_dir / "jobs" / "queued" / job_id).exists()
     
     def test_job_status_transitions(self, pipeline_dir: Path, sample_targets: list):
         """انتقالات حالة المهمة"""
@@ -368,7 +368,7 @@ class TestJobLifecycle:
         
         # Should start as queued or pending (using string status)
         status = lifecycle.get_status(job_id)
-        assert status in ["queued", "pending", None]
+        assert status == "queued"
     
     @pytest.mark.asyncio
     async def test_run_job_to_completion(

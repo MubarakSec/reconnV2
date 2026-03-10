@@ -123,7 +123,7 @@ def _normalize_stage_selection(raw_values: List[str]) -> List[str]:
     invalid = [name for name in selected if name not in available]
     if invalid:
         joined = ", ".join(sorted(set(invalid)))
-        raise typer.BadParameter(f"Unknown stage(s): {joined}", param_name="--stages")
+        raise typer.BadParameter(f"Unknown stage(s): {joined}")
     # Preserve input order but drop duplicates
     ordered: List[str] = []
     seen = set()
@@ -650,6 +650,7 @@ def doctor(
     import importlib.util
     import io
     import subprocess
+    import tempfile
     import tokenize
 
     source_root = Path(__file__).resolve().parent
@@ -663,22 +664,48 @@ def doctor(
             if token.type == tokenize.OP and token.string == "...":
                 issues.append(f"ellipsis operator found in {py_file}:{token.start[0]}")
 
-    def _version_line(tool: str, args: List[str]) -> str:
+    def _version_line(tool: str, args: List[str]) -> tuple[str, str]:
         try:
-            completed = subprocess.run(
-                [tool] + args,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
+            with tempfile.TemporaryDirectory(prefix="recon-doctor-") as tmp_home:
+                env = os.environ.copy()
+                env["HOME"] = tmp_home
+                env["XDG_CONFIG_HOME"] = os.path.join(tmp_home, ".config")
+                env["XDG_CACHE_HOME"] = os.path.join(tmp_home, ".cache")
+                env["XDG_DATA_HOME"] = os.path.join(tmp_home, ".local", "share")
+                completed = subprocess.run(
+                    [tool] + args,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                    env=env,
+                )
         except Exception:
-            return ""
-        output = (completed.stdout or "") + (completed.stderr or "")
-        output = output.strip()
+            return "error", ""
+        output = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
         if not output:
-            return ""
-        return output.splitlines()[0][:120]
+            return ("ok", "") if completed.returncode == 0 else ("error", "")
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        preferred_line = ""
+        preferred_markers = (
+            "current version",
+            "nuclei engine version",
+            "nmap version",
+            "ffuf version",
+            "usage:",
+            "usage of ",
+            "version ",
+        )
+        for line in lines:
+            lowered = line.lower()
+            if any(marker in lowered for marker in preferred_markers):
+                preferred_line = line[:120]
+                break
+        if completed.returncode == 0:
+            return "ok", preferred_line or lines[0][:120]
+        if preferred_line:
+            return "ok", preferred_line
+        return "error", lines[0][:120]
 
     tool_checks = [
         ("subfinder", ["-version"], "install via go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"),
@@ -693,7 +720,7 @@ def doctor(
         ("sqlmap", ["--version"], "install via pipx install sqlmap or apt install sqlmap"),
         ("nmap", ["--version"], "install via apt install nmap"),
         ("wpscan", ["--version"], "install via gem install wpscan"),
-        ("droopescan", ["--version"], "install via pipx install droopescan or pip install droopescan"),
+        ("droopescan", ["--help"], "install via pipx install droopescan or pip install droopescan"),
         ("interactsh-client", ["-version"], "install via go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"),
         ("waybackurls", ["-h"], "install via go install github.com/tomnomnom/waybackurls@latest"),
         ("gau", ["-h"], "install via go install github.com/lc/gau/v2/cmd/gau@latest"),
@@ -710,8 +737,15 @@ def doctor(
                 if emit_warnings and tool not in {"waybackurls", "gau"}:
                     typer.echo(f"[warn] tool '{tool}' not found in PATH ({hint})")
                 continue
-            version = _version_line(tool, version_args)
-            tool_results.append((tool, "ok", version))
+            probe_status, detail = _version_line(tool, version_args)
+            if probe_status == "ok":
+                tool_results.append((tool, "ok", detail))
+                continue
+            tool_results.append((tool, "error", detail))
+            local_warnings.append(f"tool:{tool}:error")
+            if emit_warnings:
+                suffix = f": {detail}" if detail else ""
+                typer.echo(f"[warn] tool '{tool}' is installed but failed the health probe{suffix}")
 
         if not (CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")):
             local_warnings.append("tool:waybackurls-or-gau")
@@ -851,6 +885,9 @@ def doctor(
     for tool, status, version in tool_results:
         if status == "missing":
             typer.echo(f"{tool:12} : missing")
+        elif status == "error":
+            suffix = f" ({version})" if version else ""
+            typer.echo(f"{tool:12} : error{suffix}")
         else:
             suffix = f" ({version})" if version else ""
             typer.echo(f"{tool:12} : ok{suffix}")
@@ -1027,8 +1064,7 @@ def export(
         typer.echo(str(archive_path))
 
 
-@app.command()
-def report(
+def _report_legacy(
     job_id: str,
     fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html"),
     verified_only: bool = typer.Option(False, "--verified-only", help="Include only verified findings (html only)"),
@@ -1150,7 +1186,7 @@ def cache_clear() -> None:
 
 @app.command("serve")
 def serve(
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind"),
     port: int = typer.Option(8080, "--port", help="Port to bind"),
 ) -> None:
     """Start the REST API server."""
@@ -1158,7 +1194,7 @@ def serve(
         import uvicorn
         from recon_cli.api.app import app as api_app
         typer.secho(f"🚀 Starting API server at http://{host}:{port}", fg=typer.colors.GREEN)
-        typer.echo("   Docs: http://{host}:{port}/docs")
+        typer.echo(f"   Docs: http://{host}:{port}/docs")
         uvicorn.run(api_app, host=host, port=port)
     except ImportError:
         typer.echo("❌ FastAPI/Uvicorn not installed. Run: pip install fastapi uvicorn", err=True)
@@ -1251,13 +1287,8 @@ def pdf_report(
         raise typer.BadParameter("job_id is required")
     
     manager = JobManager()
-    record = manager.load_job(job_id)
-    
-    if not record:
-        typer.echo(f"Job {job_id} not found", err=True)
-        raise typer.Exit(code=3)
-    
-    job_path = record.path
+    record = _load_job_or_exit(manager, job_id)
+    job_path = record.paths.root
     
     config = PDFReportConfig(
         title=title,
@@ -1418,8 +1449,10 @@ def setup_completions(
                 shell = "fish"
             elif os.name == "nt":
                 shell = "powershell"
+            else:
+                shell = "bash"
         else:
-            shell = "bash"
+            shell = shell.lower()
         
         shell_enum = Shell(shell.lower())
         generator = CompletionGenerator(RECON_COMMANDS)

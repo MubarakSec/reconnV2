@@ -36,6 +36,7 @@ dependencies = [
   "pyyaml>=6.0,<7.0",
   "aiodns>=3.0,<4.0",
   "croniter>=2.0,<3.0",
+  "dnspython>=2.6,<3.0",
 ]
 
 [project.optional-dependencies]

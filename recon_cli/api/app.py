@@ -27,6 +27,7 @@ from recon_cli.jobs.manager import JobManager
 from recon_cli.jobs.lifecycle import JobLifecycle
 from recon_cli.jobs.results import JobResults
 from recon_cli.jobs.summary import JobSummary
+from recon_cli.users import Permission
 from recon_cli.utils.metrics import metrics as metrics_registry
 from recon_cli.utils import validation
 from recon_cli.utils.jsonl import read_jsonl
@@ -237,6 +238,27 @@ def create_app() -> "FastAPI":
         validated = await _maybe_authenticate(x_api_key)
         if not validated:
             raise HTTPException(status_code=401, detail="Invalid API key")
+        return validated
+
+    async def _require_capability(
+        x_api_key: Optional[str],
+        required_permission: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        validated = await _require_authenticate(x_api_key)
+        granted = {
+            str(item).strip()
+            for item in [
+                *(validated.get("permissions") or []),
+                *(validated.get("scopes") or []),
+            ]
+            if str(item).strip()
+        }
+        if Permission.API_ADMIN.value in granted:
+            return validated
+        if Permission.API_ACCESS.value not in granted:
+            raise HTTPException(status_code=403, detail=f"API key lacks {Permission.API_ACCESS.value}")
+        if required_permission and required_permission not in granted:
+            raise HTTPException(status_code=403, detail=f"API key lacks {required_permission}")
         return validated
 
     def _validate_job_id_or_400(job_id: str) -> None:
@@ -597,8 +619,13 @@ def create_app() -> "FastAPI":
         return FileResponse(log_path, media_type="text/plain")
     
     @app.post("/api/scan", response_model=JobResponse)
-    async def create_scan(request: ScanRequest, background_tasks: BackgroundTasks):
+    async def create_scan(
+        request: ScanRequest,
+        background_tasks: BackgroundTasks,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    ):
         """إنشاء فحص جديد"""
+        await _require_capability(x_api_key, Permission.JOBS_CREATE.value)
         manager = app.state.manager
 
         raw_target = request.target if isinstance(request.target, str) else ""
@@ -664,7 +691,7 @@ def create_app() -> "FastAPI":
         x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """إنشاء مهمة"""
-        await _maybe_authenticate(x_api_key)
+        await _require_capability(x_api_key, Permission.JOBS_CREATE.value)
         lifecycle = JobLifecycle(manager=app.state.manager)
         options = _normalize_options_or_400(request.options)
         allow_ip = bool(options.get("allow_ip"))
@@ -688,9 +715,13 @@ def create_app() -> "FastAPI":
         return {"job_id": job_id, "status": "queued"}
     
     @app.post("/api/jobs/{job_id}/requeue")
-    async def requeue_job(job_id: str):
+    async def requeue_job(
+        job_id: str,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    ):
         """إعادة تشغيل مهمة"""
         _validate_job_id_or_400(job_id)
+        await _require_capability(x_api_key, Permission.JOBS_RUN.value)
         job_dir = _find_job_dir(job_id)
         
         if not job_dir:
@@ -708,7 +739,7 @@ def create_app() -> "FastAPI":
     async def delete_job(job_id: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
         """حذف مهمة"""
         _validate_job_id_or_400(job_id)
-        await _require_authenticate(x_api_key)
+        await _require_capability(x_api_key, Permission.JOBS_DELETE.value)
         lifecycle = JobLifecycle(manager=app.state.manager)
         removed = lifecycle.delete_job(job_id)
         if not removed:
@@ -779,7 +810,7 @@ def _run_job(job_id: str):
 #                     Run Server
 # ═══════════════════════════════════════════════════════════
 
-def run_api(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
+def run_api(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
     """تشغيل السيرفر"""
     try:
         import uvicorn

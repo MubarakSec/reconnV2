@@ -87,3 +87,90 @@ def test_run_to_file_retries_non_zero_exit(monkeypatch: pytest.MonkeyPatch, tmp_
     assert result.returncode == 0
     assert calls["count"] == 2
     assert out_path.exists()
+
+
+def test_available_rejects_python_httpx_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda command: "/tmp/httpx" if command == "httpx" else None)
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="HTTPX\nA next generation HTTP client.\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert CommandExecutor.available("httpx") is False
+
+
+def test_available_accepts_projectdiscovery_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda command: "/tmp/httpx" if command == "httpx" else None)
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="httpx usage\n-tech-detect\n-status-code\n-follow-redirects\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert CommandExecutor.available("httpx") is True
+
+
+def test_run_blocks_shell_launcher_inline_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"count": 0}
+
+    def fake_run(cmd, **kwargs):
+        called["count"] += 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    executor = CommandExecutor(DummyLogger())
+    with pytest.raises(CommandError, match="inline shell commands are not allowed"):
+        executor.run(["bash", "-lc", "echo test"], check=False)
+    assert called["count"] == 0
+
+
+def test_run_blocks_curl_env_exfiltration(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"count": 0}
+
+    def fake_run(cmd, **kwargs):
+        called["count"] += 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    executor = CommandExecutor(DummyLogger())
+    with pytest.raises(CommandError, match="shell-style expansion payload"):
+        executor.run(["curl", "-d", "$(env)", "http://127.0.0.1"], check=False)
+    assert called["count"] == 0
+
+
+def test_run_blocks_unicode_homograph_curl(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"count": 0}
+
+    def fake_run(cmd, **kwargs):
+        called["count"] += 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    executor = CommandExecutor(DummyLogger())
+    with pytest.raises(CommandError, match="Unicode-homograph executable name"):
+        executor.run(["\u0441url", "-d", "payload", "http://127.0.0.1"], check=False)
+    assert called["count"] == 0
+
+
+def test_run_guardrails_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"count": 0}
+
+    def fake_run(cmd, **kwargs):
+        called["count"] += 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("RECON_EXECUTOR_GUARDRAILS", "false")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    executor = CommandExecutor(DummyLogger())
+    result = executor.run(["curl", "-d", "$(env)", "http://127.0.0.1"], check=False)
+    assert result.returncode == 0
+    assert called["count"] == 1

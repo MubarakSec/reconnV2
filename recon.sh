@@ -104,6 +104,15 @@ run_recon() {
     run_command "$PYTHON_BIN" -m recon_cli "$@"
 }
 
+ensure_cli_runtime() {
+    if "$PYTHON_BIN" -m recon_cli --help >/dev/null 2>&1; then
+        return 0
+    fi
+    print_err "recon_cli is not ready for $PYTHON_BIN."
+    print_info "Run ./install.sh to create the virtual environment and install dependencies."
+    exit 1
+}
+
 run_scan_command() {
     local -a cmd=("$@")
     echo ""
@@ -916,7 +925,7 @@ run_quickstart() {
 
 start_web_dashboard() {
     print_info "Starting web dashboard (Ctrl+C to stop)."
-    run_recon web
+    run_recon serve
     pause_screen
 }
 
@@ -982,6 +991,7 @@ show_main_menu() {
 }
 
 main() {
+    ensure_cli_runtime
     load_profiles
     load_active_modules
 

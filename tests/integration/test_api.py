@@ -88,15 +88,15 @@ class TestHealthEndpoint:
         response = api_client.get("/api/health")
         
         data = response.json()
-        assert data["status"] in ["healthy", "ok", "up"]
+        assert data["status"] in ["healthy", "unhealthy"]
     
     def test_health_includes_components(self, api_client: TestClient):
         """Health يتضمن المكونات"""
         response = api_client.get("/api/health")
         
         data = response.json()
-        # May include components depending on implementation
-        assert isinstance(data, dict)
+        assert "checks" in data
+        assert isinstance(data["checks"], dict)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -139,16 +139,29 @@ class TestJobsAPI:
         
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, (list, dict))
+        assert set(data) == {"jobs", "total"}
+        assert isinstance(data["jobs"], list)
+        assert isinstance(data["total"], int)
     
     def test_create_job(self, api_client: TestClient, sample_job_data: dict):
         """إنشاء مهمة"""
-        with patch("recon_cli.jobs.lifecycle.JobLifecycle.create_job") as mock_create:
-            mock_create.return_value = "job-123"
-            
-            response = api_client.post("/api/jobs", json=sample_job_data)
-            
-            assert response.status_code in [200, 201, 202]
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            with patch("recon_cli.jobs.lifecycle.JobLifecycle.create_job") as mock_create:
+                mock_create.return_value = "job-123"
+                
+                response = api_client.post(
+                    "/api/jobs",
+                    json=sample_job_data,
+                    headers={"X-API-Key": "test-api-key"},
+                )
+                
+                assert response.status_code == 200
+                assert response.json() == {"job_id": "job-123", "status": "queued"}
     
     def test_get_job(self, api_client: TestClient):
         """الحصول على مهمة"""
@@ -161,7 +174,9 @@ class TestJobsAPI:
             
             response = api_client.get("/api/jobs/job-123")
             
-            assert response.status_code in [200, 404]
+            assert response.status_code == 200
+            assert response.json()["job_id"] == "job-123"
+            assert response.json()["status"] == "running"
     
     def test_get_nonexistent_job(self, api_client: TestClient):
         """الحصول على مهمة غير موجودة"""
@@ -170,19 +185,25 @@ class TestJobsAPI:
             
             response = api_client.get("/api/jobs/nonexistent-job")
             
-            assert response.status_code in [404, 200]
+            assert response.status_code == 404
+            assert "Job not found" in response.json()["detail"]
     
     def test_delete_job(self, api_client: TestClient):
         """حذف مهمة"""
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
-            mock_validate.return_value = {"user_id": 1, "permissions": ["write"]}
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:delete"],
+                "scopes": [],
+            }
             with patch("recon_cli.jobs.lifecycle.JobLifecycle.delete_job") as mock_delete:
                 mock_delete.return_value = True
                 response = api_client.delete(
                     "/api/jobs/job-123",
                     headers={"X-API-Key": "test-api-key"},
                 )
-                assert response.status_code in [200, 204, 404]
+                assert response.status_code == 200
+                assert response.json()["message"] == "Job job-123 deleted"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -202,7 +223,9 @@ class TestJobResultsAPI:
             
             response = api_client.get("/api/jobs/job-123/results")
             
-            assert response.status_code in [200, 404]
+            assert response.status_code == 200
+            assert response.json()["total"] == 2
+            assert len(response.json()["results"]) == 2
     
     def test_get_job_summary(self, api_client: TestClient):
         """الحصول على ملخص المهمة"""
@@ -216,13 +239,16 @@ class TestJobResultsAPI:
             
             response = api_client.get("/api/jobs/job-123/summary")
             
-            assert response.status_code in [200, 404]
+            assert response.status_code == 200
+            assert response.json()["total_targets"] == 5
+            assert response.json()["total_vulns"] == 3
     
     def test_get_job_logs(self, api_client: TestClient):
         """الحصول على سجلات المهمة"""
         response = api_client.get("/api/jobs/job-123/logs")
-        
-        assert response.status_code in [200, 404]
+
+        assert response.status_code == 404
+        assert "Job not found" in response.json()["detail"]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -242,9 +268,8 @@ class TestMetricsEndpoint:
         """تنسيق Prometheus"""
         response = api_client.get("/api/metrics")
         
-        # Should be text/plain for Prometheus
         content_type = response.headers.get("content-type", "")
-        assert "text" in content_type or response.status_code == 200
+        assert "text/plain" in content_type
 
 
 # ═══════════════════════════════════════════════════════════
@@ -265,11 +290,16 @@ class TestAPIAuthentication:
         headers = {"X-API-Key": "test-api-key"}
         
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
-            mock_validate.return_value = {"user_id": 1, "permissions": ["read"]}
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:view"],
+                "scopes": [],
+            }
             
             response = api_client.get("/api/jobs", headers=headers)
             
-            assert response.status_code in [200, 401, 403]
+            assert response.status_code == 200
+            mock_validate.assert_called_once_with("test-api-key")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -293,7 +323,7 @@ class TestAPIErrorHandling:
             headers={"Content-Type": "application/json"},
         )
         
-        assert response.status_code in [400, 422]
+        assert response.status_code == 422
     
     def test_validation_error(self, api_client: TestClient):
         """خطأ التحقق"""
@@ -301,10 +331,20 @@ class TestAPIErrorHandling:
             "targets": [],  # Empty targets should be invalid
             "stages": [],   # Empty stages should be invalid
         }
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            response = api_client.post(
+                "/api/jobs",
+                json=invalid_data,
+                headers={"X-API-Key": "test-api-key"},
+            )
         
-        response = api_client.post("/api/jobs", json=invalid_data)
-        
-        assert response.status_code in [400, 422, 200]
+        assert response.status_code == 400
+        assert response.json()["detail"] == "targets is required"
     
     def test_internal_server_error(self, api_client: TestClient):
         """خطأ داخلي في الخادم"""
@@ -313,8 +353,8 @@ class TestAPIErrorHandling:
             
             response = api_client.get("/api/jobs")
             
-            # Should handle gracefully
-            assert response.status_code in [200, 500]
+            assert response.status_code == 500
+            assert response.json()["detail"] == "Database error"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -363,11 +403,8 @@ class TestAPIRateLimiting:
         # Make many requests quickly
         for _ in range(100):
             response = api_client.get("/api/jobs")
-            if response.status_code == 429:
-                break
         
-        # Either succeeds or hits rate limit
-        assert response.status_code in [200, 429]
+        assert response.status_code == 200
 
 
 # ═══════════════════════════════════════════════════════════
@@ -387,8 +424,8 @@ class TestAPICORS:
             },
         )
         
-        # Should allow CORS or return 405
-        assert response.status_code in [200, 204, 405]
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     
     def test_cors_headers(self, api_client: TestClient):
         """CORS headers"""
@@ -397,8 +434,8 @@ class TestAPICORS:
             headers={"Origin": "http://localhost:3000"},
         )
         
-        # Should include CORS headers if enabled
         assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -410,23 +447,15 @@ class TestAPIWebSocket:
     
     def test_websocket_connection(self, api_client: TestClient):
         """اتصال WebSocket"""
-        try:
-            with api_client.websocket_connect("/api/ws/jobs") as ws:
-                # Connection successful
+        with pytest.raises(Exception):
+            with api_client.websocket_connect("/api/ws/jobs"):
                 pass
-        except Exception:
-            # WebSocket might not be implemented
-            pass
     
     def test_websocket_job_updates(self, api_client: TestClient):
         """تحديثات المهام عبر WebSocket"""
-        try:
-            with api_client.websocket_connect("/api/ws/jobs/job-123") as ws:
-                # Should receive updates
+        with pytest.raises(Exception):
+            with api_client.websocket_connect("/api/ws/jobs/job-123"):
                 pass
-        except Exception:
-            # WebSocket might not be implemented
-            pass
 
 
 # ═══════════════════════════════════════════════════════════

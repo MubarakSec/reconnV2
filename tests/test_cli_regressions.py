@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -27,6 +28,13 @@ def test_completions_command_uses_command_tree():
     result = runner.invoke(cli.app, ["completions", "--shell", "bash"])
     assert result.exit_code == 0
     assert "_recon_completions" in result.stdout
+
+
+def test_completions_show_respects_explicit_shell():
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["completions", "--shell", "zsh", "--show"])
+    assert result.exit_code == 0
+    assert "Completion script for zsh" in result.stdout
 
 
 def test_completions_install_handles_path_return(monkeypatch):
@@ -75,12 +83,41 @@ def test_doctor_reports_python_dependency_section():
     runner = CliRunner()
     result = runner.invoke(cli.app, ["doctor"])
     assert result.exit_code in {0, 1}
+    assert "== Tool Health ==" in result.stdout
     assert "interactsh-client" in result.stdout
     assert "== Python Dependency Health ==" in result.stdout
     assert "dnspython" in result.stdout
     assert "playwright" in result.stdout
     assert "requests" in result.stdout
     assert "pyyaml" in result.stdout
+
+
+def test_doctor_reports_missing_external_tools(monkeypatch):
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(lambda _tool: False))
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "httpx        : missing" in result.stdout
+    assert "nuclei       : missing" in result.stdout
+    assert "interactsh-client : missing" in result.stdout
+    assert "Doctor completed with" in result.stdout
+
+
+def test_doctor_reports_tool_probe_errors(monkeypatch):
+    runner = CliRunner()
+
+    monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(lambda tool: tool == "droopescan"))
+
+    def _fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Traceback: broken tool\n")
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+
+    result = runner.invoke(cli.app, ["doctor"])
+    assert result.exit_code == 0
+    assert "droopescan   : error" in result.stdout
 
 
 def test_doctor_fix_deps_attempts_installs(monkeypatch):
@@ -118,6 +155,34 @@ def test_doctor_fix_deps_attempts_installs(monkeypatch):
     assert result.exit_code == 0
     assert "== Dependency Fix Attempts ==" in result.stdout
     assert any(cmd[:4] == [sys.executable, "-m", "pip", "install"] for cmd in calls)
+
+
+def test_rerun_invalid_stage_returns_cli_error():
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["rerun", "job-123", "--stages", "nope"])
+    assert result.exit_code == 2
+    assert not isinstance(result.exception, TypeError)
+
+
+def test_serve_defaults_to_loopback(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_run(app_obj, host, port):
+        captured["app"] = app_obj
+        captured["host"] = host
+        captured["port"] = port
+
+    import uvicorn
+    import recon_cli.api.app as api_app
+
+    monkeypatch.setattr(uvicorn, "run", _fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["serve"])
+    assert result.exit_code == 0
+    assert captured["app"] is api_app.app
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 8080
 
 
 def _configure_test_home(tmp_path: Path, monkeypatch) -> None:
@@ -173,6 +238,29 @@ def test_export_hunter_mode_filters_and_limits(tmp_path: Path, monkeypatch):
     assert len(lines) == 1
     payload = json.loads(lines[0])
     assert payload["title"] == "verified-high"
+
+
+def test_pdf_command_uses_job_root(tmp_path: Path, monkeypatch):
+    _configure_test_home(tmp_path, monkeypatch)
+    manager = JobManager()
+    record = manager.create_job(target="example.com", profile="passive")
+
+    captured: dict[str, object] = {}
+
+    def _fake_generate_pdf_report(job_path, output_path=None, config=None):
+        captured["job_path"] = Path(job_path)
+        captured["output_path"] = output_path
+        captured["config"] = config
+        return record.paths.root / "report.pdf"
+
+    import recon_cli.utils.pdf_reporter as pdf_reporter
+
+    monkeypatch.setattr(pdf_reporter, "generate_pdf_report", _fake_generate_pdf_report)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["pdf", record.spec.job_id])
+    assert result.exit_code == 0
+    assert captured["job_path"] == record.paths.root
 
 
 def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):

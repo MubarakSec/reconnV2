@@ -29,8 +29,10 @@ class TestAPIStatus:
         """Status includes uptime information."""
         client = TestClient(app)
         response = client.get("/api/status")
+        assert response.status_code == 200
         data = response.json()
-        assert "uptime" in data or "started_at" in data or "version" in data
+        assert "uptime" in data
+        assert isinstance(data["uptime"], str)
 
 
 class TestAPIStats:
@@ -42,7 +44,9 @@ class TestAPIStats:
         response = client.get("/api/stats")
         assert response.status_code == 200
         data = response.json()
-        assert "queued" in data or "jobs" in data or "total" in data
+        for key in ("queued", "running", "finished", "failed", "total"):
+            assert key in data
+        assert data["total"] == data["queued"] + data["running"] + data["finished"] + data["failed"]
 
 
 class TestAPIJobs:
@@ -68,6 +72,28 @@ class TestAPIJobs:
         response = client.delete("/api/jobs/job-123")
         assert response.status_code == 401
 
+    def test_requeue_requires_api_key(self):
+        """Requeue endpoint requires API key."""
+        client = TestClient(app)
+        response = client.post("/api/jobs/job-123/requeue")
+        assert response.status_code == 401
+
+    def test_delete_requires_permission(self):
+        """Delete endpoint enforces job delete permission."""
+        client = TestClient(app)
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:view"],
+                "scopes": [],
+            }
+            response = client.delete(
+                "/api/jobs/job-123",
+                headers={"X-API-Key": "test-api-key"},
+            )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "API key lacks jobs:delete"
+
     def test_delete_rejects_path_traversal_job_id(self):
         """Encoded traversal job_id is rejected before deletion."""
         client = TestClient(app)
@@ -85,35 +111,73 @@ class TestAPIJobs:
 class TestAPIScan:
     """Tests for /api/scan endpoint."""
 
+    def test_scan_requires_api_key(self):
+        """Scan creation requires API key."""
+        client = TestClient(app)
+        response = client.post("/api/scan", json={"target": "example.com"})
+        assert response.status_code == 401
+
     def test_scan_requires_target(self):
         """Scan requires target parameter."""
         client = TestClient(app)
-        response = client.post("/api/scan", json={})
-        # Should fail validation
-        assert response.status_code in [400, 422]
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            response = client.post("/api/scan", json={}, headers={"X-API-Key": "test-api-key"})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "target is required"
 
     def test_scan_with_valid_target(self):
         """Scan with valid target creates job."""
         client = TestClient(app)
-        with patch("recon_cli.api.app.JobManager") as mock_manager:
-            mock_record = MagicMock()
-            mock_record.metadata.job_id = "test_job_123"
-            mock_manager.return_value.create_job.return_value = mock_record
-            
-            response = client.post("/api/scan", json={
-                "target": "example.com",
-                "profile": "passive"
-            })
-            # Either creates job or returns validation error
-            assert response.status_code in [200, 201, 422, 500]
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            with patch.object(app.state.manager, "create_job") as mock_create_job:
+                mock_record = MagicMock()
+                mock_record.spec.job_id = "test_job_123"
+                mock_record.metadata.queued_at = "2026-03-10T00:00:00Z"
+                mock_create_job.return_value = mock_record
+
+                response = client.post("/api/scan", json={
+                    "target": "example.com",
+                    "profile": "passive"
+                }, headers={"X-API-Key": "test-api-key"})
+                assert response.status_code == 200
+                assert response.json() == {
+                    "job_id": "test_job_123",
+                    "status": "queued",
+                    "target": "example.com",
+                    "profile": "passive",
+                    "stage": None,
+                    "queued_at": "2026-03-10T00:00:00Z",
+                    "started_at": None,
+                    "finished_at": None,
+                    "error": None,
+                    "stats": {},
+                    "quality": {},
+                }
 
     def test_scan_rejects_invalid_scanner_token(self):
         """Invalid scanner names are rejected."""
         client = TestClient(app)
-        response = client.post(
-            "/api/scan",
-            json={"target": "example.com", "profile": "passive", "scanners": ["bad token"]},
-        )
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            response = client.post(
+                "/api/scan",
+                json={"target": "example.com", "profile": "passive", "scanners": ["bad token"]},
+                headers={"X-API-Key": "test-api-key"},
+            )
         assert response.status_code == 400
         assert "Invalid scanners value" in response.json().get("detail", "")
 
@@ -205,18 +269,32 @@ class TestAPIMutationValidation:
 
     def test_create_job_rejects_empty_target_entries(self):
         client = TestClient(app)
-        response = client.post(
-            "/api/jobs",
-            json={"targets": ["example.com", "   "], "stages": [], "options": {}},
-        )
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            response = client.post(
+                "/api/jobs",
+                json={"targets": ["example.com", "   "], "stages": [], "options": {}},
+                headers={"X-API-Key": "test-api-key"},
+            )
         assert response.status_code == 400
         assert "empty values" in response.json().get("detail", "")
 
     def test_create_job_rejects_non_boolean_allow_ip(self):
         client = TestClient(app)
-        response = client.post(
-            "/api/jobs",
-            json={"targets": ["example.com"], "stages": [], "options": {"allow_ip": "yes"}},
-        )
+        with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
+            mock_validate.return_value = {
+                "user_id": 1,
+                "permissions": ["api:access", "jobs:create"],
+                "scopes": [],
+            }
+            response = client.post(
+                "/api/jobs",
+                json={"targets": ["example.com"], "stages": [], "options": {"allow_ip": "yes"}},
+                headers={"X-API-Key": "test-api-key"},
+            )
         assert response.status_code == 400
         assert "allow_ip" in response.json().get("detail", "")

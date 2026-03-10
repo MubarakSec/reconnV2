@@ -129,7 +129,7 @@ class TestSlackChannel:
             
             result = await channel.send(alert)
             
-            assert result is True or result is None  # Depends on implementation
+            assert result is True
     
     def test_format_message(self):
         """تنسيق الرسالة"""
@@ -179,7 +179,7 @@ class TestDiscordChannel:
             
             result = await channel.send(alert)
             
-            assert result is True or result is None
+            assert result is True
 
 
 # ═══════════════════════════════════════════════════════════
@@ -219,7 +219,7 @@ class TestTelegramChannel:
             
             result = await channel.send(alert)
             
-            assert result is True or result is None
+            assert result is True
 
 
 # ═══════════════════════════════════════════════════════════
@@ -255,7 +255,7 @@ class TestWebhookChannel:
             
             result = await channel.send(alert)
             
-            assert result is True or result is None
+            assert result is True
     
     def test_custom_headers(self):
         """headers مخصصة"""
@@ -377,7 +377,7 @@ class TestAlertManager:
             
             results = await manager.send_alert(alert)
             
-            assert isinstance(results, dict)
+            assert results == {"webhook": True}
     
     @pytest.mark.asyncio
     async def test_filter_by_level(self):
@@ -452,8 +452,7 @@ class TestAlertRateLimiting:
             )
             await manager.send_alert(alert)
         
-        # Should have rate limited some
-        assert mock_channel.send.call_count <= 5 or mock_channel.send.call_count == 10
+        assert mock_channel.send.call_count == 5
     
     @pytest.mark.asyncio
     async def test_deduplication(self):
@@ -474,9 +473,7 @@ class TestAlertRateLimiting:
         await manager.send_alert(alert)
         await manager.send_alert(alert)
         
-        # Should have deduplicated
-        # (depends on implementation)
-        assert mock_channel.send.call_count >= 1
+        assert mock_channel.send.call_count == 1
 
 
 # ═══════════════════════════════════════════════════════════
@@ -491,8 +488,7 @@ class TestEmailChannel:
         """إرسال تنبيه"""
         with patch("smtplib.SMTP") as mock_smtp:
             mock_server = MagicMock()
-            mock_smtp.return_value.__enter__ = MagicMock(return_value=mock_server)
-            mock_smtp.return_value.__exit__ = MagicMock()
+            mock_smtp.return_value = mock_server
             
             channel = EmailChannel(
                 smtp_host="smtp.example.com",
@@ -509,12 +505,13 @@ class TestEmailChannel:
                 message="Critical issue",
             )
             
-            # Note: This might need adjustment based on actual implementation
-            try:
-                result = await channel.send(alert)
-            except Exception:
-                # Email sending might fail in test environment
-                pass
+            result = await channel.send(alert)
+            
+            assert result is True
+            mock_server.starttls.assert_called_once()
+            mock_server.login.assert_called_once_with("user@example.com", "password")
+            mock_server.sendmail.assert_called_once()
+            mock_server.quit.assert_called_once()
     
     def test_format_email(self):
         """تنسيق البريد"""
@@ -533,10 +530,6 @@ class TestEmailChannel:
             message="An error occurred",
         )
         
-        # Check that email formatting works
-        try:
-            subject, body = channel.format_email(alert)
-            assert "Error" in subject or "error" in subject.lower()
-        except AttributeError:
-            # Method might not exist
-            pass
+        subject, body = channel.format_email(alert)
+        assert subject == "[HIGH] Error Alert"
+        assert "An error occurred" in body
