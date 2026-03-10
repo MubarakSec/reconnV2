@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Dict, List
 from urllib.parse import urljoin, urlparse
 
@@ -10,23 +11,61 @@ from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.jsonl import read_jsonl
 
 
+@dataclass
+class _JSSurfaceExtraction:
+    endpoints: set[str] = field(default_factory=set)
+    graphql_endpoints: set[str] = field(default_factory=set)
+    graphql_operations: set[str] = field(default_factory=set)
+    persisted_query_hints: set[str] = field(default_factory=set)
+    ws_endpoints: set[str] = field(default_factory=set)
+    high_value_strings: set[str] = field(default_factory=set)
+
+    def merge(self, other: "_JSSurfaceExtraction") -> None:
+        self.endpoints.update(other.endpoints)
+        self.graphql_endpoints.update(other.graphql_endpoints)
+        self.graphql_operations.update(other.graphql_operations)
+        self.persisted_query_hints.update(other.persisted_query_hints)
+        self.ws_endpoints.update(other.ws_endpoints)
+        self.high_value_strings.update(other.high_value_strings)
+
+
 class JSIntelligenceStage(Stage):
     name = "js_intelligence"
 
     ENDPOINT_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
+    WS_ENDPOINT_PATTERN = re.compile(r"wss?://[^\s\"'<>\\)]+", re.IGNORECASE)
     API_CALL_PATTERN = re.compile(
         r"(?:fetch|axios\.(?:get|post|put|patch|delete)|\$.ajax)\(\s*([\"'`])([^\"'`]+)\1",
         re.IGNORECASE,
     )
     RELATIVE_PATTERN = re.compile(
-        r"/(?:api|graphql|v\\d+|auth|oauth|login|logout|register|admin|internal|debug|config|upload|media)[^\\s\"'<>]*"
+        r"(?<![A-Za-z0-9_])/(?:"
+        r"api|graphql|gql|v\d+|admin|internal|export|download|uploads|files|"
+        r"report|reports|billing|oauth|auth|login|logout|session|sessions|"
+        r"token|tokens|users|user|account|accounts|tenant|tenants|org|orgs|"
+        r"organization|organizations|project|projects|team|teams|workspace|workspaces|"
+        r"invoice|invoices|payment|checkout|order|orders|cart|carts|subscription|subscriptions|"
+        r"feature|features|flag|flags|debug|preview|staging|upload|media|ws|websocket|socket|sockjs|live|stream"
+        r")(?:[A-Za-z0-9_\-./?=&%]*)",
+        re.IGNORECASE,
     )
     DYNAMIC_ROUTE_PATTERN = re.compile(
-        r"`(/(?:api|graphql|v\d+|auth|oauth|admin|internal|upload|media|ws|socket)[^`<>]*)`"
+        r"`(/(?:"
+        r"api|graphql|gql|v\d+|admin|internal|export|download|uploads|files|"
+        r"billing|oauth|auth|login|logout|session|token|users|user|account|accounts|"
+        r"tenant|org|organization|project|team|workspace|invoice|payment|checkout|"
+        r"order|cart|subscription|feature|flag|debug|preview|staging|upload|media|"
+        r"ws|websocket|socket|sockjs|live|stream"
+        r")[^`<>]*)`",
+        re.IGNORECASE,
     )
     QUERY_PARAM_PATTERN = re.compile(r"[?&]([a-zA-Z_][a-zA-Z0-9_-]{1,40})=")
     PARAM_BLOCK_PATTERN = re.compile(r"(?:params|query|variables)\s*:\s*\{([^}]*)\}", re.IGNORECASE | re.DOTALL)
     PARAM_KEY_PATTERN = re.compile(r"([a-zA-Z_][a-zA-Z0-9_-]{1,40})\s*:")
+    GRAPHQL_ENDPOINT_PATTERN = re.compile(r"/graphql\b|/gql\b", re.IGNORECASE)
+    GRAPHQL_OPERATION_NAME_PATTERN = re.compile(r"operationName\s*[:=]\s*[\"']([A-Za-z0-9_]{2,})[\"']")
+    GRAPHQL_OPERATION_PATTERN = re.compile(r"\b(query|mutation|subscription)\s+([A-Za-z0-9_]{2,})")
+    PERSISTED_QUERY_PATTERN = re.compile(r"sha256Hash\s*[:=]\s*[\"']([a-fA-F0-9]{16,64})[\"']")
     SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
     AUTH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "register", "password", "reset", "forgot", "auth", "oauth", "sso")
     ADMIN_HINTS = ("admin", "dashboard", "console", "manage", "staff", "internal", "superuser")
@@ -37,7 +76,32 @@ class JSIntelligenceStage(Stage):
     DEBUG_HINTS = ("debug", "trace", "health", "metrics", "status", "actuator")
     UPLOAD_HINTS = ("upload", "file", "attachment", "media", "avatar", "profile-picture")
     CONFIG_HINTS = ("config", "settings", "env", "secrets", "apikey", "token", "jwt")
-    GRAPHQL_HINTS = ("graphql", "graphiql", "apollo")
+    GRAPHQL_HINTS = ("graphql", "graphiql", "apollo", "gql")
+    WS_HINTS = ("ws", "websocket", "socket", "socket.io", "sockjs", "live", "stream")
+    HIGH_VALUE_HINTS = (
+        "admin",
+        "entitlement",
+        "featureflag",
+        "feature_flag",
+        "flag",
+        "debug",
+        "internal",
+        "staging",
+        "preview",
+        "billing",
+        "invoice",
+        "payment",
+        "export",
+        "report",
+        "impersonate",
+        "impersonation",
+        "role",
+        "permission",
+        "rbac",
+        "tenant",
+        "organization",
+        "workspace",
+    )
     SPEC_HINTS = ("swagger", "openapi", "api-docs")
     STATIC_EXTENSIONS = (
         ".png",
@@ -72,6 +136,7 @@ class JSIntelligenceStage(Stage):
             context.logger.warning("js intelligence requires requests; skipping")
             return
         items = read_jsonl(context.record.paths.results_jsonl)
+        js_url_bases: Dict[str, str] = {}
         js_urls: List[str] = []
         direct_js_urls: List[str] = []
         runtime_js_urls: List[str] = []
@@ -84,8 +149,11 @@ class JSIntelligenceStage(Stage):
                 if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
                     if entry.get("status_code") in {200, 302}:
                         direct_js_urls.append(url)
-                        js_urls.append(url)
+                        if url not in js_url_bases:
+                            js_urls.append(url)
+                        js_url_bases.setdefault(url, url)
             elif etype == "runtime_crawl":
+                page_url = str(entry.get("url") or "")
                 js_files = entry.get("javascript_files") or []
                 if not isinstance(js_files, list):
                     continue
@@ -94,11 +162,10 @@ class JSIntelligenceStage(Stage):
                         continue
                     if js_url.startswith(("http://", "https://")):
                         runtime_js_urls.append(js_url)
+                        if js_url not in js_url_bases:
+                            js_urls.append(js_url)
+                        js_url_bases.setdefault(js_url, page_url or js_url)
 
-        if runtime_js_urls:
-            js_urls.extend(runtime_js_urls)
-
-        js_urls = list(dict.fromkeys(js_urls))
         if runtime_js_urls:
             context.logger.info(
                 "JS intelligence candidates: %s direct + %s from runtime crawl",
@@ -123,8 +190,14 @@ class JSIntelligenceStage(Stage):
         js_urls = js_urls[:max_files]
         artifacts: List[Dict[str, object]] = []
         discovered_urls: List[str] = []
+        graphql_endpoints: set[str] = set()
+        graphql_operations: set[str] = set()
+        persisted_query_hints: set[str] = set()
+        ws_endpoints: set[str] = set()
+        high_value_strings: set[str] = set()
         hidden_param_hints: set[str] = set()
         for js_url in js_urls:
+            surface_base_url = js_url_bases.get(js_url) or js_url
             session = context.auth_session(js_url)
             headers = context.auth_headers({"User-Agent": "recon-cli js-intel"})
             if limiter and not limiter.wait_for_slot(js_url, timeout=timeout):
@@ -155,7 +228,11 @@ class JSIntelligenceStage(Stage):
             if resp.status_code >= 400:
                 continue
             content = resp.text or ""
-            endpoints = self._extract_endpoints_from_blob(content, base_url=js_url, include_dynamic=include_dynamic)
+            extraction = self._extract_surface_from_blob(
+                content,
+                base_url=surface_base_url,
+                include_dynamic=include_dynamic,
+            )
             if include_hidden:
                 hidden_param_hints.update(self._extract_param_hints(content))
             source_map = None
@@ -193,10 +270,10 @@ class JSIntelligenceStage(Stage):
                             for source_blob in sources_content[:5]:
                                 if not source_blob or not isinstance(source_blob, str):
                                     continue
-                                endpoints.update(
-                                    self._extract_endpoints_from_blob(
+                                extraction.merge(
+                                    self._extract_surface_from_blob(
                                         source_blob,
-                                        base_url=js_url,
+                                        base_url=surface_base_url,
                                         include_dynamic=include_dynamic,
                                     )
                                 )
@@ -206,30 +283,55 @@ class JSIntelligenceStage(Stage):
                         if limiter:
                             limiter.on_error(source_map)
                         pass
-            normalized = []
-            seen_norm = set()
-            for endpoint in endpoints:
-                norm = self._normalize_endpoint(endpoint)
-                if not norm or norm in seen_norm:
-                    continue
-                seen_norm.add(norm)
-                normalized.append(norm)
-            endpoints = normalized[:max_urls]
+            endpoints = self._normalize_candidates(extraction.endpoints)
+            graphql_candidates = set(self._normalize_candidates(extraction.graphql_endpoints))
+            ws_candidates = set(self._normalize_candidates(extraction.ws_endpoints))
+            combined_candidates = endpoints + [candidate for candidate in sorted(ws_candidates) if candidate not in endpoints]
+            combined_candidates = combined_candidates[:max_urls]
+            endpoint_set = set(combined_candidates)
+            graphql_candidates &= endpoint_set
+            ws_candidates &= endpoint_set
+            graphql_endpoints.update(graphql_candidates)
+            graphql_operations.update(extraction.graphql_operations)
+            persisted_query_hints.update(extraction.persisted_query_hints)
+            ws_endpoints.update(ws_candidates)
+            high_value_strings.update(extraction.high_value_strings)
             artifacts.append(
                 {
                     "js_url": js_url,
-                    "endpoints": endpoints,
+                    "surface_base_url": surface_base_url,
+                    "endpoints": combined_candidates,
+                    "graphql_endpoints": sorted(graphql_candidates),
+                    "graphql_operations": sorted(extraction.graphql_operations),
+                    "persisted_query_hints": sorted(extraction.persisted_query_hints),
+                    "ws_endpoints": sorted(ws_candidates),
+                    "high_value_strings": sorted(extraction.high_value_strings),
                     "source_map": source_map,
                 }
             )
-            for endpoint in endpoints:
-                if not context.url_allowed(endpoint):
+            for endpoint in combined_candidates:
+                try:
+                    parsed = urlparse(endpoint)
+                except ValueError:
                     continue
-                parsed = urlparse(endpoint)
                 path = parsed.path.lower()
                 if self._is_static_asset(path):
                     continue
-                tags, score = self._classify_endpoint(path)
+                tags, score = self._classify_endpoint(endpoint)
+                if parsed.scheme in {"ws", "wss"}:
+                    if context.url_allowed(endpoint):
+                        context.emit_signal(
+                            "ws_hint",
+                            "url",
+                            endpoint,
+                            confidence=0.5,
+                            source="js-intel",
+                            tags=sorted(tags),
+                            evidence={"url": js_url},
+                        )
+                    continue
+                if not context.url_allowed(endpoint):
+                    continue
                 payload = {
                     "type": "url",
                     "source": "js-intel",
@@ -317,18 +419,41 @@ class JSIntelligenceStage(Stage):
             context.set_data("js_endpoints", discovered_urls)
             if hidden_param_hints:
                 context.set_data("js_param_hints", sorted(hidden_param_hints))
+            if graphql_endpoints:
+                context.set_data("js_graphql_endpoints", sorted(graphql_endpoints))
+            if graphql_operations:
+                context.set_data("js_graphql_operations", sorted(graphql_operations))
+            if persisted_query_hints:
+                context.set_data("js_persisted_query_hints", sorted(persisted_query_hints))
+            if ws_endpoints:
+                context.set_data("js_ws_endpoints", sorted(ws_endpoints))
+            if high_value_strings:
+                context.set_data("js_high_value_strings", sorted(high_value_strings))
             stats = context.record.metadata.stats.setdefault("js_intel", {})
             stats["files"] = len(artifacts)
             stats["endpoints"] = len(discovered_urls)
             stats["hidden_params"] = len(hidden_param_hints)
+            stats["graphql_endpoints"] = len(graphql_endpoints)
+            stats["graphql_operations"] = len(graphql_operations)
+            stats["persisted_query_hints"] = len(persisted_query_hints)
+            stats["ws_endpoints"] = len(ws_endpoints)
+            stats["high_value_strings"] = len(high_value_strings)
             context.manager.update_metadata(context.record)
 
-    def _classify_endpoint(self, path: str) -> tuple[set[str], int]:
+    def _classify_endpoint(self, endpoint: str) -> tuple[set[str], int]:
+        try:
+            parsed = urlparse(endpoint)
+        except ValueError:
+            parsed = urlparse("")
+        path = parsed.path.lower()
         tags = {"js:discovered", "source:js"}
         score = 30
-        if "/api" in path or "/graphql" in path:
+        if parsed.scheme in {"ws", "wss"}:
+            tags.add("service:ws")
+            score += 6
+        if "/api" in path or self._is_graphql_candidate(path):
             tags.add("service:api")
-        if any(hint in path for hint in self.GRAPHQL_HINTS):
+        if self._is_graphql_candidate(path):
             tags.add("api:graphql")
         if any(hint in path for hint in self.SPEC_HINTS) and path.endswith((".json", ".yaml", ".yml")):
             tags.add("api:spec")
@@ -368,6 +493,9 @@ class JSIntelligenceStage(Stage):
             score += 8
         if "surface:upload" in tags:
             score += 6
+        if any(hint in path for hint in self.HIGH_VALUE_HINTS):
+            tags.add("surface:high-value")
+            score += 6
         if "api:graphql" in tags:
             score += 5
         if "api:spec" in tags:
@@ -389,27 +517,66 @@ class JSIntelligenceStage(Stage):
         cleaned = parsed._replace(fragment="")
         return cleaned.geturl()
 
-    def _extract_endpoints_from_blob(self, content: str, *, base_url: str, include_dynamic: bool) -> set[str]:
-        endpoints: set[str] = set()
+    def _normalize_candidates(self, endpoints: set[str]) -> List[str]:
+        normalized: List[str] = []
+        seen_norm = set()
+        for endpoint in sorted(endpoints):
+            norm = self._normalize_endpoint(endpoint)
+            if not norm or norm in seen_norm:
+                continue
+            seen_norm.add(norm)
+            normalized.append(norm)
+        return normalized
+
+    def _extract_surface_from_blob(self, content: str, *, base_url: str, include_dynamic: bool) -> _JSSurfaceExtraction:
+        extraction = _JSSurfaceExtraction()
         for absolute in self.ENDPOINT_PATTERN.findall(content):
-            endpoints.add(absolute)
+            extraction.endpoints.add(absolute)
+            if self._is_graphql_candidate(absolute):
+                extraction.graphql_endpoints.add(absolute)
+        for ws_endpoint in self.WS_ENDPOINT_PATTERN.findall(content):
+            extraction.ws_endpoints.add(ws_endpoint)
         for rel in self.RELATIVE_PATTERN.findall(content):
-            endpoints.add(urljoin(base_url, rel))
+            absolute = urljoin(base_url, rel)
+            extraction.endpoints.add(absolute)
+            if self._is_graphql_candidate(rel):
+                extraction.graphql_endpoints.add(absolute)
         for _quote, candidate in self.API_CALL_PATTERN.findall(content):
             cleaned_candidate = self._clean_endpoint_candidate(candidate)
             if not cleaned_candidate:
                 continue
             if cleaned_candidate.startswith(("http://", "https://")):
-                endpoints.add(cleaned_candidate)
+                extraction.endpoints.add(cleaned_candidate)
+                if self._is_graphql_candidate(cleaned_candidate):
+                    extraction.graphql_endpoints.add(cleaned_candidate)
+                continue
+            if cleaned_candidate.startswith(("ws://", "wss://")):
+                extraction.ws_endpoints.add(cleaned_candidate)
                 continue
             if cleaned_candidate.startswith("/"):
-                endpoints.add(urljoin(base_url, cleaned_candidate))
+                absolute = urljoin(base_url, cleaned_candidate)
+                extraction.endpoints.add(absolute)
+                if self._is_graphql_candidate(cleaned_candidate):
+                    extraction.graphql_endpoints.add(absolute)
         if include_dynamic:
             for dynamic in self.DYNAMIC_ROUTE_PATTERN.findall(content):
                 materialized = self._materialize_dynamic_path(dynamic)
                 if materialized:
-                    endpoints.add(urljoin(base_url, materialized))
-        return endpoints
+                    absolute = urljoin(base_url, materialized)
+                    extraction.endpoints.add(absolute)
+                    if self._is_graphql_candidate(materialized):
+                        extraction.graphql_endpoints.add(absolute)
+        for operation_name in self.GRAPHQL_OPERATION_NAME_PATTERN.findall(content):
+            extraction.graphql_operations.add(operation_name)
+        for _kind, operation_name in self.GRAPHQL_OPERATION_PATTERN.findall(content):
+            extraction.graphql_operations.add(operation_name)
+        for persisted_query in self.PERSISTED_QUERY_PATTERN.findall(content):
+            extraction.persisted_query_hints.add(persisted_query)
+        lowered = content.lower()
+        for hint in self.HIGH_VALUE_HINTS:
+            if hint in lowered:
+                extraction.high_value_strings.add(hint)
+        return extraction
 
     def _extract_param_hints(self, content: str) -> set[str]:
         hints: set[str] = set()
@@ -439,6 +606,9 @@ class JSIntelligenceStage(Stage):
         if cleaned.startswith("//"):
             cleaned = "https:" + cleaned
         return cleaned
+
+    def _is_graphql_candidate(self, value: str) -> bool:
+        return bool(self.GRAPHQL_ENDPOINT_PATTERN.search(value or ""))
 
     def _is_static_asset(self, path: str) -> bool:
         if not path:

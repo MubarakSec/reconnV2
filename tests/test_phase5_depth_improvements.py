@@ -9,8 +9,10 @@ from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_api_recon import APIReconStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
+from recon_cli.pipeline.stage_graphql import GraphQLReconStage
 from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
 from recon_cli.pipeline.stage_param_mining import ParamMiningStage
+from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 from recon_cli.pipeline.stages import RuntimeCrawlStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
@@ -99,6 +101,98 @@ def test_js_intel_extracts_dynamic_routes_and_hidden_params(monkeypatch, tmp_pat
     assert "account_id" in hints
     assert "token" in hints
     assert "redirect_url" in hints
+
+
+def test_js_intel_extracts_graphql_ws_and_persisted_hints(monkeypatch, tmp_path: Path):
+    record = _make_record(
+        tmp_path,
+        {
+            "enable_js_intel": True,
+            "js_intel_max_files": 5,
+            "js_intel_max_urls": 30,
+            "js_intel_timeout": 1,
+            "js_intel_extract_dynamic_routes": True,
+            "js_intel_extract_hidden_params": True,
+            "js_intel_rps": 0,
+            "js_intel_per_host_rps": 0,
+        },
+    )
+    payload = {
+        "type": "runtime_crawl",
+        "source": "playwright",
+        "url": "https://app.example.com/app",
+        "hostname": "app.example.com",
+        "success": True,
+        "javascript_files": ["https://cdn.example.com/assets/app.js"],
+    }
+    with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, separators=(",", ":"))
+        handle.write("\n")
+
+    context = PipelineContext(record=record, manager=DummyManager())
+    js_blob = """
+    fetch('/gql');
+    const socket = "wss://stream.example.com/socket";
+    const request = {
+      operationName: "GetBillingOverview",
+      extensions: { persistedQuery: { sha256Hash: "0123456789abcdef0123456789abcdef" } }
+    };
+    query ViewerQuery { viewer { id } }
+    const flags = '/api/feature-flags';
+    """
+
+    import requests
+
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda *_args, **_kwargs: _FakeResponse(200, text=js_blob, headers={"Content-Type": "application/javascript"}),
+    )
+
+    JSIntelligenceStage().run(context)
+
+    artifact_rows = json.loads(record.paths.artifact("js_intel.json").read_text(encoding="utf-8"))
+    assert len(artifact_rows) == 1
+    artifact = artifact_rows[0]
+    assert artifact["surface_base_url"] == "https://app.example.com/app"
+    assert "https://app.example.com/gql" in artifact["graphql_endpoints"]
+    assert "wss://stream.example.com/socket" in artifact["ws_endpoints"]
+    assert "GetBillingOverview" in artifact["graphql_operations"]
+    assert "ViewerQuery" in artifact["graphql_operations"]
+    assert "0123456789abcdef0123456789abcdef" in artifact["persisted_query_hints"]
+    assert "billing" in artifact["high_value_strings"]
+    assert "flag" in artifact["high_value_strings"]
+
+    assert "https://app.example.com/gql" in (context.get_data("js_graphql_endpoints", []) or [])
+    assert "wss://stream.example.com/socket" in (context.get_data("js_ws_endpoints", []) or [])
+    assert "GetBillingOverview" in (context.get_data("js_graphql_operations", []) or [])
+    assert "0123456789abcdef0123456789abcdef" in (context.get_data("js_persisted_query_hints", []) or [])
+
+    stats = record.metadata.stats.get("js_intel", {})
+    assert stats.get("graphql_endpoints") == 1
+    assert stats.get("graphql_operations", 0) >= 2
+    assert stats.get("persisted_query_hints") == 1
+    assert stats.get("ws_endpoints") == 1
+    assert stats.get("high_value_strings", 0) >= 2
+
+
+def test_graphql_and_ws_stages_consume_js_specific_hints(tmp_path: Path):
+    record = _make_record(
+        tmp_path,
+        {
+            "enable_graphql_recon": True,
+            "enable_ws_grpc_discovery": True,
+        },
+    )
+    context = PipelineContext(record=record, manager=DummyManager())
+    context.set_data("js_graphql_endpoints", ["https://api.example.com/gql"])
+    context.set_data("js_ws_endpoints", ["wss://app.example.com/socket"])
+
+    graphql_candidates = GraphQLReconStage()._collect_candidates(context)
+    ws_candidates = WsGrpcDiscoveryStage()._collect_ws_candidates(context)
+
+    assert "https://api.example.com/gql" in graphql_candidates
+    assert "wss://app.example.com/socket" in ws_candidates
 
 
 def test_param_mining_generates_mutation_catalog_from_js_hints(tmp_path: Path):

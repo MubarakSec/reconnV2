@@ -72,6 +72,10 @@ def _large_output_command(size: int = 4096) -> list[str]:
     return [sys.executable, "-u", "-c", code]
 
 
+def _quick_command(message: str = "done") -> list[str]:
+    return [sys.executable, "-u", "-c", f"print({message!r})"]
+
+
 def _wait_for_output(
     executor: CommandExecutor,
     session_identifier: str,
@@ -229,3 +233,51 @@ def test_command_session_truncates_buffer_and_records_trace(tmp_path: Path) -> N
     assert tool_span.get("attributes", {}).get("session_dropped_output_chars", 0) >= 3968
     event_names = [event.get("name") for event in tool_span.get("events", [])]
     assert "session.output.truncated" in event_names
+
+
+def test_list_sessions_prunes_finished_sessions_by_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECON_EXECUTOR_SESSION_FINISHED_TTL_SECONDS", "1")
+    executor = CommandExecutor(DummyLogger())
+
+    stale = executor.start_session(_quick_command("stale"))
+    stale_final = executor.wait_session(stale.alias, timeout=2.0, clear_output=False)
+    assert stale_final.running is False
+
+    fresh = executor.start_session(_quick_command("fresh"))
+    fresh_final = executor.wait_session(fresh.alias, timeout=2.0, clear_output=False)
+    assert fresh_final.running is False
+
+    stale_session = executor_mod._resolve_session(stale.session_id)
+    stale_session._finished_monotonic = time.monotonic() - 10.0
+
+    sessions = executor.list_sessions(include_finished=True)
+
+    assert all(item.session_id != stale.session_id for item in sessions)
+    assert any(item.session_id == fresh.session_id for item in sessions)
+
+
+def test_cleanup_sessions_keeps_running_and_honors_finished_limit() -> None:
+    executor = CommandExecutor(DummyLogger())
+
+    running = executor.start_session(_interactive_command())
+
+    first = executor.start_session(_quick_command("first"))
+    first_final = executor.wait_session(first.alias, timeout=2.0, clear_output=False)
+    assert first_final.running is False
+
+    second = executor.start_session(_quick_command("second"))
+    second_final = executor.wait_session(second.alias, timeout=2.0, clear_output=False)
+    assert second_final.running is False
+
+    cleaned = executor.cleanup_sessions(max_finished=1, finished_ttl_seconds=0)
+    sessions = executor.list_sessions(include_finished=True, clear_output=False)
+
+    assert cleaned["terminated_running_sessions"] == 0
+    assert cleaned["pruned_finished_sessions"] == 1
+    assert cleaned["remaining_sessions"] == 2
+    assert any(item.session_id == running.session_id and item.running for item in sessions)
+    assert any(item.session_id == second.session_id and not item.running for item in sessions)
+    assert all(item.session_id != first.session_id for item in sessions)
+
+    executor.terminate_session(running.alias)
+    executor.wait_session(running.session_id, timeout=2.0)

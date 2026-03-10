@@ -48,6 +48,7 @@ _DEFAULT_SESSION_MAX_OUTPUT_CHARS = 262144
 _MIN_SESSION_MAX_OUTPUT_CHARS = 128
 _DEFAULT_SESSION_MAX_FINISHED = 32
 _MIN_SESSION_MAX_FINISHED = 0
+_DEFAULT_SESSION_FINISHED_TTL_SECONDS = 86400.0
 
 
 class CommandError(RuntimeError):
@@ -439,6 +440,24 @@ def _session_finished_limit(max_finished: Optional[int] = None) -> int:
         return _DEFAULT_SESSION_MAX_FINISHED
 
 
+def _session_finished_ttl(max_age_seconds: Optional[float] = None) -> Optional[float]:
+    if max_age_seconds is not None:
+        try:
+            parsed = float(max_age_seconds)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+    raw_value = os.environ.get(
+        "RECON_EXECUTOR_SESSION_FINISHED_TTL_SECONDS",
+        str(_DEFAULT_SESSION_FINISHED_TTL_SECONDS),
+    )
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        return _DEFAULT_SESSION_FINISHED_TTL_SECONDS
+    return parsed if parsed > 0 else None
+
+
 def _tool_class_for_command(command_name: str) -> str:
     return _TOOL_CLASS_MAP.get(command_name.lower(), "default")
 
@@ -586,6 +605,7 @@ class _CommandSession:
         self._max_output_chars = _session_output_limit(max_output_chars)
         self._dropped_output_chars = 0
         self._output_truncation_reported = False
+        self._finished_monotonic: Optional[float] = None
 
     def start(self) -> None:
         fallback_reason: Optional[str] = None
@@ -716,6 +736,7 @@ class _CommandSession:
                 return
             self.running = False
             self.finished_at = time_utils.iso_now()
+            self._finished_monotonic = time.monotonic()
             self.returncode = returncode
             self.error = error
             self.last_activity = time.time()
@@ -930,20 +951,53 @@ def _remove_session_registry_entry(session: _CommandSession) -> None:
 
 
 def _finished_sort_key(session: _CommandSession) -> tuple[str, str, str]:
-    finished_at = session.finished_at or ""
+    finished_monotonic = session._finished_monotonic if session._finished_monotonic is not None else float("inf")
     started_at = session.started_at or ""
-    return (finished_at, started_at, session.session_id)
+    return (f"{finished_monotonic:020.6f}", started_at, session.session_id)
 
 
-def _prune_finished_sessions(max_finished: Optional[int] = None) -> int:
+def _finished_session_age_seconds(
+    session: _CommandSession,
+    *,
+    now_monotonic: Optional[float] = None,
+) -> Optional[float]:
+    finished_monotonic = session._finished_monotonic
+    if finished_monotonic is None:
+        return None
+    now_value = time.monotonic() if now_monotonic is None else float(now_monotonic)
+    return max(0.0, now_value - finished_monotonic)
+
+
+def _prune_finished_sessions(
+    max_finished: Optional[int] = None,
+    max_age_seconds: Optional[float] = None,
+) -> int:
     limit = _session_finished_limit(max_finished)
+    ttl_seconds = _session_finished_ttl(max_age_seconds)
     with _SESSION_LOCK:
         finished_sessions = [session for session in _SESSIONS.values() if not session.running]
-        if len(finished_sessions) <= limit:
+        if not finished_sessions:
             return 0
-        finished_sessions.sort(key=_finished_sort_key)
-        prune_count = len(finished_sessions) - limit
-        stale_sessions = finished_sessions[:prune_count]
+        stale_sessions: List[_CommandSession] = []
+        stale_ids: set[str] = set()
+        if ttl_seconds is not None:
+            now_monotonic = time.monotonic()
+            for session in finished_sessions:
+                age_seconds = _finished_session_age_seconds(session, now_monotonic=now_monotonic)
+                if age_seconds is not None and age_seconds >= ttl_seconds:
+                    stale_sessions.append(session)
+                    stale_ids.add(session.session_id)
+        retained_finished = [session for session in finished_sessions if session.session_id not in stale_ids]
+        if len(retained_finished) > limit:
+            retained_finished.sort(key=_finished_sort_key)
+            prune_count = len(retained_finished) - limit
+            for session in retained_finished[:prune_count]:
+                if session.session_id in stale_ids:
+                    continue
+                stale_sessions.append(session)
+                stale_ids.add(session.session_id)
+        if not stale_sessions:
+            return 0
         for session in stale_sessions:
             _SESSIONS.pop(session.session_id, None)
             _SESSION_ALIASES.pop(session.alias, None)
@@ -1615,9 +1669,26 @@ class CommandExecutor:
         self,
         *,
         terminate_running: bool = False,
-        max_finished: Optional[int] = None,
+        max_finished: Optional[int] = 0,
+        finished_ttl_seconds: Optional[float] = 0,
     ) -> Dict[str, int]:
-        pruned_finished = _prune_finished_sessions(max_finished=max_finished)
-        cleaned = _cleanup_executor_sessions(terminate_running=terminate_running)
-        cleaned["pruned_finished_sessions"] = pruned_finished
+        cleaned = {
+            "terminated_running_sessions": 0,
+            "pruned_finished_sessions": 0,
+        }
+        if terminate_running:
+            with _SESSION_LOCK:
+                running_sessions = [session for session in _SESSIONS.values() if session.running]
+            for session in running_sessions:
+                try:
+                    session.terminate()
+                    cleaned["terminated_running_sessions"] += 1
+                except Exception:
+                    continue
+        cleaned["pruned_finished_sessions"] = _prune_finished_sessions(
+            max_finished=max_finished,
+            max_age_seconds=finished_ttl_seconds,
+        )
+        with _SESSION_LOCK:
+            cleaned["remaining_sessions"] = len(_SESSIONS)
         return cleaned

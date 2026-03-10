@@ -162,6 +162,12 @@ class GraphQLReconStage(Stage):
         candidates: List[str] = []
         urls_seen: set[str] = set()
 
+        js_graphql_endpoints = context.get_data("js_graphql_endpoints", []) or []
+        for url in js_graphql_endpoints:
+            if isinstance(url, str) and url and url not in urls_seen:
+                candidates.append(url)
+                urls_seen.add(url)
+
         for entry in read_jsonl(context.record.paths.results_jsonl):
             if entry.get("type") != "url":
                 continue

@@ -132,6 +132,10 @@ class WsGrpcDiscoveryStage(Stage):
 
     def _collect_ws_candidates(self, context: PipelineContext) -> List[str]:
         urls: List[str] = []
+        js_ws_endpoints = context.get_data("js_ws_endpoints", []) or []
+        for url in js_ws_endpoints:
+            if isinstance(url, str) and url:
+                urls.append(self._normalize_ws_url(url))
         js_endpoints = context.get_data("js_endpoints", []) or []
         for url in js_endpoints:
             if isinstance(url, str) and ("ws://" in url or "wss://" in url or self._has_ws_hint(url)):
