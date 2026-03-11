@@ -1001,35 +1001,36 @@ show_main_menu() {
     echo -e "${WHITE}[2]${NC} Passive scan"
     echo -e "${WHITE}[3]${NC} Full scan"
     echo -e "${WHITE}[4]${NC} Deep scan"
-    echo -e "${WHITE}[5]${NC} API-only scan"
-    echo -e "${WHITE}[6]${NC} Secure scan"
-    echo -e "${WHITE}[7]${NC} Fuzz-only scan"
-    echo -e "${WHITE}[8]${NC} WordPress mode (full + wpscan)"
-    echo -e "${WHITE}[9]${NC} Select profile manually"
+    echo -e "${WHITE}[5]${NC} Ultra-deep scan"
+    echo -e "${WHITE}[6]${NC} API-only scan"
+    echo -e "${WHITE}[7]${NC} Secure scan"
+    echo -e "${WHITE}[8]${NC} Fuzz-only scan"
+    echo -e "${WHITE}[9]${NC} WordPress mode (full + wpscan)"
+    echo -e "${WHITE}[10]${NC} Select profile manually"
     echo -e "${WHITE}==================== Job Control ======================${NC}"
-    echo -e "${WHITE}[10]${NC} List jobs"
-    echo -e "${WHITE}[11]${NC} Job status"
-    echo -e "${WHITE}[12]${NC} Tail job logs"
-    echo -e "${WHITE}[13]${NC} Rerun job"
-    echo -e "${WHITE}[14]${NC} Requeue job"
-    echo -e "${WHITE}[15]${NC} Cancel running job"
-    echo -e "${WHITE}[16]${NC} Verify job files"
+    echo -e "${WHITE}[11]${NC} List jobs"
+    echo -e "${WHITE}[12]${NC} Job status"
+    echo -e "${WHITE}[13]${NC} Tail job logs"
+    echo -e "${WHITE}[14]${NC} Rerun job"
+    echo -e "${WHITE}[15]${NC} Requeue job"
+    echo -e "${WHITE}[16]${NC} Cancel running job"
+    echo -e "${WHITE}[17]${NC} Verify job files"
     echo -e "${WHITE}==================== Output / Reports =================${NC}"
-    echo -e "${WHITE}[17]${NC} Export results"
-    echo -e "${WHITE}[18]${NC} Generate report"
-    echo -e "${WHITE}[19]${NC} Generate PDF report"
+    echo -e "${WHITE}[18]${NC} Export results"
+    echo -e "${WHITE}[19]${NC} Generate report"
+    echo -e "${WHITE}[20]${NC} Generate PDF report"
     echo -e "${WHITE}==================== Utilities ========================${NC}"
-    echo -e "${WHITE}[20]${NC} Doctor"
-    echo -e "${WHITE}[21]${NC} Prune finished jobs"
-    echo -e "${WHITE}[22]${NC} Wizard"
-    echo -e "${WHITE}[23]${NC} Interactive mode"
-    echo -e "${WHITE}[24]${NC} Quickstart guide"
-    echo -e "${WHITE}[25]${NC} Web dashboard"
-    echo -e "${WHITE}[26]${NC} Shell completions"
-    echo -e "${WHITE}[27]${NC} Trace summary"
-    echo -e "${WHITE}[28]${NC} Show schema (JSON)"
-    echo -e "${WHITE}[29]${NC} Cache stats"
-    echo -e "${WHITE}[30]${NC} Cache clear"
+    echo -e "${WHITE}[21]${NC} Doctor"
+    echo -e "${WHITE}[22]${NC} Prune finished jobs"
+    echo -e "${WHITE}[23]${NC} Wizard"
+    echo -e "${WHITE}[24]${NC} Interactive mode"
+    echo -e "${WHITE}[25]${NC} Quickstart guide"
+    echo -e "${WHITE}[26]${NC} Web dashboard"
+    echo -e "${WHITE}[27]${NC} Shell completions"
+    echo -e "${WHITE}[28]${NC} Trace summary"
+    echo -e "${WHITE}[29]${NC} Show schema (JSON)"
+    echo -e "${WHITE}[30]${NC} Cache stats"
+    echo -e "${WHITE}[31]${NC} Cache clear"
     echo -e "${WHITE}[0]${NC} Exit"
     echo ""
     echo -ne "${MAGENTA}Choose: ${NC}"
@@ -1054,32 +1055,33 @@ main() {
             2) scan_passive ;;
             3) scan_full ;;
             4) scan_deep ;;
-            5) scan_api_only ;;
-            6) scan_secure ;;
-            7) scan_fuzz_only ;;
-            8) scan_wordpress ;;
-            9) select_profile_and_scan ;;
-            10) list_jobs ;;
-            11) job_status ;;
-            12) tail_logs ;;
-            13) rerun_job ;;
-            14) requeue_job ;;
-            15) cancel_job ;;
-            16) verify_job ;;
-            17) export_results ;;
-            18) generate_report ;;
-            19) run_pdf_report ;;
-            20) run_doctor ;;
-            21) prune_jobs ;;
-            22) run_wizard ;;
-            23) run_interactive ;;
-            24) run_quickstart ;;
-            25) start_web_dashboard ;;
-            26) setup_completions ;;
-            27) show_trace ;;
-            28) show_schema ;;
-            29) cache_stats ;;
-            30) cache_clear ;;
+            5) run_scan_flow "ultra-deep" ;;
+            6) scan_api_only ;;
+            7) scan_secure ;;
+            8) scan_fuzz_only ;;
+            9) scan_wordpress ;;
+            10) select_profile_and_scan ;;
+            11) list_jobs ;;
+            12) job_status ;;
+            13) tail_logs ;;
+            14) rerun_job ;;
+            15) requeue_job ;;
+            16) cancel_job ;;
+            17) verify_job ;;
+            18) export_results ;;
+            19) generate_report ;;
+            20) run_pdf_report ;;
+            21) run_doctor ;;
+            22) prune_jobs ;;
+            23) run_wizard ;;
+            24) run_interactive ;;
+            25) run_quickstart ;;
+            26) start_web_dashboard ;;
+            27) setup_completions ;;
+            28) show_trace ;;
+            29) show_schema ;;
+            30) cache_stats ;;
+            31) cache_clear ;;
             0|q|Q)
                 echo ""
                 print_ok "Bye"

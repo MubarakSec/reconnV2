@@ -24,6 +24,9 @@ def root_domain(host: str) -> str:
 class CorrelationStage(Stage):
     name = "correlation"
 
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_correlation", False))
+
     def execute(self, context: PipelineContext) -> None:
         results_path = context.record.paths.results_jsonl
         trimmed_path = context.record.paths.trimmed_results_jsonl

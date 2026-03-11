@@ -20,6 +20,9 @@ except ImportError:  # pragma: no cover - optional dependency
 class LearningStage(Stage):
     name = "learning"
 
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_learning", False))
+
     def execute(self, context: PipelineContext) -> None:
         features_path = context.record.paths.artifact("correlation/features.json")
         if not features_path.exists():

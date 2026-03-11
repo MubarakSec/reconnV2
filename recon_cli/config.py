@@ -212,6 +212,8 @@ DEFAULT_PROFILES_CONTENT = """{
       "secrets_max_files": 120,
       "max_screenshots": 120,
       "enable_extended_validation": true,
+      "enable_correlation": true,
+      "enable_learning": true,
       "extended_validation_max_duration": 14400,
       "extended_validation_max_probes": 1200,
       "verify_max_total": 600,
@@ -429,6 +431,8 @@ class RuntimeConfig:
     soft_404_max_hosts: int = int(os.environ.get("RECON_SOFT_404_MAX_HOSTS", 25))
     soft_404_paths: int = int(os.environ.get("RECON_SOFT_404_PATHS", 1))
     soft_404_timeout: int = int(os.environ.get("RECON_SOFT_404_TIMEOUT", 6))
+    enable_correlation: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_CORRELATION", "0") not in {"0", "false", "False"})
+    enable_learning: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_LEARNING", "0") not in {"0", "false", "False"})
     enable_fuzz: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_FUZZ", "0") not in {"0", "false", "False"})
     enable_param_fuzz: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_PARAM_FUZZ", "0") not in {"0", "false", "False"})
     enable_runtime_crawl: bool = field(default_factory=lambda: os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0") not in {"0", "false", "False"})

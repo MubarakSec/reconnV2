@@ -162,6 +162,8 @@
       "secrets_max_files": 120,
       "max_screenshots": 120,
       "enable_extended_validation": true,
+      "enable_correlation": true,
+      "enable_learning": true,
       "extended_validation_max_duration": 14400,
       "extended_validation_max_probes": 1200,
       "verify_max_total": 600,
