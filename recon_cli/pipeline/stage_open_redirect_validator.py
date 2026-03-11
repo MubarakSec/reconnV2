@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -88,7 +88,7 @@ class OpenRedirectValidatorStage(Stage):
                             verify=verify_tls,
                             stream=True,
                         )
-                except Exception:
+                except requests.exceptions.RequestException:
                     if limiter:
                         limiter.on_error(test_url)
                     failed += 1

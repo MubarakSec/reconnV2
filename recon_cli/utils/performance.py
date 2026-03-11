@@ -12,7 +12,6 @@ import weakref
 from typing import Any, Dict, Iterator, List, Optional, TypeVar
 from dataclasses import dataclass
 from contextlib import contextmanager
-from urllib.parse import urlparse
 
 try:
     import requests
@@ -242,7 +241,6 @@ class MemoryMonitor:
             }
         except ImportError:
             # Fallback without psutil
-            import sys
             snapshot = {
                 "label": label,
                 "gc_objects": len(gc.get_objects()),

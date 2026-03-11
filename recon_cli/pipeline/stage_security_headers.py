@@ -81,7 +81,7 @@ class SecurityHeadersStage(Stage):
                     verify=context.runtime_config.verify_tls,
                     headers={"User-Agent": "recon-cli security-headers"},
                 )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if limiter:
                     limiter.on_error(url)
                 continue

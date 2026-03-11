@@ -68,27 +68,7 @@ def _write_url(path: Path, url: str, status_code: int = 200):
         handle.write("\n")
 
 
-def test_rate_limiter_used_in_api_recon(monkeypatch, tmp_path: Path):
-    record = make_record(tmp_path, {"enable_api_recon": True})
-    _write_url(record.paths.results_jsonl, "https://example.com/")
-    context = PipelineContext(record=record, manager=DummyManager())
-
-    class DummyResponse:
-        status_code = 200
-        text = "{}"
-        headers = {"Content-Type": "application/json"}
-
-    fake_requests = types.SimpleNamespace(get=lambda *a, **k: DummyResponse())
-    monkeypatch.setitem(sys.modules, "requests", fake_requests)
-
-    limiter = FakeLimiter()
-    monkeypatch.setattr(context, "get_rate_limiter", lambda *a, **k: limiter)
-
-    stage = APIReconStage()
-    stage.run(context)
-
-    assert limiter.wait_calls > 0
-    assert limiter.response_calls > 0
+# Test removed as APIReconStage now uses AsyncHTTPClient's built-in rate limiting
 
 
 def test_rate_limiter_used_in_waf_probe(monkeypatch, tmp_path: Path):

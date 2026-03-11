@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from recon_cli.jobs.models import Job, ScanSpec
+    
     from recon_cli.pipeline.stages import PipelineStage
 
 logger = logging.getLogger(__name__)

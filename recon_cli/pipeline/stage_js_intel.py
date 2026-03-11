@@ -219,7 +219,7 @@ class JSIntelligenceStage(Stage):
                         headers=headers,
                         verify=context.runtime_config.verify_tls,
                     )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if limiter:
                     limiter.on_error(js_url)
                 continue
@@ -279,7 +279,7 @@ class JSIntelligenceStage(Stage):
                                 )
                                 if include_hidden:
                                     hidden_param_hints.update(self._extract_param_hints(source_blob))
-                    except Exception:
+                    except requests.exceptions.RequestException:
                         if limiter:
                             limiter.on_error(source_map)
                         pass

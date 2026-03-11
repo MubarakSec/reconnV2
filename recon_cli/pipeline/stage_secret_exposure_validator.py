@@ -278,7 +278,7 @@ class SecretExposureValidatorStage(Stage):
                 resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=verify_tls)
             else:
                 resp = requests_mod.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=verify_tls)
-        except Exception:
+        except requests.exceptions.RequestException:
             if limiter:
                 limiter.on_error(url)
             return None, "failed"

@@ -1,86 +1,32 @@
-# ReconnV2 Max-Bounty Roadmap
+# ReconnV2 Upgrade Roadmap
 
-## Goal
-Shift ReconnV2 from detection-heavy recon into a hunter-centric system that finds and proves:
-- business-logic flaws,
-- auth abuse chains,
-- race-condition and state-desync bugs,
-- high-quality manual exploitation paths.
+This document outlines the strategic upgrades required to transform the current ReconnV2 tool from a rigid, synchronous pipeline into a modern, high-performance, asynchronous reconnaissance engine.
 
-## Success Criteria (North Star)
-- Higher accepted-report rate per 100 scans.
-- Lower duplicate/out-of-scope rate.
-- Faster time from finding -> reproducible submission.
-- More multi-step, high-impact findings (not just surface misconfigs).
+## Phase 1: Performance & Deep Concurrency
+**Goal**: Eliminate sequential bottlenecks inside individual pipeline stages and drastically reduce process spawning overhead.
 
-## Phase 1: Workflow Capture and Replay
-- [ ] Add authenticated/unauthenticated workflow recorder (request/response sequence + state transitions).
-- [ ] Add deterministic flow replay engine (with token/session refresh support).
-- [ ] Add flow templates for common bounty domains: signup, reset, checkout, coupon, wallet, transfer, payout.
-- [ ] Add endpoint state snapshots before/after each workflow step.
-- [ ] Add tests for replay determinism and session continuity.
-- [ ] **Done when:** we can replay real app workflows reliably and diff outcomes per run.
+- [x] **Audit Core Network Stages**: Identify all stages relying on sequential `for` loops (e.g., `stage_http_probe.py`, `stage_upload_probe.py`, `stage_api_recon.py`).
+- [x] **Integrate AsyncHTTPClient**: Replace synchronous `requests` and `http.client` fallbacks with the existing `AsyncHTTPClient` (via `aiohttp`).
+- [x] **Implement TaskGroups**: Rewrite internal stage loops to use `asyncio.gather` or `asyncio.TaskGroup` to process targets concurrently.
+- [x] **Reduce Subprocess Overhead**: Native python implementations for lightweight tasks instead of shelling out to basic commands (like single-shot `curl` or `dig` equivalents) where an async python library exists (e.g., `aiodns`).
 
-## Phase 2: Authorization Abuse Chains
-- [ ] Extend role matrix to support cross-role chain scenarios (A creates -> B reads/updates/deletes).
-- [ ] Add forced-browse path traversal across roles and tenants.
-- [ ] Add object-lifecycle abuse checks (orphaned objects, stale references, cross-tenant IDs).
-- [ ] Add privilege-boundary mutation checks on hidden parameters and headers.
-- [ ] Add tests for role confusion, horizontal/vertical abuse, and tenant breakout.
-- [ ] **Done when:** auth findings include chain evidence, not single-request anomalies.
+## Phase 2: Architecture & Data Flow
+**Goal**: Move away from disk I/O bottlenecks and rigid execution graphs.
 
-## Phase 3: Business Invariant Engine
-- [ ] Add `config/invariants.yaml` for per-target business rules.
-- [ ] Support numeric, enum, monotonic, and transition invariants (e.g. `balance >= 0`, valid status graph).
-- [ ] Add invariant evaluation at every replay step with diff context.
-- [ ] Add auto-generated PoC traces when invariant is violated.
-- [ ] Add tests for invariant parsing, evaluation, and false-positive suppression.
-- [ ] **Done when:** logic violations are explicitly proven via invariant break events.
+- [ ] **In-Memory Event Bus**: Replace the "Pass-by-File" (`results.jsonl`) architecture with an `asyncio.Queue` or lightweight local broker (e.g., Redis/SQLite pub-sub).
+- [ ] **Real-time Stage Triggers**: Enable stages like `crawler` or `vuln_scan` to subscribe to the event bus and trigger immediately when an upstream stage publishes a finding, rather than waiting for the entire upstream stage to finish.
+- [ ] **Dynamic Dependency Resolution**: Refactor `DependencyResolver.STAGE_DEPENDENCIES`. Stages should dynamically declare `requires = [...]` and `provides = [...]` so the DAG can optimize itself based on available tools and user profiles.
 
-## Phase 4: Race and TOCTOU Validation
-- [ ] Add race harness for high-risk actions: redeem, withdraw, refund, purchase, reset, invite.
-- [ ] Add concurrent replay with timing jitter and sequence perturbation.
-- [ ] Add idempotency and double-spend assertions.
-- [ ] Add state-desync detector (API/UI mismatch and cross-endpoint inconsistency).
-- [ ] Add tests with deterministic mock race fixtures.
-- [ ] **Done when:** race findings include timing profile, winning sequence, and reproducible script.
+## Phase 3: State Management & Intelligence
+**Goal**: Prevent redundant work across scans and ensure data consistency.
 
-## Phase 5: Manual Exploitation Assist
-- [ ] Generate exploit packs per finding: raw HTTP, `curl`, replay script, and expected success checks.
-- [ ] Add Burp-compatible import bundle and step-by-step chain instructions.
-- [ ] Add “next pivot” suggestions from graph context (what to try after initial foothold).
-- [ ] Add confidence gates: `candidate`, `chain-verified`, `submission-ready`.
-- [ ] Add tests for exploit pack completeness and replayability.
-- [ ] **Done when:** hunter can move from signal to report with minimal manual setup.
+- [x] **Global Command Caching**: Implement a caching layer for `CommandExecutor` that hashes target + command arguments. If fingerprints haven't changed since the last run, skip expensive operations (like full `nuclei` or `nmap` scans).
+- [ ] **Strict Data Typing (Pydantic)**: Eradicate bare `Dict[str, Any]` usage for findings and signals. Define strict Pydantic schemas for all data models flowing through the pipeline to prevent runtime parsing bugs.
+- [ ] **Global Rate Limiting Service**: Unify the scattered, stage-specific rate limiters into a single, global service aware of target IPs to prevent accidental self-DoS across concurrent stages.
 
-## Phase 6: Target-Aware Intelligence
-- [ ] Add per-program playbooks (`config/playbooks/*.yaml`) for known bounty patterns.
-- [ ] Add endpoint criticality model for money/account/admin/auth surfaces.
-- [ ] Add novelty scoring to prioritize newly introduced risky paths.
-- [ ] Add anti-dup heuristics tuned for bug-bounty report uniqueness.
-- [ ] Add tests for prioritization stability and playbook correctness.
-- [ ] **Done when:** top-ranked leads align with likely payout-worthy paths.
+## Phase 4: Integration & Cleanup
+**Goal**: Wire up orphaned logic and finalize structural stability.
 
-## Cross-Cutting Safety and Quality
-- [ ] Keep safe defaults for non-destructive probing; explicit opt-in for risky checks.
-- [ ] Expand redaction and secrets hygiene in artifacts and logs.
-- [ ] Add strict per-host budgets, kill-switches, and emergency stop for aggressive stages.
-- [ ] Maintain regression suites for logic engine and race harness.
-- [ ] Add CI quality gates for proof completeness and false-positive thresholds.
-
-## Execution Plan
-- [ ] Week 1: Phase 1 foundations (recorder + replay core).
-- [ ] Week 2: Phase 2 auth-chain engine.
-- [ ] Week 3: Phase 3 invariants and proofs.
-- [ ] Week 4: Phase 4 race/TOCTOU harness.
-- [ ] Week 5: Phase 5 exploit packs + Burp integration.
-- [ ] Week 6: Phase 6 prioritization and anti-dup tuning.
-- [ ] Week 7: Hardening, scale tests, and docs.
-
-## Release Readiness Checklist
-- [ ] End-to-end flow replay works on at least 3 real programs (staging/safe scopes).
-- [ ] Invariant violations produce reproducible PoCs with clear business impact.
-- [ ] Race harness produces deterministic evidence artifacts.
-- [ ] Hunter-mode output includes submission-ready chain summaries.
-- [ ] Documentation updated (`README`, examples, config schemas, playbooks).
-- [ ] Performance and safety budgets validated under load.
+- [x] **Consolidate Error Handling**: Systematically replace all remaining bare `except Exception:` blocks with specific exception catching to prevent masking critical network/system errors.
+- [x] **Integrate Learning & Correlation**: Fully weave the `correlation` and `learning` modules into the core dependency graph so their heuristic models train consistently across all deep scans.
+- [x] **Remove Mixed Paradigms**: Deprecate the thread-based `_run_parallel_threaded` orchestrator entirely in favor of a purely asynchronous `_run_parallel` engine.

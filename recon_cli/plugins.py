@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
-from typing import List, Optional
+from typing import List
 
 from recon_cli.pipeline.stages import Stage
 

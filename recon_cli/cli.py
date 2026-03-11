@@ -1469,7 +1469,7 @@ def run_plugin(
     result = registry.loader.execute_plugin(name, context)
     
     if result.success:
-        typer.secho(f"✅ Plugin executed successfully", fg=typer.colors.GREEN)
+        typer.secho("✅ Plugin executed successfully", fg=typer.colors.GREEN)
         if result.data:
             rich_print(f"  Result: {result.data}")
         rich_print(f"  Execution time: {result.execution_time:.2f}s")
@@ -1568,7 +1568,7 @@ def setup_completions(
             script = generator.generate(shell_enum)
             rich_print(f"[bold]Completion script for {shell}:[/bold]\n")
             print(script)
-            rich_print(f"\n[dim]Use --install to auto-install[/dim]")
+            rich_print("\n[dim]Use --install to auto-install[/dim]")
         
         if install:
             installer = CompletionInstaller()
@@ -1580,7 +1580,7 @@ def setup_completions(
                 
     except ImportError as e:
         typer.secho(f"Completions module not available: {e}", fg=typer.colors.RED)
-    except ValueError as e:
+    except ValueError:
         typer.secho(f"Invalid shell: {shell}. Use bash, zsh, fish, or powershell", fg=typer.colors.RED)
 
 
@@ -1690,7 +1690,7 @@ def generate_report(
                 
     except ImportError as e:
         typer.secho(f"Reports module not available: {e}", fg=typer.colors.RED)
-    except ValueError as e:
+    except ValueError:
         typer.secho(f"Invalid format: {format}. Use html, json, csv, markdown, xml, or pdf", fg=typer.colors.RED)
 
 

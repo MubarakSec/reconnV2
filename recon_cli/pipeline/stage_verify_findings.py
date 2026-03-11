@@ -103,7 +103,7 @@ class VerifyFindingsStage(Stage):
                         headers=headers,
                         stream=True,
                     )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if limiter:
                     limiter.on_error(url)
                 failed += 1

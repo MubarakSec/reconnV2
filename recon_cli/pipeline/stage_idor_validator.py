@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -276,7 +276,7 @@ class IDORValidatorStage(Stage):
     def _fetch_profile(
         self,
         context: PipelineContext,
-        session: "requests.Session",
+        session: Any,
         helper: IDORStage,
         url: str,
         *,
@@ -333,7 +333,7 @@ class IDORValidatorStage(Stage):
 
     @staticmethod
     def _request_with_retries(
-        session: "requests.Session",
+        session: Any,
         url: str,
         headers: Dict[str, str],
         timeout: int,
@@ -352,7 +352,7 @@ class IDORValidatorStage(Stage):
                     verify=verify_tls,
                     allow_redirects=True,
                 )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if attempt >= retries:
                     return None
                 delay = backoff_base * (backoff_factor ** attempt)

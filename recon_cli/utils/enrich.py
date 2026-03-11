@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import logging
 import os
 from dataclasses import dataclass
-from functools import lru_cache
+
 from typing import Dict, Iterable, Optional
 from urllib.parse import urlparse
 
@@ -148,6 +149,10 @@ SOFT_404_PATTERNS = [
     "the page you requested",
     "no longer exists",
     "does not exist",
+    "requested url was not found",
+    "invalid page",
+    "file not found",
+    "error 404",
 ]
 
 
@@ -367,6 +372,17 @@ def detect_waf_tags(server: Optional[str], cdn: Optional[str] = None) -> set[str
             tags.add(tag)
             tags.add("service:waf")
     return tags
+
+
+def get_soft_404_fingerprint(body: str, title: str = "") -> dict:
+    """Generate a fingerprint for a potential soft 404 page."""
+    words = body.lower().split()
+    return {
+        "length": len(body),
+        "word_count": len(words),
+        "title": title.strip().lower(),
+        "hash": hashlib.md5(body.encode("utf-8", errors="ignore")).hexdigest()[:16],
+    }
 
 
 def looks_like_soft_404(status_code: Optional[int], body_snippet: str, title: str = "") -> bool:

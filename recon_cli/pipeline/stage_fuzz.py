@@ -85,7 +85,7 @@ class FuzzStage(Stage):
                 "-o",
                 str(artifact),
             ]
-            if self._run_ffuf(context, cmd, tool_timeout, runtime):
+            if self._run_ffuf(context, cmd, tool_timeout, runtime, host=host):
                 self._ingest_ffuf_results(
                     context,
                     artifact,
@@ -123,7 +123,7 @@ class FuzzStage(Stage):
                         "-o",
                         str(param_artifact),
                     ]
-                    if self._run_ffuf(context, param_cmd, tool_timeout, runtime):
+                    if self._run_ffuf(context, param_cmd, tool_timeout, runtime, host=host):
                         self._ingest_ffuf_results(
                             context,
                             param_artifact,
@@ -313,11 +313,23 @@ class FuzzStage(Stage):
         combined_path.write_text("\n".join(combined) + "\n", encoding="utf-8")
         return combined_path
 
-    def _run_ffuf(self, context: PipelineContext, cmd: List[str], tool_timeout: int, runtime) -> bool:
+    def _run_ffuf(self, context: PipelineContext, cmd: List[str], tool_timeout: int, runtime, host: str = None) -> bool:
         try:
             ffuf_maxtime = max(0, int(getattr(runtime, "ffuf_maxtime", 0)))
             if ffuf_maxtime:
                 cmd.extend(["-maxtime", str(ffuf_maxtime)])
+
+            # Apply soft 404 filters if detected for this host
+            if host:
+                soft_404_data = context.record.metadata.stats.get("soft_404", {}).get("fingerprints", {}).get(host)
+                if soft_404_data:
+                    size = soft_404_data.get("length")
+                    words = soft_404_data.get("word_count")
+                    if size and str(size) not in cmd:
+                        cmd.extend(["-fs", str(size)])
+                    if words and str(words) not in cmd:
+                        cmd.extend(["-fw", str(words)])
+
             timeout = tool_timeout
             if ffuf_maxtime:
                 timeout = ffuf_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
@@ -444,7 +456,14 @@ class FuzzStage(Stage):
         for candidate in candidates:
             if candidate.exists():
                 return candidate
-        return base / "Discovery" / "Web-Content" / "common.txt"
+        fallback_path = base / "Discovery" / "Web-Content" / "common.txt"
+        if not fallback_path.exists():
+            import tempfile
+            tmp_path = Path(tempfile.gettempdir()) / "recon_default_wordlist.txt"
+            if not tmp_path.exists():
+                tmp_path.write_text("admin\nlogin\napi\nconfig\n.env\ntest\nbackup\n", encoding="utf-8")
+            return tmp_path
+        return fallback_path
 
     @staticmethod
     def _load_param_wordlist(runtime) -> Set[str]:

@@ -111,7 +111,7 @@ class AuthDiscoveryStage(Stage):
                         headers=headers,
                         verify=context.runtime_config.verify_tls,
                     )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if limiter:
                     limiter.on_error(url)
                 continue

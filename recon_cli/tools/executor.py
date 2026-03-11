@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 """
 Command Executor Module - تنفيذ الأوامر الخارجية
 
@@ -1033,6 +1036,52 @@ def _cleanup_sessions_on_exit() -> None:
 atexit.register(_cleanup_sessions_on_exit)
 
 
+
+class CommandCache:
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def get(self, command: List[str], cwd: Optional[Path], env: Optional[Mapping[str, str]]) -> Optional[subprocess.CompletedProcess]:
+        key = self._hash(command, cwd, env)
+        path = self.cache_dir / f"{key}.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return subprocess.CompletedProcess(
+                    args=data["args"],
+                    returncode=data["returncode"],
+                    stdout=data.get("stdout"),
+                    stderr=data.get("stderr")
+                )
+            except Exception:
+                return None
+        return None
+
+    def set(self, result: subprocess.CompletedProcess, cwd: Optional[Path], env: Optional[Mapping[str, str]]):
+        # Don't cache massive outputs
+        if result.stdout and len(result.stdout) > 1024 * 1024:
+            return
+        key = self._hash(result.args, cwd, env)
+        path = self.cache_dir / f"{key}.json"
+        data = {
+            "args": result.args,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "timestamp": time.time()
+        }
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def _hash(self, command: List[str], cwd: Optional[Path], env: Optional[Mapping[str, str]]) -> str:
+        h = hashlib.sha256()
+        h.update(json.dumps(list(command)).encode())
+        if cwd:
+            h.update(str(cwd).encode())
+        if env:
+            h.update(json.dumps(dict(env), sort_keys=True).encode())
+        return h.hexdigest()
+
 class CommandExecutor:
     """
     منفذ الأوامر الخارجية مع دعم كامل للـ logging والـ error handling.
@@ -1061,14 +1110,16 @@ class CommandExecutor:
         >>> executor.run_to_file(["subfinder", "-d", "target.com"], Path("subs.txt"))
     """
 
-    def __init__(self, logger=None) -> None:
+    def __init__(self, logger=None, cache: Optional[CommandCache] = None) -> None:
         """
         تهيئة المنفذ.
 
         Args:
             logger: كائن logging.Logger للتسجيل
+            cache: كائن CommandCache للتخزين المؤقت
         """
         self.logger = logger or _MODULE_LOGGER
+        self.cache = cache
 
     @staticmethod
     def available(command: str) -> bool:
@@ -1130,6 +1181,12 @@ class CommandExecutor:
         """
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        if self.cache:
+            cached = self.cache.get(cmd_list, cwd, env)
+            if cached:
+                self.logger.info("Using cached result for: %s", _command_preview(cmd_list, redact=redact))
+                return cached
+
         message = _command_preview(cmd_list, redact=redact)
         policy = _resolve_policy(cmd_list, timeout_override=timeout)
         trace_span = _start_command_trace_span(
@@ -1193,6 +1250,8 @@ class CommandExecutor:
                     if completed.returncode == 0:
                         final_error = None
                         breaker.record_success()
+                        if self.cache:
+                            self.cache.set(completed, cwd, env)
                     else:
                         final_error = f"Command exited with {completed.returncode}"
                         breaker.record_failure()
@@ -1289,6 +1348,12 @@ class CommandExecutor:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        if self.cache:
+            cached = self.cache.get(cmd_list, cwd, env)
+            if cached:
+                self.logger.info("Using cached result for: %s", _command_preview(cmd_list, redact=redact))
+                return cached
+
         message = _command_preview(cmd_list, redact=redact)
         policy = _resolve_policy(cmd_list, timeout_override=timeout)
         trace_span = _start_command_trace_span(
@@ -1341,6 +1406,8 @@ class CommandExecutor:
                     if completed.returncode == 0:
                         final_error = None
                         breaker.record_success()
+                        if self.cache:
+                            self.cache.set(completed, cwd, env)
                         break
                     final_error = f"Command exited with {completed.returncode}"
                     breaker.record_failure()
@@ -1419,6 +1486,12 @@ class CommandExecutor:
     ) -> subprocess.CompletedProcess:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        if self.cache:
+            cached = self.cache.get(cmd_list, cwd, env)
+            if cached:
+                self.logger.info("Using cached result for: %s", _command_preview(cmd_list, redact=redact))
+                return cached
+
         message = _command_preview(cmd_list, redact=redact)
         policy = _resolve_policy(cmd_list, timeout_override=timeout)
         trace_span = _start_command_trace_span(
@@ -1517,6 +1590,8 @@ class CommandExecutor:
                     if completed.returncode == 0:
                         final_error = None
                         breaker.record_success()
+                        if self.cache:
+                            self.cache.set(completed, cwd, env)
                         return completed
 
                     breaker.record_failure()
@@ -1568,6 +1643,12 @@ class CommandExecutor:
     ) -> CommandSessionInfo:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        if self.cache:
+            cached = self.cache.get(cmd_list, cwd, env)
+            if cached:
+                self.logger.info("Using cached result for: %s", _command_preview(cmd_list, redact=redact))
+                return cached
+
         message = _command_preview(cmd_list, redact=redact)
         policy = _resolve_policy(cmd_list)
         trace_span = _start_command_trace_span(

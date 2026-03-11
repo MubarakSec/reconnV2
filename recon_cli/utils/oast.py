@@ -50,14 +50,18 @@ class InteractshSession:
         if self.domain_override:
             self.base_domain = self.domain_override
             return True
-        cmd = ["interactsh-client", "-json", "-o", str(self.output_path)]
+        self.payload_file = self.output_path.with_name(self.output_path.name + ".payload")
+        if self.payload_file.exists():
+            try:
+                self.payload_file.unlink()
+            except Exception:
+                pass
+        cmd = ["interactsh-client", "-json", "-o", str(self.output_path), "-ps", "-psf", str(self.payload_file)]
         try:
             self.process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         except Exception as exc:
             if self.logger:
@@ -71,30 +75,18 @@ class InteractshSession:
     def _wait_for_domain(self) -> bool:
         if self.base_domain:
             return True
-        if not self.process or not self.process.stdout:
+        if not self.process:
             return False
         deadline = time.time() + self.timeout
         while time.time() < deadline:
             if self.process.poll() is not None:
                 break
-            line = self.process.stdout.readline()
-            if not line:
-                time.sleep(0.1)
-                continue
-            lowered = line.strip().lower()
-            match = DOMAIN_RE.search(lowered)
-            if match:
-                self.base_domain = match.group(1)
-                return True
-            server_match = SERVER_RE.search(lowered)
-            if server_match:
-                self.server = server_match.group(1)
-            client_match = CLIENT_RE.search(lowered)
-            if client_match:
-                self.client_id = client_match.group(1)
-            if self.server and self.client_id:
-                self.base_domain = f"{self.client_id}.{self.server}"
-                return True
+            if getattr(self, 'payload_file', None) and self.payload_file.exists():
+                content = self.payload_file.read_text().strip()
+                if content:
+                    self.base_domain = content
+                    return True
+            time.sleep(0.5)
         return bool(self.base_domain)
 
     def make_url(self, token: str) -> str:

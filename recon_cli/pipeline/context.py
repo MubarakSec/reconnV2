@@ -11,7 +11,7 @@ import re
 from recon_cli import config
 from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.jobs.results import ResultsTracker
-from recon_cli.tools.executor import CommandExecutor
+from recon_cli.tools.executor import CommandExecutor, CommandCache
 from recon_cli.utils import fs, time as time_utils
 from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.logging import build_file_logger, silence_logger
@@ -87,7 +87,8 @@ class PipelineContext:
             level=config.LOG_LEVEL,
             log_format=config.LOG_FORMAT,
         )
-        self.executor = CommandExecutor(self.logger)
+        cache = CommandCache(config.GLOBAL_CACHE_DIR)
+        self.executor = CommandExecutor(self.logger, cache=cache)
         pattern = self.runtime_config.url_path_allow_regex
         self._url_allow_pattern = re.compile(pattern) if pattern else None
         try:

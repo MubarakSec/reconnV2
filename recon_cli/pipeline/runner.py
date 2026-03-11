@@ -11,7 +11,8 @@ from pathlib import Path
 from recon_cli.jobs import summary
 from recon_cli.jobs.manager import JobManager
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stages import PIPELINE_STAGES, Stage, StageError, StageResult
+from recon_cli.pipeline.stage_base import Stage, StageError, StageResult
+from recon_cli.pipeline.stages import PIPELINE_STAGES
 from recon_cli.pipeline.parallel import DependencyResolver
 from recon_cli.utils.notify import send_pipeline_notification
 from recon_cli.utils import time as time_utils
@@ -348,24 +349,11 @@ class PipelineRunner:
         trace: Optional[PipelineTraceRecorder] = None,
     ) -> None:
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
+            future = asyncio.run_coroutine_threadsafe(self._run_parallel(context, stages, trace=trace), loop)
+            future.result()
         except RuntimeError:
-            self._run_parallel_threaded(context, stages, trace=trace)
-            return
-
-        error_holder: list[Exception] = []
-
-        def _runner() -> None:
-            try:
-                self._run_parallel_threaded(context, stages, trace=trace)
-            except Exception as exc:
-                error_holder.append(exc)
-
-        thread = threading.Thread(target=_runner, daemon=True)
-        thread.start()
-        thread.join()
-        if error_holder:
-            raise error_holder[0]
+            asyncio.run(self._run_parallel(context, stages, trace=trace))
 
     def _run_parallel_threaded(
         self,

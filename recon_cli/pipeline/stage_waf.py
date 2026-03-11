@@ -383,7 +383,7 @@ class WafProbeStage(Stage):
     def _looks_blocked(self, resp, body_snippet: str) -> bool:
         try:
             status_code = int(resp.status_code)
-        except Exception:
+        except requests.exceptions.RequestException:
             status_code = 0
         if status_code in self.BLOCK_STATUSES:
             return True

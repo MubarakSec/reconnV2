@@ -21,7 +21,6 @@ Example:
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -636,7 +635,7 @@ class CompletionInstaller:
         if shell == Shell.BASH:
             return f'source "{path}"  # Add to ~/.bashrc'
         elif shell == Shell.ZSH:
-            return f'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit  # Add to ~/.zshrc'
+            return 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit  # Add to ~/.zshrc'
         elif shell == Shell.FISH:
             return f'# Fish loads completions automatically from {path}'
         elif shell == Shell.POWERSHELL:
@@ -674,7 +673,7 @@ def install_completion(shell: Optional[Shell] = None) -> Optional[Path]:
     path = installer.install(shell)
     
     print(f"✅ Installed completion script to: {path}")
-    print(f"\n📋 To activate, run:")
+    print("\n📋 To activate, run:")
     print(f"   {installer.get_source_command(shell)}")
     
     return path

@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from typing import Any, Callable, Dict, List, Sequence, Tuple
+from typing import Any, Callable, Dict, Sequence, Tuple
 
 _PLACEHOLDER = "***"
 

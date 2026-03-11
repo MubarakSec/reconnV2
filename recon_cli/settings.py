@@ -20,9 +20,8 @@ Example:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Set, Union
+from typing import Any, List, Literal, Optional, Set, Union
 
 from pydantic import (
     BaseModel,

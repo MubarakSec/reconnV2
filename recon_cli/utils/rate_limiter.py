@@ -231,7 +231,7 @@ def rate_limited(limiter: RateLimiter):
                 if hasattr(result, 'status_code'):
                     limiter.on_response(url, result.status_code)
                 return result
-            except Exception as e:
+            except Exception:
                 limiter.on_error(url)
                 raise
         

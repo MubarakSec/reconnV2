@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -35,7 +34,6 @@ from typing import (
     Optional,
     Set,
     TypeVar,
-    Union,
 )
 
 

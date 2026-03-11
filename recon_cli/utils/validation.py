@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from urllib.parse import urlparse
-from typing import Iterable, List
+from typing import List
 
 LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 

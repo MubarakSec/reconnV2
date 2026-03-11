@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List, Optional, Tuple
+import asyncio
+from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.jsonl import read_jsonl
+
+try:
+    from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
+except ImportError:
+    AsyncHTTPClient = None
 
 
 class APIReconStage(Stage):
@@ -43,84 +49,87 @@ class APIReconStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_api_recon", False))
 
-    def execute(self, context: PipelineContext) -> None:
-        try:
-            import requests
-        except Exception:
-            context.logger.warning("api recon requires requests; skipping")
-            return
+    async def run_async(self, context: PipelineContext) -> bool:
+        if not self.is_enabled(context):
+            return False
+
+        if not AsyncHTTPClient:
+            context.logger.warning("AsyncHTTPClient unavailable. Skipping async api recon.")
+            return False
+
         host_info = self._collect_hosts(context)
         if not host_info:
-            return
+            return True
+
         signal_index = context.signal_index()
         ranked_hosts = self._rank_hosts(host_info, signal_index)
+
         if bool(getattr(context.runtime_config, "api_recon_enrich_from_js", True)):
             enriched_paths = self._build_host_enriched_paths(context, host_info)
         else:
             enriched_paths = {}
-        max_hosts = int(getattr(context.runtime_config, "api_recon_max_hosts", 50))
-        timeout = int(getattr(context.runtime_config, "api_recon_timeout", 8))
+
         runtime = context.runtime_config
-        limiter = context.get_rate_limiter(
-            "api_recon",
-            rps=float(getattr(runtime, "api_recon_rps", 0)),
-            per_host=float(getattr(runtime, "api_recon_per_host_rps", 0)),
-        )
-        signaled_hosts: set[str] = set()
-        specs_found = 0
-        urls_added = 0
+        max_hosts = int(getattr(runtime, "api_recon_max_hosts", 50))
+        timeout = int(getattr(runtime, "api_recon_timeout", 8))
+        concurrency = int(getattr(runtime, "api_recon_concurrency", 20))
+
         probe_attempts = 0
         enriched_probe_count = 0
+        urls_to_check: List[Tuple[str, str, str]] = []  # host, url, path
+
         for host in ranked_hosts[:max_hosts]:
             info = host_info.get(host, {})
             base_url = str(info.get("base_url") or f"https://{host}")
             parsed_base = urlparse(base_url)
             scheme = parsed_base.scheme or "https"
             base = f"{scheme}://{host}"
+            
             host_probe_paths = list(dict.fromkeys(self.PROBE_PATHS + enriched_paths.get(host, [])))
             for path in host_probe_paths:
                 probe_attempts += 1
                 if path not in self.PROBE_PATHS:
                     enriched_probe_count += 1
                 url = urljoin(base, path)
-                if not context.url_allowed(url):
+                if context.url_allowed(url):
+                    urls_to_check.append((host, url, path))
+
+        if not urls_to_check:
+            return True
+
+        config = HTTPClientConfig(
+            max_concurrent=concurrency,
+            total_timeout=timeout,
+            verify_ssl=context.runtime_config.verify_tls,
+        )
+        
+        headers = context.auth_headers(
+            {"User-Agent": "recon-cli api-recon", "Accept": "application/json"}
+        )
+
+        signaled_hosts: set[str] = set()
+        specs_found = 0
+        urls_added = 0
+
+        async with AsyncHTTPClient(config) as client:
+            tasks = [
+                client.get(url, headers=headers, follow_redirects=True)
+                for _, url, _ in urls_to_check
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for (host, url, path), resp in zip(urls_to_check, responses):
+                if isinstance(resp, Exception) or resp.status == 0:
                     continue
-                session = context.auth_session(url)
-                headers = context.auth_headers(
-                    {"User-Agent": "recon-cli api-recon", "Accept": "application/json"}
-                )
-                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-                    continue
-                try:
-                    if session:
-                        resp = session.get(
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                        )
-                    else:
-                        resp = requests.get(
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                        )
-                except Exception:
-                    if limiter:
-                        limiter.on_error(url)
-                    continue
-                if limiter:
-                    limiter.on_response(url, resp.status_code)
+                
                 content_type = resp.headers.get("Content-Type", "").lower()
-                status_code = int(resp.status_code or 0)
-                text = resp.text or ""
+                status_code = resp.status
+                text = resp.body or ""
                 meta = self._response_meta(resp, text)
+                
                 if status_code >= 500:
                     continue
-                text = resp.text or ""
+
                 if "graphql" in path:
                     if "graphql" in text.lower() or status_code in {200, 400}:
                         payload = {
@@ -155,8 +164,10 @@ class APIReconStage(Stage):
                             evidence={"status_code": status_code, "location": meta.get("location")},
                         )
                     continue
+
                 data, spec_format = self._parse_spec(text, content_type)
                 spec_hint = self._looks_like_spec(path, text)
+
                 if status_code in {401, 403, 302} and spec_hint:
                     spec_payload = {
                         "type": "api_spec",
@@ -195,12 +206,13 @@ class APIReconStage(Stage):
                         )
                         signaled_hosts.add(host)
                     continue
+
                 if isinstance(data, dict) and data:
                     specs_found += 1
-                    paths = data.get("paths") or {}
-                    if isinstance(paths, dict):
-                        for api_path in list(paths.keys())[:200]:
-                            full_url = urljoin(base, api_path)
+                    paths_obj = data.get("paths") or {}
+                    if isinstance(paths_obj, dict):
+                        for api_path in list(paths_obj.keys())[:200]:
+                            full_url = urljoin(f"{urlparse(url).scheme}://{host}", api_path)
                             if not context.url_allowed(full_url):
                                 continue
                             payload = {
@@ -239,12 +251,18 @@ class APIReconStage(Stage):
                             evidence={"url": url},
                         )
                         signaled_hosts.add(host)
+
         stats = context.record.metadata.stats.setdefault("api_recon", {})
         stats["specs"] = specs_found
         stats["urls_added"] = urls_added
         stats["probe_attempts"] = probe_attempts
         stats["enriched_probe_paths"] = enriched_probe_count
         context.manager.update_metadata(context.record)
+        return True
+
+    def execute(self, context: PipelineContext) -> None:
+        import asyncio
+        asyncio.run(self.run_async(context))
 
     def _collect_hosts(self, context: PipelineContext) -> Dict[str, Dict[str, object]]:
         host_info: Dict[str, Dict[str, object]] = {}
@@ -399,7 +417,7 @@ class APIReconStage(Stage):
             return True
         return False
 
-    def _response_meta(self, resp, body: str) -> Dict[str, object]:
+    def _response_meta(self, resp: Any, body: str) -> Dict[str, object]:
         content_type = resp.headers.get("Content-Type", "") if resp else ""
         location = resp.headers.get("Location", "") if resp else ""
         title = self._extract_title(body)

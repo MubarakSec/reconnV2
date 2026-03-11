@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import List, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -105,7 +105,7 @@ class CloudAssetDiscoveryStage(Stage):
                     verify=context.runtime_config.verify_tls,
                     headers={"User-Agent": "recon-cli cloud-discovery"},
                 )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if limiter:
                     limiter.on_error(url)
                 continue

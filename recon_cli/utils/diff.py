@@ -21,11 +21,11 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
-from difflib import unified_diff
+from datetime import datetime, timedelta
+
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, TypeVar
+from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -570,7 +570,6 @@ class HistoryTracker:
             hour=0, minute=0, second=0, microsecond=0
         ) - timedelta(days=days)
         
-        from datetime import timedelta
         
         snapshots = [s for s in snapshots if s.timestamp >= cutoff]
         

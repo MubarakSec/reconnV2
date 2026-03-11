@@ -6,13 +6,12 @@ Cache System - نظام تخزين مؤقت للنتائج
 from __future__ import annotations
 
 import hashlib
-import json
 import pickle
 import sqlite3
 from contextlib import contextmanager
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Generic, Optional, TypeVar
 

@@ -22,12 +22,10 @@ Example:
     ...     print(f"{m.pattern}: confidence={m.confidence}")
 """
 
-import json
 import math
 import re
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import requests
@@ -190,7 +188,7 @@ class SecretsDetector:
             if resp.status_code != 200:
                 return None
             content_type = resp.headers.get("Content-Type", "")
-            if "text" not in content_type and not url.split("?")[0].split(".")[-1].lower() in TEXT_LIKE_EXTENSIONS:
+            if "text" not in content_type and url.split("?")[0].split(".")[-1].lower() not in TEXT_LIKE_EXTENSIONS:
                 return None
             resp.encoding = resp.encoding or "utf-8"
             return resp.text

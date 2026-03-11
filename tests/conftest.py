@@ -139,20 +139,6 @@ def pytest_configure(config):
 
 
 # ═══════════════════════════════════════════════════════════
-#                     Event Loop
-# ═══════════════════════════════════════════════════════════
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Event loop للاختبارات الـ async"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-    asyncio.set_event_loop(None)
-    loop.close()
-
-
-# ═══════════════════════════════════════════════════════════
 #                     Temp Directories
 # ═══════════════════════════════════════════════════════════
 

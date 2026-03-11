@@ -255,13 +255,14 @@ def test_api_recon_enriches_probe_paths_from_js_endpoints(monkeypatch, tmp_path:
     )
     called: list[str] = []
 
-    def fake_get(url, **_kwargs):
+    async def fake_get(self_obj, url, **_kwargs):
+        from recon_cli.utils.async_http import HTTPResponse
         called.append(url)
-        return _FakeResponse(404, text="not found", headers={"Content-Type": "application/json"})
+        return HTTPResponse(url=url, status=404, headers={"Content-Type": "application/json"}, body="not found", elapsed=0.1)
 
-    import requests
-
-    monkeypatch.setattr(requests, "get", fake_get)
+    from recon_cli.utils.async_http import AsyncHTTPClient
+    monkeypatch.setattr(AsyncHTTPClient, "get", fake_get)
+    
     APIReconStage().run(context)
     assert any("/graphql/v1" in url for url in called)
     assert any("/api/openapi.json" in url for url in called)
@@ -300,7 +301,7 @@ def test_runtime_crawl_role_aware_profiles_emit_profile_records(monkeypatch, tmp
         handle.write("\n")
     context = PipelineContext(record=record, manager=DummyManager())
 
-    import recon_cli.pipeline.stages as stages_module
+    import recon_cli.pipeline.stage_runtime_crawl as stages_module
 
     monkeypatch.setattr(stages_module, "PLAYWRIGHT_AVAILABLE", True)
 

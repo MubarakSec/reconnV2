@@ -87,29 +87,41 @@ class ResolveStage(Stage):
         context.record.metadata.stats["resolved_hosts"] = len({host for host, _ in resolutions})
         context.manager.update_metadata(context.record)
 
-    def _fallback_resolve(self, context: PipelineContext, hosts: List[str]) -> List[Tuple[str, str]]:
+    async def _fallback_resolve_async(self, context: PipelineContext, hosts: List[str]) -> List[Tuple[str, str]]:
         limit = context.runtime_config.fallback_dns_limit
+        targets = hosts[:limit] if limit else hosts
+        if limit and len(hosts) > limit:
+            context.logger.warning(
+                "Fallback DNS limit reached (%s hosts); skipping remaining %s entries",
+                limit,
+                len(hosts) - limit,
+            )
+        
+        import asyncio
+        loop = asyncio.get_running_loop()
         results: List[Tuple[str, str]] = []
-        for idx, target in enumerate(hosts):
-            if limit and idx >= limit:
-                context.logger.warning(
-                    "Fallback DNS limit reached (%s hosts); skipping remaining %s entries",
-                    limit,
-                    max(0, len(hosts) - limit),
-                )
-                break
+        
+        async def resolve_host(host: str) -> List[Tuple[str, str]]:
             try:
-                infos = socket.getaddrinfo(target, None, proto=socket.IPPROTO_TCP)
-            except socket.gaierror:
-                continue
-            ips = {info[4][0] for info in infos}
-            if ips:
-                for ip in ips:
-                    results.append((target, ip))
-            if (idx + 1) % 50 == 0:
-                context.logger.debug(
-                    "Fallback DNS progress: processed %s hosts (%s resolved)",
-                    idx + 1,
-                    len(results),
-                )
+                infos = await loop.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+                ips = {info[4][0] for info in infos}
+                return [(host, ip) for ip in ips]
+            except Exception:
+                return []
+                
+        sem = asyncio.Semaphore(100)
+        
+        async def bounded_resolve(host: str):
+            async with sem:
+                return await resolve_host(host)
+                
+        tasks = [bounded_resolve(h) for h in targets]
+        resolved = await asyncio.gather(*tasks)
+        for r in resolved:
+            results.extend(r)
+            
         return results
+
+    def _fallback_resolve(self, context: PipelineContext, hosts: List[str]) -> List[Tuple[str, str]]:
+        import asyncio
+        return asyncio.run(self._fallback_resolve_async(context, hosts))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
-from typing import Dict, List, Set
+from typing import List, Set
 from urllib.parse import urlparse, urlunparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -74,7 +74,7 @@ class WsGrpcDiscoveryStage(Stage):
                         allow_redirects=False,
                         verify=context.runtime_config.verify_tls,
                     )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if limiter:
                     limiter.on_error(url)
                 continue

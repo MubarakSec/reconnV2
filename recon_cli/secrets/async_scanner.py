@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 

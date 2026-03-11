@@ -133,14 +133,12 @@ class PDFReporter:
         """Generate PDF using ReportLab"""
         from reportlab.lib.pagesizes import A4, letter
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch, cm
+        from reportlab.lib.units import cm
         from reportlab.lib import colors
         from reportlab.platypus import (
             SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-            PageBreak, Image
+            PageBreak
         )
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
         
         # Page size
         page_size = A4 if self.config.page_size == "A4" else letter

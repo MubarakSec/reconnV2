@@ -5,7 +5,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 from urllib.parse import parse_qsl, urlparse
 
 try:

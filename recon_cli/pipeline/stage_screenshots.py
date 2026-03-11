@@ -38,8 +38,6 @@ class ScreenshotStage(Stage):
         ocr_ready = False
         if ocr_enabled and ocr_max:
             try:
-                import pytesseract  # type: ignore
-                from PIL import Image  # type: ignore
                 ocr_ready = True
             except Exception:
                 context.logger.warning("pytesseract/PIL not available; skipping OCR")

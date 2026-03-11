@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -236,7 +235,7 @@ class AuthMatrixStage(Stage):
             return None
         try:
             resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
-        except Exception as exc:
+        except requests.exceptions.RequestException as exc:
             context.logger.debug("AuthMatrix request failed for %s (%s): %s", url, auth_label, exc)
             if limiter:
                 limiter.on_error(url)

@@ -393,7 +393,7 @@ class VHostDiscoveryStage(Stage):
                 title=title,
                 server=resp.headers.get("Server"),
             )
-        except Exception:
+        except requests.exceptions.RequestException:
             return None
         finally:
             if resp is not None:

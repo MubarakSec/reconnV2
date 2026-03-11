@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shlex
-from typing import List
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool

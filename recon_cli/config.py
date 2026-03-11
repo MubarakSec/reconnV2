@@ -27,6 +27,7 @@ RUNNING_JOBS: Path = JOBS_ROOT / "running"
 FINISHED_JOBS: Path = JOBS_ROOT / "finished"
 FAILED_JOBS: Path = JOBS_ROOT / "failed"
 ARCHIVE_ROOT: Path = RECON_HOME / "archive"
+GLOBAL_CACHE_DIR: Path = RECON_HOME / "cache"
 
 LOG_RELATIVE_PATH = Path("logs") / "pipeline.log"
 RESULTS_JSONL_NAME = "results.jsonl"

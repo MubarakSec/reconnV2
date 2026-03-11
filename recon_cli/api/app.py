@@ -30,7 +30,6 @@ from recon_cli.jobs.summary import JobSummary
 from recon_cli.users import Permission
 from recon_cli.utils.metrics import metrics as metrics_registry
 from recon_cli.utils import validation
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class _JobsBaseProxy:

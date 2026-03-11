@@ -22,7 +22,6 @@ Example:
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -35,7 +34,6 @@ from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from enum import Enum, IntEnum
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)

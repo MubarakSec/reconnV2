@@ -20,12 +20,11 @@ import hashlib
 import json
 import logging
 import traceback
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from recon_cli.exceptions import ReconError, get_error_code, is_recoverable
+from recon_cli.exceptions import get_error_code, is_recoverable
 
 logger = logging.getLogger(__name__)
 

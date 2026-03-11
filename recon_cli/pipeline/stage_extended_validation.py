@@ -973,7 +973,7 @@ class ExtendedValidationStage(Stage):
                     headers=headers,
                     verify=verify_tls,
                 )
-            except Exception:
+            except requests.exceptions.RequestException:
                 if attempt >= retries:
                     return None
                 delay = backoff_base * (backoff_factor ** attempt)

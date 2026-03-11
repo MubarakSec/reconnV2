@@ -17,7 +17,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -466,20 +466,20 @@ def migrate_config(
             print(f"  • {error}")
         return False
     
-    print(f"\n✅ Migration successful!")
-    print(f"\n📝 Changes made:")
+    print("\n✅ Migration successful!")
+    print("\n📝 Changes made:")
     for change in result.changes:
         print(f"  • {change}")
     
     if result.warnings:
-        print(f"\n⚠️ Warnings:")
+        print("\n⚠️ Warnings:")
         for warning in result.warnings:
             print(f"  • {warning}")
     
     # Validate
     is_valid, validation_errors = migrator.validate()
     if not is_valid:
-        print(f"\n⚠️ Validation warnings:")
+        print("\n⚠️ Validation warnings:")
         for error in validation_errors:
             print(f"  • {error}")
     

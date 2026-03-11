@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Dict, List, Any
 
 from recon_cli import config
-from recon_cli.utils.sanitizer import redact
 
 RULES_PATH = config.RECON_HOME / "config" / "rules.json"
 

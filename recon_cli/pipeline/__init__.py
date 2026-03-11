@@ -10,7 +10,7 @@ This package provides the pipeline execution framework:
 """
 
 from .context import PipelineContext
-from .stages import Stage, StageError
+from .stage_base import Stage, StageError
 from .parallel import ParallelStageExecutor, DependencyResolver
 from .progress import ProgressLogger
 
