@@ -2050,11 +2050,12 @@ def start_telegram_bot(
     
     if not chat_id:
         typer.secho("🆔 Telegram Chat ID not found in environment.", fg=typer.colors.YELLOW)
-        chat_id = typer.prompt("Please enter your Telegram Chat ID")
+        typer.secho("Tip: If you don't know your ID, enter 'discover' below.", dim=True)
+        chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
 
     if not token or not chat_id:
         rich_print(
-            "[bold red]Error:[/bold red] Missing Telegram token or chat ID. Set RECON_TELEGRAM_TOKEN and RECON_TELEGRAM_CHAT_ID."
+            "[bold red]Error:[/bold red] Missing Telegram token or chat ID."
         )
         raise typer.Exit(code=1)
 
@@ -2063,7 +2064,11 @@ def start_telegram_bot(
     bot = TelegramBot(token, chat_id)
 
     rich_print("[bold green]Starting Telegram Bot...[/bold green]")
-    rich_print(f"Locked to Chat ID: {chat_id}")
+    if chat_id == "discover":
+        rich_print("[bold cyan]🔍 DISCOVERY MODE ENABLED[/bold cyan]")
+        rich_print("Message your bot on Telegram now, and your Chat ID will be printed here.")
+    else:
+        rich_print(f"Locked to Chat IDs: {chat_id}")
     rich_print("\n[dim]Tip: You can export these to your .bashrc or .env file to skip this prompt:[/dim]")
     rich_print(f"[blue]export RECON_TELEGRAM_TOKEN=\"{token}\"[/blue]")
     rich_print(f"[blue]export RECON_TELEGRAM_CHAT_ID=\"{chat_id}\"[/blue]")

@@ -20,7 +20,10 @@ class TelegramBot:
 
     def __init__(self, token: str, allowed_chat_id: str):
         self.token = token
-        self.allowed_chat_id = str(allowed_chat_id)
+        # Support comma-separated list of IDs
+        self.allowed_chat_ids = {str(i).strip() for i in str(allowed_chat_id).split(",") if str(i).strip()}
+        self.discovery_mode = "discover" in self.allowed_chat_ids
+        
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.manager = JobManager()
         self.offset = 0
@@ -57,10 +60,18 @@ class TelegramBot:
         return []
 
     async def handle_command(self, chat_id: str, text: str) -> None:
-        if str(chat_id) != self.allowed_chat_id:
-            logger.warning("Unauthorized access attempt from chat_id: %s", chat_id)
+        s_chat_id = str(chat_id)
+        
+        if s_chat_id not in self.allowed_chat_ids:
+            if self.discovery_mode:
+                msg = f"🔍 *Discovery Mode*: Incoming message from ID: `{s_chat_id}`"
+                print(f"\n[bold cyan]TELEGRAM DISCOVERY:[/bold cyan] Received message from Chat ID: {s_chat_id}")
+                await self.send_message(s_chat_id, f"🆔 Your Telegram Chat ID is: `{s_chat_id}`\n\nTo authorize this ID, restart the bot with this ID added to the Chat ID list.")
+                return
+            
+            logger.warning("Unauthorized access attempt from chat_id: %s", s_chat_id)
             await self.send_message(
-                chat_id, "⚠️ Unauthorized. This bot is locked to a specific chat ID."
+                s_chat_id, "⚠️ Unauthorized. This bot is locked to specific chat IDs."
             )
             return
 
@@ -193,7 +204,9 @@ class TelegramBot:
 
     async def start(self) -> None:
         self.running = True
-        logger.info("Telegram Bot started for chat_id: %s", self.allowed_chat_id)
+        logger.info("Telegram Bot started. Authorized IDs: %s", ", ".join(self.allowed_chat_ids))
+        if self.discovery_mode:
+            logger.info("Discovery Mode is ENABLED. Message the bot to see your Chat ID.")
 
         while self.running:
             updates = await self.get_updates()
