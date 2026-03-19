@@ -59,6 +59,7 @@ def generate_summary(context) -> None:
     noise_count = 0
     findings_total = 0
     verified_count = 0
+    verified_ratio = 0.0
     top_candidates: List[dict] = []
     top_urls: List[dict] = []
     top_findings: List[dict] = []
@@ -158,7 +159,7 @@ def generate_summary(context) -> None:
             if status:
                 status_counter[str(status)] += 1
             tags = set(entry.get("tags", []))
-            if "noise" in tags:
+            if "noise" in tags or score < 75:
                 noise_count += 1
                 continue
             priority = entry.get("priority") or "unknown"
@@ -167,14 +168,16 @@ def generate_summary(context) -> None:
             tags = entry.get("tags", [])
             if tags:
                 priority_counter["enriched_hosts"] += 1
-        elif etype in {"finding", "idor_suspect"}:
+        elif etype in {"finding", "idor_suspect", "idor_candidate"}:
             priority = entry.get("priority") or "unknown"
             priority_counter[priority] += 1
 
     for entry in iter_jsonl(summary_path):
         etype = entry.get("type", "unknown")
+        score = int(entry.get("score", 0))
         if etype == "url":
-            score = int(entry.get("score", 0))
+            if score < 75:
+                continue
             tags = set(entry.get("tags", []))
             if "noise" in tags:
                 continue
@@ -182,8 +185,7 @@ def generate_summary(context) -> None:
             payload = entry | {"score": score, "priority": priority}
             top_candidates.append(payload)
             top_urls.append(payload)
-        elif etype in {"finding", "idor_suspect"}:
-            score = int(entry.get("score", 0))
+        elif etype in {"finding", "idor_suspect", "idor_candidate"}:
             priority = entry.get("priority") or "unknown"
             payload = entry | {"score": score, "priority": priority}
             top_candidates.append(payload)
@@ -194,23 +196,52 @@ def generate_summary(context) -> None:
     top_findings.sort(key=_ranking_key, reverse=True)
 
     lines = []
+    lines.append("================================================================================")
+    lines.append(f"  RECON SUMMARY: {spec.target}")
+    lines.append("================================================================================")
     lines.append(f"Job ID       : {metadata.job_id}")
-    lines.append(f"Target       : {spec.target}")
     lines.append(f"Profile      : {spec.profile}")
-    lines.append(f"Queued       : {metadata.queued_at}")
-    lines.append(f"Started      : {metadata.started_at}")
-    lines.append(f"Finished     : {metadata.finished_at}")
+    lines.append(f"Duration     : {metadata.started_at} -> {metadata.finished_at}")
+    
     started_dt = _parse_iso(metadata.started_at)
     finished_dt = _parse_iso(metadata.finished_at)
     if started_dt and finished_dt:
         wall_clock = (finished_dt - started_dt).total_seconds()
         if wall_clock >= 0:
             lines.append(f"Wall Clock   : {wall_clock:.1f}s")
-    lines.append(f"Summary Src  : {summary_source}")
+    
+    confirmed_findings = [entry for entry in top_findings if _is_confirmed(entry)]
+    if confirmed_findings:
+        lines.append("")
+        lines.append(f"== CONFIRMED FINDINGS ({len(confirmed_findings)}) ==")
+        for entry in confirmed_findings[:SUMMARY_TOP]:
+            label = _format_finding_label(entry)
+            score = entry.get("score", 0)
+            priority = (entry.get("priority") or "high").upper()
+            tags = ",".join(entry.get("tags", []))
+            lines.append(f"[*] [{score:3}] ({priority:8}) {label}")
+            if entry.get("url"):
+                lines.append(f"    URL: {entry.get('url')}")
+    
+    high_priority_candidates = [entry for entry in top_findings if not _is_confirmed(entry) and int(entry.get("score", 0)) >= 70]
+    if high_priority_candidates:
+        lines.append("")
+        lines.append(f"== HIGH PRIORITY CANDIDATES ({len(high_priority_candidates)}) ==")
+        for entry in high_priority_candidates[:SUMMARY_TOP]:
+            label = _format_finding_label(entry)
+            score = entry.get("score", 0)
+            priority = (entry.get("priority") or "med").upper()
+            lines.append(f"[?] [{score:3}] ({priority:8}) {label}")
+
     lines.append("")
-    lines.append("== Totals ==")
+    lines.append("== STATS ==")
     for key in sorted(counts):
-        lines.append(f"{key:18}: {counts[key]}")
+        if counts[key] > 0:
+            lines.append(f"{key:18}: {counts[key]}")
+    
+    if verified_count:
+        verified_ratio = (verified_count / findings_total) if findings_total else 0.0
+        lines.append(f"Verified Ratio    : {verified_ratio:.2%} ({verified_count}/{findings_total})")
     if status_counter:
         lines.append("")
         lines.append("== HTTP Status Codes ==")
@@ -410,34 +441,16 @@ def generate_summary(context) -> None:
         lines.append(f"Model trained: {learning_stats.get('trained', False)}")
         for host, prob in learning_stats.get('top_hosts', []):
             lines.append(f"{host}: {prob:.2f}")
-    if top_findings:
-        lines.append("")
-        lines.append(f"== Top Findings (top {min(len(top_findings), SUMMARY_TOP)}) ==")
-        for entry in top_findings[:SUMMARY_TOP]:
-            label = _format_finding_label(entry)
-            score = entry.get("score", 0)
-            priority = entry.get("priority", "unknown")
-            tags = ",".join(entry.get("tags", []))
-            lines.append(f"[{score:4}] ({priority}) {label} {tags}")
-    confirmed_findings = [entry for entry in top_findings if _is_confirmed(entry)]
-    if confirmed_findings:
-        lines.append("")
-        lines.append(f"== Confirmed Findings (top {min(len(confirmed_findings), SUMMARY_TOP)}) ==")
-        for entry in confirmed_findings[:SUMMARY_TOP]:
-            label = _format_finding_label(entry)
-            score = entry.get("score", 0)
-            priority = entry.get("priority", "unknown")
-            tags = ",".join(entry.get("tags", []))
-            lines.append(f"[{score:4}] ({priority}) {label} {tags}")
     if top_urls:
         lines.append("")
-        lines.append(f"== Top URLs (top {min(len(top_urls), SUMMARY_TOP)}) ==")
+        lines.append(f"== RELEVANT URLS (score >= 75, top {min(len(top_urls), SUMMARY_TOP)}) ==")
         for entry in top_urls[:SUMMARY_TOP]:
             label = _format_url_label(entry)
             score = entry.get("score", 0)
-            priority = entry.get("priority", "unknown")
+            priority = (entry.get("priority") or "med").upper()
             tags = ",".join(entry.get("tags", []))
-            lines.append(f"[{score:4}] ({priority}) {label} {tags}")
+            lines.append(f"[-] [{score:3}] ({priority:8}) {label} {tags}")
+    
     next_actions: list[str] = []
     secrets_stats = getattr(metadata, 'stats', {}).get('secrets') if hasattr(metadata, 'stats') else None
     if secrets_stats and secrets_stats.get('findings'):
@@ -463,7 +476,7 @@ def generate_summary(context) -> None:
         if entry.get("finding_type"):
             return True
         etype = entry.get("type")
-        return isinstance(etype, str) and etype in {"finding", "idor_suspect", "vulnerability", "vuln"}
+        return isinstance(etype, str) and etype in {"finding", "idor_suspect", "idor_candidate", "vulnerability", "vuln"}
 
     bigger_path = record.paths.root / "results_bigger.txt"
     big_lines: List[str] = []

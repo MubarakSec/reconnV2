@@ -744,11 +744,11 @@ def test_summary_prefers_confirmed_findings_in_top_section(tmp_path: Path):
     jobs_summary.generate_summary(context)
 
     text = record.paths.results_txt.read_text(encoding="utf-8")
-    marker = "== Top Findings"
+    marker = "== CONFIRMED FINDINGS"
     idx = text.find(marker)
     assert idx != -1
     section = text[idx:].splitlines()
-    first_entry = next((line for line in section if line.startswith("[")), "")
+    first_entry = next((line for line in section if line.startswith("[*]")), "")
     assert "confirmed-lower-score" in first_entry
 
 
