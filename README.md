@@ -53,66 +53,46 @@ reconnV2/
 
 ---
 
-## ✨ الميزات الجديدة (2026)
+## ✨ الميزات الجديدة (2026) - Honest & Hardened
 
 | الميزة | الوصف |
 |--------|-------|
+| ✅ **صدق النتائج (Honesty)** | التحقق النشط من الثغرات (Active Proof) بدلاً من التخمين |
+| 🛡️ **قاطع الدائرة (Circuit Breaker)** | تخطي الأهداف التي تفعل WAF تلقائيًا لحماية الـ IP الخاص بك |
+| ⚡ **معالجة متدفقة (Streaming)** | دعم الأهداف الضخمة بفضل استهلاك الذاكرة المنخفض (LRU Buffering) |
+| 🔒 **تحصين الأوامر (Hardening)** | حماية ضد Command Injection و Data Exfiltration |
 | 🌐 **لوحة تحكم ويب** | واجهة رسومية حديثة مع RTL عربي |
-| 📊 **REST API** | API كامل لإدارة الفحص |
-| 📄 **تقارير PDF** | تقارير مهنية بدعم العربية |
-| 🔔 **إشعارات متعددة** | Telegram, Slack, Discord, Email |
-| 🗄️ **قاعدة بيانات** | SQLite لحفظ النتائج |
-| 🔌 **نظام إضافات** | قابل للتوسيع بسهولة |
-| ⚡ **Rate Limiter** | تحكم في سرعة الطلبات |
-| 💾 **Cache** | تخزين مؤقت ذكي |
-| 🔒 **كشف الأسرار** | اكتشاف API Keys و Tokens |
-| 🤖 **CI/CD** | GitHub Actions للاختبار التلقائي |
-| 🧙 **الوضع التفاعلي** | معالج سهل للمبتدئين |
-| 🔍 **بحث متقدم** | بحث في جميع النتائج |
-| 📈 **رسوم بيانية** | Charts للإحصائيات |
-| ⚡ **WebSocket** | تحديثات فورية مباشرة |
+| ⚡ **HTTPX (Go Version)** | استخدام تلقائي لنسخة ProjectDiscovery الأسرع والأقوى |
 
 ---
 
-## 🧪 تحسينات العمق (Phase 5)
+## 🛡️ فلسفة الصدق والتحصين (Honest Recon)
 
-تمت إضافة تحسينات عملية لزيادة عمق الاكتشاف وجودة السطح الهجومي:
+تمت إعادة هيكلة الأداة لتكون "صادقة" معك، فهي لا تغرقك بنتائج وهمية:
 
-- **JS Intelligence أعمق**:
-  - استخراج مسارات ديناميكية من template literals.
-  - استخراج أنماط استدعاءات API (`fetch`, `axios`, `$.ajax`).
-  - استخراج hidden parameter hints من JavaScript.
-- **API Recon Enrichment**:
-  - توسيع probing لمسارات OpenAPI/GraphQL/gRPC/Swagger.
-  - إثراء مسارات الفحص تلقائيًا من نتائج `js-intel` و `api-spec`.
-- **Param Mining + Mutation Catalog**:
-  - تصنيف كل parameter حسب الفئة (identifier/url/file_path/token/...).
-  - توليد mutation candidates جاهزة لإعادة الاستخدام في replay/fuzzing.
-- **Role-aware Runtime Crawl**:
-  - دعم crawling متعدد ملفات auth profiles.
-  - تسجيل نتائج لكل profile عبر `runtime_crawl_profile`.
-- **Attack Path Correlation**:
-  - بناء مسارات هجوم مترابطة `entry_url -> sink_url`.
-  - إنتاج benchmark لقياس الفرق بين baseline surfaces والنتائج النهائية.
+- **Active Proof (GraphQL/API)**: لا يتم الإبلاغ عن GraphQL إلا بعد إرسال introspection query والتأكد من استجابة النظام.
+- **Cross-Token IDOR Validation**: يتم التحقق من ثغرات IDOR عبر مقارنة الوصول بين مستخدمين مختلفين (Token A vs Token B) لإثبات وجود خلل في الصلاحيات.
+- **Evidence-Based Discovery**: اكتشاف ملفات الرفع (Upload) يتطلب وجود Form أو Input فعلي في الـ HTML، وليس مجرد كود 200.
+- **Cloud Header Verification**: لا يتم تأكيد وجود S3 Bucket إلا بعد فحص الـ HTTP Headers الخاصة بمزود الخدمة.
 
-Artifacts الجديدة:
+---
 
-- `artifacts/js_intel.json`
-- `artifacts/param_mining.json` (يشمل mutation catalog)
-- `artifacts/correlation/attack_paths.json`
-- `artifacts/correlation/surface_benchmark.json`
+## 📁 هيكل النتائج
 
-Runtime flags مفيدة:
-
-- `RECON_JS_INTEL_DYNAMIC_ROUTES=1`
-- `RECON_JS_INTEL_HIDDEN_PARAMS=1`
-- `RECON_API_RECON_ENRICH_FROM_JS=1`
-- `RECON_API_RECON_MAX_ENRICHED_PATHS=40`
-- `RECON_PARAM_MINING_MUTATIONS=1`
-- `RECON_PARAM_MINING_MUTATIONS_PER_PARAM=8`
-- `RECON_RUNTIME_CRAWL_ROLE_AWARE=1`
-- `RECON_RUNTIME_CRAWL_MAX_AUTH_PROFILES=3`
-- `RECON_CORRELATION_ATTACK_PATH_LIMIT=30`
+```
+jobs/finished/example.com_20260319_143052_a1b2/
+├── metadata.json      # بيانات المهمة
+├── spec.json          # مواصفات الفحص
+├── results.jsonl      # النتائج (Sanitized - مسح البيانات الحساسة تلقائيًا)
+├── results.txt        # ملخص "صادق" (يركز على النتائج المؤكدة والـ High Score)
+├── results_bigger.txt # النتائج المهمة (Score >= 60)
+├── artifacts/         # الملفات المستخرجة
+│   ├── trace.json     # تتبع كامل لكل خطوة (Observability)
+│   ├── metrics.json   # إحصائيات الأداء
+│   └── ...
+└── logs/
+    └── pipeline.log   # سجل التنفيذ
+```
 
 ---
 

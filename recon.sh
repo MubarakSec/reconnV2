@@ -51,7 +51,7 @@ show_banner() {
     echo -e "${CYAN}"
     cat <<'BANNER'
   ============================================================
-                      ReconnV2 Interactive
+             ReconnV2 Interactive - HONEST EDITION
   ============================================================
 BANNER
     echo -e "${NC}"
@@ -460,6 +460,11 @@ run_scan_flow() {
 
     prompt_auth
 
+    # Inject performance/hardening variables
+    [ -n "${RECON_STAGE_TIMEOUT:-}" ] && AUTH_ENV+=("RECON_STAGE_TIMEOUT=$RECON_STAGE_TIMEOUT")
+    [ -n "${RECON_CB_THRESHOLD:-}" ] && AUTH_ENV+=("RECON_HOST_CIRCUIT_BREAKER_THRESHOLD=$RECON_CB_THRESHOLD")
+    [ -n "${RECON_PARALLEL_STAGES:-}" ] && AUTH_ENV+=("RECON_PARALLEL_STAGES=$RECON_PARALLEL_STAGES")
+
     local -a cmd=("$PYTHON_BIN" -m recon_cli scan)
 
     if [ -n "$TARGETS_FILE" ]; then
@@ -862,6 +867,48 @@ generate_report() {
     pause_screen
 }
 
+set_stage_timeout() {
+    echo ""
+    echo -ne "${CYAN}Stage timeout in seconds [3600]: ${NC}"
+    local timeout=""
+    read -r timeout
+    timeout="${timeout:-3600}"
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        print_err "Invalid number"
+        return
+    fi
+    export RECON_STAGE_TIMEOUT="$timeout"
+    print_ok "Stage timeout set to ${timeout}s"
+    pause_screen
+}
+
+set_cb_threshold() {
+    echo ""
+    echo -ne "${CYAN}Host Circuit Breaker Threshold [10]: ${NC}"
+    local threshold=""
+    read -r threshold
+    threshold="${threshold:-10}"
+    if ! [[ "$threshold" =~ ^[0-9]+$ ]]; then
+        print_err "Invalid number"
+        return
+    fi
+    export RECON_CB_THRESHOLD="$threshold"
+    print_ok "Circuit breaker threshold set to ${threshold}"
+    pause_screen
+}
+
+toggle_parallel() {
+    if [ "${RECON_PARALLEL:-ON}" = "ON" ]; then
+        export RECON_PARALLEL="OFF"
+        export RECON_PARALLEL_STAGES="0"
+    else
+        export RECON_PARALLEL="ON"
+        export RECON_PARALLEL_STAGES="1"
+    fi
+    print_ok "Parallel stages: $RECON_PARALLEL"
+    pause_screen
+}
+
 run_pdf_report() {
     echo ""
     echo -ne "${CYAN}Job ID: ${NC}"
@@ -1015,22 +1062,26 @@ show_main_menu() {
     echo -e "${WHITE}[15]${NC} Requeue job"
     echo -e "${WHITE}[16]${NC} Cancel running job"
     echo -e "${WHITE}[17]${NC} Verify job files"
+    echo -e "${WHITE}==================== Hardening & Perf =================${NC}"
+    echo -e "${WHITE}[18]${NC} Set Stage Timeout (Current: ${RECON_STAGE_TIMEOUT:-3600}s)"
+    echo -e "${WHITE}[19]${NC} Host Circuit Breaker (Threshold: ${RECON_CB_THRESHOLD:-10})"
+    echo -e "${WHITE}[20]${NC} Toggle Parallel Stages (${RECON_PARALLEL:-ON})"
     echo -e "${WHITE}==================== Output / Reports =================${NC}"
-    echo -e "${WHITE}[18]${NC} Export results"
-    echo -e "${WHITE}[19]${NC} Generate report"
-    echo -e "${WHITE}[20]${NC} Generate PDF report"
+    echo -e "${WHITE}[21]${NC} Export results"
+    echo -e "${WHITE}[22]${NC} Generate report"
+    echo -e "${WHITE}[23]${NC} Generate PDF report"
     echo -e "${WHITE}==================== Utilities ========================${NC}"
-    echo -e "${WHITE}[21]${NC} Doctor"
-    echo -e "${WHITE}[22]${NC} Prune finished jobs"
-    echo -e "${WHITE}[23]${NC} Wizard"
-    echo -e "${WHITE}[24]${NC} Interactive mode"
-    echo -e "${WHITE}[25]${NC} Quickstart guide"
-    echo -e "${WHITE}[26]${NC} Web dashboard"
-    echo -e "${WHITE}[27]${NC} Shell completions"
-    echo -e "${WHITE}[28]${NC} Trace summary"
-    echo -e "${WHITE}[29]${NC} Show schema (JSON)"
-    echo -e "${WHITE}[30]${NC} Cache stats"
-    echo -e "${WHITE}[31]${NC} Cache clear"
+    echo -e "${WHITE}[24]${NC} Doctor"
+    echo -e "${WHITE}[25]${NC} Prune finished jobs"
+    echo -e "${WHITE}[26]${NC} Wizard"
+    echo -e "${WHITE}[27]${NC} Interactive mode"
+    echo -e "${WHITE}[28]${NC} Quickstart guide"
+    echo -e "${WHITE}[29]${NC} Web dashboard"
+    echo -e "${WHITE}[30]${NC} Shell completions"
+    echo -e "${WHITE}[31]${NC} Trace summary"
+    echo -e "${WHITE}[32]${NC} Show schema (JSON)"
+    echo -e "${WHITE}[33]${NC} Cache stats"
+    echo -e "${WHITE}[34]${NC} Cache clear"
     echo -e "${WHITE}[0]${NC} Exit"
     echo ""
     echo -ne "${MAGENTA}Choose: ${NC}"
@@ -1068,20 +1119,23 @@ main() {
             15) requeue_job ;;
             16) cancel_job ;;
             17) verify_job ;;
-            18) export_results ;;
-            19) generate_report ;;
-            20) run_pdf_report ;;
-            21) run_doctor ;;
-            22) prune_jobs ;;
-            23) run_wizard ;;
-            24) run_interactive ;;
-            25) run_quickstart ;;
-            26) start_web_dashboard ;;
-            27) setup_completions ;;
-            28) show_trace ;;
-            29) show_schema ;;
-            30) cache_stats ;;
-            31) cache_clear ;;
+            18) set_stage_timeout ;;
+            19) set_cb_threshold ;;
+            20) toggle_parallel ;;
+            21) export_results ;;
+            22) generate_report ;;
+            23) run_pdf_report ;;
+            24) run_doctor ;;
+            25) prune_jobs ;;
+            26) run_wizard ;;
+            27) run_interactive ;;
+            28) run_quickstart ;;
+            29) start_web_dashboard ;;
+            30) setup_completions ;;
+            31) show_trace ;;
+            32) show_schema ;;
+            33) cache_stats ;;
+            34) cache_clear ;;
             0|q|Q)
                 echo ""
                 print_ok "Bye"
