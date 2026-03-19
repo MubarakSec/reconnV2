@@ -447,6 +447,14 @@ class AuthSessionManager:
             pass
 
 
+def load_telegram_config() -> Dict[str, str]:
+    """Load saved Telegram credentials from config file."""
+    from recon_cli import config
+    from recon_cli.utils import fs
+    config_path = config.CONFIG_DIR / "telegram.json"
+    return fs.read_json(config_path, default={})
+
+
 def build_auth_manager(
     runtime_config,
     *,

@@ -267,6 +267,13 @@ def send_pipeline_notification(
     token = getattr(runtime, "telegram_token", None)
     chat_id = getattr(runtime, "telegram_chat_id", None)
     timeout = getattr(runtime, "telegram_timeout", 5)
+    
+    if not token or not chat_id:
+        from recon_cli.utils.auth import load_telegram_config
+        saved = load_telegram_config()
+        token = token or saved.get("token")
+        chat_id = chat_id or saved.get("chat_id")
+
     if not token or not chat_id:
         return
 

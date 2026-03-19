@@ -18,14 +18,17 @@ def read_json(path: Path, default: Any | None = None) -> Any:
         return default
 
 
-def write_json(path: Path, payload: Any) -> None:
+def write_json(path: Path, payload: Any, redacted: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with tmp_path.open("w", encoding="utf-8") as handle:
         text = json.dumps(payload, indent=2, sort_keys=True)
-        redacted = redact(text) or ""
-        handle.write(redacted)
-        if not redacted.endswith("\n"):
+        if redacted:
+            output = redact(text) or ""
+        else:
+            output = text
+        handle.write(output)
+        if not output.endswith("\n"):
             handle.write("\n")
     tmp_path.replace(path)
 

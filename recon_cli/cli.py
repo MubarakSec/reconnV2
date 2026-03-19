@@ -2044,20 +2044,34 @@ def start_telegram_bot(
     ),
 ) -> None:
     """Start the interactive Telegram Bot listener."""
+    config_path = config.CONFIG_DIR / "telegram.json"
+    saved_config = fs.read_json(config_path, default={})
+    
     if not token:
-        typer.secho("🤖 Telegram Bot Token not found in environment.", fg=typer.colors.YELLOW)
-        token = typer.prompt("Please enter your Telegram Bot Token")
+        token = saved_config.get("token")
+        if not token:
+            typer.secho("🤖 Telegram Bot Token not found.", fg=typer.colors.YELLOW)
+            token = typer.prompt("Please enter your Telegram Bot Token")
+            saved_config["token"] = token
     
     if not chat_id:
-        typer.secho("🆔 Telegram Chat ID not found in environment.", fg=typer.colors.YELLOW)
-        typer.secho("Tip: If you don't know your ID, enter 'discover' below.", dim=True)
-        chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
+        chat_id = saved_config.get("chat_id")
+        if not chat_id:
+            typer.secho("🆔 Telegram Chat ID not found.", fg=typer.colors.YELLOW)
+            typer.secho("Tip: If you don't know your ID, enter 'discover' below.", dim=True)
+            chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
+            if chat_id != "discover":
+                saved_config["chat_id"] = chat_id
 
     if not token or not chat_id:
         rich_print(
             "[bold red]Error:[/bold red] Missing Telegram token or chat ID."
         )
         raise typer.Exit(code=1)
+
+    # Save if we updated anything
+    if saved_config.get("token") == token or saved_config.get("chat_id") == chat_id:
+        fs.write_json(config_path, saved_config, redacted=False)
 
     from recon_cli.utils.telegram_bot import TelegramBot
 
@@ -2069,9 +2083,8 @@ def start_telegram_bot(
         rich_print("Message your bot on Telegram now, and your Chat ID will be printed here.")
     else:
         rich_print(f"Locked to Chat IDs: {chat_id}")
-    rich_print("\n[dim]Tip: You can export these to your .bashrc or .env file to skip this prompt:[/dim]")
-    rich_print(f"[blue]export RECON_TELEGRAM_TOKEN=\"{token}\"[/blue]")
-    rich_print(f"[blue]export RECON_TELEGRAM_CHAT_ID=\"{chat_id}\"[/blue]")
+    
+    rich_print(f"\n[dim]Config saved to: {config_path}[/dim]")
 
     try:
         asyncio.run(bot.start())
