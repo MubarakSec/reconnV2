@@ -24,7 +24,12 @@ STAGE_HEALTH_SIGNALS = {
         "api_auth_challenge",
         "api_public_endpoint",
     ),
-    "oauth_discovery": ("oidc_config", "oauth_config", "oauth_authorize_endpoint", "oauth_token_endpoint"),
+    "oauth_discovery": (
+        "oidc_config",
+        "oauth_config",
+        "oauth_authorize_endpoint",
+        "oauth_token_endpoint",
+    ),
     "ws_grpc_discovery": ("ws_detected", "ws_candidate", "grpc_detected"),
     "upload_probe": ("upload_surface", "upload_dir_exposed"),
     "vhost_discovery": ("vhost_found",),
@@ -34,7 +39,12 @@ STAGE_HEALTH_SIGNALS = {
     "html_form_mining": ("form_discovered",),
     "cms_scan": ("cms_drupal", "cms_joomla", "cms_magento", "cms_module_discovered"),
     "exploit_validation": ("poc_validated", "poc_failed"),
-    "extended_validation": ("ssrf_confirmed", "xxe_confirmed", "open_redirect_confirmed", "lfi_confirmed"),
+    "extended_validation": (
+        "ssrf_confirmed",
+        "xxe_confirmed",
+        "open_redirect_confirmed",
+        "lfi_confirmed",
+    ),
 }
 
 
@@ -46,10 +56,8 @@ def generate_summary(context) -> None:
     spec = record.spec
     results_path = record.paths.results_jsonl
     trimmed_path = record.paths.trimmed_results_jsonl
-    summary_source = "full"
     summary_path = results_path
     if trimmed_path.exists() and trimmed_path.stat().st_size > 0:
-        summary_source = "trimmed"
         summary_path = trimmed_path
 
     counts = Counter()
@@ -124,7 +132,10 @@ def generate_summary(context) -> None:
                 if tag == "confirmed" or str(tag).endswith(":confirmed"):
                     return True
         source = entry.get("source")
-        if isinstance(source, str) and source in {"extended-validation", "exploit-validation"}:
+        if isinstance(source, str) and source in {
+            "extended-validation",
+            "exploit-validation",
+        }:
             return True
         return False
 
@@ -136,7 +147,11 @@ def generate_summary(context) -> None:
 
     def _ranking_key(entry: dict) -> tuple[int, int, int, int]:
         tags_raw = entry.get("tags", [])
-        tags = {str(tag).lower() for tag in tags_raw} if isinstance(tags_raw, list) else set()
+        tags = (
+            {str(tag).lower() for tag in tags_raw}
+            if isinstance(tags_raw, list)
+            else set()
+        )
         confirmed = 1 if _is_confirmed(entry) else 0
         non_repetitive = 0 if "auth:repetitive" in tags else 1
         score = int(entry.get("score", 0) or 0)
@@ -196,20 +211,24 @@ def generate_summary(context) -> None:
     top_findings.sort(key=_ranking_key, reverse=True)
 
     lines = []
-    lines.append("================================================================================")
+    lines.append(
+        "================================================================================"
+    )
     lines.append(f"  RECON SUMMARY: {spec.target}")
-    lines.append("================================================================================")
+    lines.append(
+        "================================================================================"
+    )
     lines.append(f"Job ID       : {metadata.job_id}")
     lines.append(f"Profile      : {spec.profile}")
     lines.append(f"Duration     : {metadata.started_at} -> {metadata.finished_at}")
-    
+
     started_dt = _parse_iso(metadata.started_at)
     finished_dt = _parse_iso(metadata.finished_at)
     if started_dt and finished_dt:
         wall_clock = (finished_dt - started_dt).total_seconds()
         if wall_clock >= 0:
             lines.append(f"Wall Clock   : {wall_clock:.1f}s")
-    
+
     confirmed_findings = [entry for entry in top_findings if _is_confirmed(entry)]
     if confirmed_findings:
         lines.append("")
@@ -222,11 +241,17 @@ def generate_summary(context) -> None:
             lines.append(f"[*] [{score:3}] ({priority:8}) {label}")
             if entry.get("url"):
                 lines.append(f"    URL: {entry.get('url')}")
-    
-    high_priority_candidates = [entry for entry in top_findings if not _is_confirmed(entry) and int(entry.get("score", 0)) >= 70]
+
+    high_priority_candidates = [
+        entry
+        for entry in top_findings
+        if not _is_confirmed(entry) and int(entry.get("score", 0)) >= 70
+    ]
     if high_priority_candidates:
         lines.append("")
-        lines.append(f"== HIGH PRIORITY CANDIDATES ({len(high_priority_candidates)}) ==")
+        lines.append(
+            f"== HIGH PRIORITY CANDIDATES ({len(high_priority_candidates)}) =="
+        )
         for entry in high_priority_candidates[:SUMMARY_TOP]:
             label = _format_finding_label(entry)
             score = entry.get("score", 0)
@@ -238,10 +263,12 @@ def generate_summary(context) -> None:
     for key in sorted(counts):
         if counts[key] > 0:
             lines.append(f"{key:18}: {counts[key]}")
-    
+
     if verified_count:
         verified_ratio = (verified_count / findings_total) if findings_total else 0.0
-        lines.append(f"Verified Ratio    : {verified_ratio:.2%} ({verified_count}/{findings_total})")
+        lines.append(
+            f"Verified Ratio    : {verified_ratio:.2%} ({verified_count}/{findings_total})"
+        )
     if status_counter:
         lines.append("")
         lines.append("== HTTP Status Codes ==")
@@ -257,24 +284,37 @@ def generate_summary(context) -> None:
     verified_ratio = (verified_count / findings_total) if findings_total else 0.0
     dupe_seen = 0
     dupe_count = 0
-    if hasattr(context, "results") and getattr(context.results, "stats", None) is not None:
+    if (
+        hasattr(context, "results")
+        and getattr(context.results, "stats", None) is not None
+    ):
         dupe_seen = int(context.results.stats.get("records_seen", 0))
         dupe_count = int(context.results.stats.get("records_duplicate", 0))
     duplicate_ratio = (dupe_count / dupe_seen) if dupe_seen else 0.0
     lines.append("")
     lines.append("== Quality ==")
-    lines.append(f"Noise ratio     : {noise_ratio:.2%} (noise {noise_count} / urls {total_urls})")
-    lines.append(f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})")
+    lines.append(
+        f"Noise ratio     : {noise_ratio:.2%} (noise {noise_count} / urls {total_urls})"
+    )
+    lines.append(
+        f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})"
+    )
     if dupe_seen:
-        lines.append(f"Duplicate ratio : {duplicate_ratio:.2%} (duplicates {dupe_count} / seen {dupe_seen})")
+        lines.append(
+            f"Duplicate ratio : {duplicate_ratio:.2%} (duplicates {dupe_count} / seen {dupe_seen})"
+        )
     else:
         lines.append("Duplicate ratio : n/a (no in-memory stats)")
-    missing_tools = metadata.stats.get("missing_tools") if hasattr(metadata, "stats") else None
+    missing_tools = (
+        metadata.stats.get("missing_tools") if hasattr(metadata, "stats") else None
+    )
     if missing_tools:
         lines.append("")
         lines.append("== Missing Tools ==")
         lines.append(", ".join(sorted(missing_tools)))
-    stage_progress = metadata.stats.get("stage_progress") if hasattr(metadata, "stats") else None
+    stage_progress = (
+        metadata.stats.get("stage_progress") if hasattr(metadata, "stats") else None
+    )
     if stage_progress:
         durations: List[tuple[str, float, str]] = []
         total_duration = 0.0
@@ -287,12 +327,20 @@ def generate_summary(context) -> None:
                 continue
             duration = (end - start).total_seconds()
             total_duration += duration
-            durations.append((str(entry.get("stage", "unknown")), duration, str(entry.get("status", "unknown"))))
+            durations.append(
+                (
+                    str(entry.get("stage", "unknown")),
+                    duration,
+                    str(entry.get("status", "unknown")),
+                )
+            )
         if durations:
             lines.append("")
             lines.append("== Stage Timings ==")
             lines.append(f"Total: {total_duration:.1f}s (stage progress window)")
-            for stage, duration, status in sorted(durations, key=lambda item: item[1], reverse=True)[:10]:
+            for stage, duration, status in sorted(
+                durations, key=lambda item: item[1], reverse=True
+            )[:10]:
                 lines.append(f"{stage:20} {duration:6.1f}s ({status})")
     if STAGE_HEALTH_SIGNALS:
         lines.append("")
@@ -303,167 +351,268 @@ def generate_summary(context) -> None:
             lines.append(f"{stage:20} {status} ({total_signals})")
     if noise_count:
         metadata.stats["noise_suppressed"] = noise_count
-    correlation_stats = getattr(metadata, 'stats', {}).get('correlation') if hasattr(metadata, 'stats') else None
+    correlation_stats = (
+        getattr(metadata, "stats", {}).get("correlation")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if correlation_stats:
-        lines.append('')
-        lines.append('== Correlation Summary ==')
+        lines.append("")
+        lines.append("== Correlation Summary ==")
         lines.append(f"Graph nodes: {correlation_stats.get('graph_nodes', 0)}")
         lines.append(f"Graph edges: {correlation_stats.get('graph_edges', 0)}")
-        if correlation_stats.get('ip_clusters'):
+        if correlation_stats.get("ip_clusters"):
             lines.append(f"IP clusters: {correlation_stats['ip_clusters']}")
-        if correlation_stats.get('asn_clusters'):
+        if correlation_stats.get("asn_clusters"):
             lines.append(f"ASN clusters: {correlation_stats['asn_clusters']}")
-        if correlation_stats.get('provider_clusters'):
+        if correlation_stats.get("provider_clusters"):
             lines.append(f"Provider clusters: {correlation_stats['provider_clusters']}")
-        if correlation_stats.get('api_hosts'):
+        if correlation_stats.get("api_hosts"):
             lines.append(f"Hosts exposing APIs: {correlation_stats['api_hosts']}")
-        top_tags = correlation_stats.get('top_tags') if isinstance(correlation_stats, dict) else None
+        top_tags = (
+            correlation_stats.get("top_tags")
+            if isinstance(correlation_stats, dict)
+            else None
+        )
         if top_tags:
-            summary_tags = ', '.join(f"{tag}:{count}" for tag, count in top_tags[:5])
+            summary_tags = ", ".join(f"{tag}:{count}" for tag, count in top_tags[:5])
             lines.append(f"Top tags: {summary_tags}")
-    secrets_stats = getattr(metadata, 'stats', {}).get('secrets') if hasattr(metadata, 'stats') else None
-    if secrets_stats and secrets_stats.get('findings'):
-        lines.append('')
-        lines.append('== Secrets Summary ==')
-        lines.append(f"Matches: {secrets_stats.get('findings', 0)} across {secrets_stats.get('urls', 0)} URLs")
-        patterns = secrets_stats.get('patterns', {})
+    secrets_stats = (
+        getattr(metadata, "stats", {}).get("secrets")
+        if hasattr(metadata, "stats")
+        else None
+    )
+    if secrets_stats and secrets_stats.get("findings"):
+        lines.append("")
+        lines.append("== Secrets Summary ==")
+        lines.append(
+            f"Matches: {secrets_stats.get('findings', 0)} across {secrets_stats.get('urls', 0)} URLs"
+        )
+        patterns = secrets_stats.get("patterns", {})
         if patterns:
-            top_patterns = ', '.join(f"{name}:{count}" for name, count in sorted(patterns.items(), key=lambda item: item[1], reverse=True)[:5])
+            top_patterns = ", ".join(
+                f"{name}:{count}"
+                for name, count in sorted(
+                    patterns.items(), key=lambda item: item[1], reverse=True
+                )[:5]
+            )
             lines.append(f"Top patterns: {top_patterns}")
-        guidance = secrets_stats.get('guidance')
+        guidance = secrets_stats.get("guidance")
         if guidance:
             lines.append(f"Guidance: {guidance}")
-    scanner_stats = getattr(metadata, 'stats', {}).get('scanners') if hasattr(metadata, 'stats') else None
+    scanner_stats = (
+        getattr(metadata, "stats", {}).get("scanners")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if scanner_stats:
-        lines.append('')
-        lines.append('== Scanner Summary ==')
+        lines.append("")
+        lines.append("== Scanner Summary ==")
         for name, data in scanner_stats.items():
             if isinstance(data, dict):
-                lines.append(f"{name}: targets={data.get('targets', 0)}, findings={data.get('findings', 0)}")
+                lines.append(
+                    f"{name}: targets={data.get('targets', 0)}, findings={data.get('findings', 0)}"
+                )
             else:
                 lines.append(f"{name}: {data}")
-    nmap_stats = getattr(metadata, 'stats', {}).get('nmap') if hasattr(metadata, 'stats') else None
+    nmap_stats = (
+        getattr(metadata, "stats", {}).get("nmap")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if nmap_stats:
-        lines.append('')
-        lines.append('== Nmap Summary ==')
+        lines.append("")
+        lines.append("== Nmap Summary ==")
         lines.append(f"Hosts scanned: {nmap_stats.get('hosts', 0)}")
         lines.append(f"Services: {nmap_stats.get('services', 0)}")
-        if nmap_stats.get('udp_services'):
+        if nmap_stats.get("udp_services"):
             lines.append(f"UDP services: {nmap_stats.get('udp_services', 0)}")
         lines.append(f"Findings: {nmap_stats.get('findings', 0)}")
-    auth_stats = getattr(metadata, 'stats', {}).get('auth_discovery') if hasattr(metadata, 'stats') else None
+    auth_stats = (
+        getattr(metadata, "stats", {}).get("auth_discovery")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if auth_stats:
-        lines.append('')
-        lines.append('== Auth Discovery ==')
+        lines.append("")
+        lines.append("== Auth Discovery ==")
         lines.append(f"Forms discovered: {auth_stats.get('forms', 0)}")
-    auth_session = getattr(metadata, 'stats', {}).get('auth') if hasattr(metadata, 'stats') else None
+    auth_session = (
+        getattr(metadata, "stats", {}).get("auth")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if auth_session:
-        lines.append('')
-        lines.append('== Auth Session ==')
+        lines.append("")
+        lines.append("== Auth Session ==")
         lines.append(f"Enabled: {auth_session.get('enabled', False)}")
         lines.append(f"Profile: {auth_session.get('profile', 'default')}")
-        if auth_session.get('login_success') or auth_session.get('login_failed'):
+        if auth_session.get("login_success") or auth_session.get("login_failed"):
             lines.append(f"Login success: {auth_session.get('login_success', 0)}")
             lines.append(f"Login failed: {auth_session.get('login_failed', 0)}")
-    surface_stats = getattr(metadata, 'stats', {}).get('auth_surface') if hasattr(metadata, 'stats') else None
+    surface_stats = (
+        getattr(metadata, "stats", {}).get("auth_surface")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if surface_stats:
-        lines.append('')
-        lines.append('== Auth Surfaces ==')
+        lines.append("")
+        lines.append("== Auth Surfaces ==")
         lines.append(f"Login: {surface_stats.get('login', 0)}")
         lines.append(f"Password reset: {surface_stats.get('password_reset', 0)}")
         lines.append(f"Register: {surface_stats.get('register', 0)}")
-    js_stats = getattr(metadata, 'stats', {}).get('js_intel') if hasattr(metadata, 'stats') else None
+    js_stats = (
+        getattr(metadata, "stats", {}).get("js_intel")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if js_stats:
-        lines.append('')
-        lines.append('== JS Intelligence ==')
+        lines.append("")
+        lines.append("== JS Intelligence ==")
         lines.append(f"JS files: {js_stats.get('files', 0)}")
         lines.append(f"Endpoints: {js_stats.get('endpoints', 0)}")
-    api_stats = getattr(metadata, 'stats', {}).get('api_recon') if hasattr(metadata, 'stats') else None
+    api_stats = (
+        getattr(metadata, "stats", {}).get("api_recon")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if api_stats:
-        lines.append('')
-        lines.append('== API Recon ==')
+        lines.append("")
+        lines.append("== API Recon ==")
         lines.append(f"Specs: {api_stats.get('specs', 0)}")
         lines.append(f"URLs added: {api_stats.get('urls_added', 0)}")
-    param_stats = getattr(metadata, 'stats', {}).get('param_mining') if hasattr(metadata, 'stats') else None
+    param_stats = (
+        getattr(metadata, "stats", {}).get("param_mining")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if param_stats:
-        lines.append('')
-        lines.append('== Parameter Mining ==')
+        lines.append("")
+        lines.append("== Parameter Mining ==")
         lines.append(f"Parameters: {param_stats.get('params', 0)}")
         lines.append(f"URLs analyzed: {param_stats.get('urls', 0)}")
-    waf_stats = getattr(metadata, 'stats', {}).get('waf_probe') if hasattr(metadata, 'stats') else None
+    waf_stats = (
+        getattr(metadata, "stats", {}).get("waf_probe")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if waf_stats:
-        lines.append('')
-        lines.append('== WAF Probe ==')
+        lines.append("")
+        lines.append("== WAF Probe ==")
         lines.append(f"Findings: {waf_stats.get('findings', 0)}")
-    takeover_stats = getattr(metadata, 'stats', {}).get('takeover') if hasattr(metadata, 'stats') else None
+    takeover_stats = (
+        getattr(metadata, "stats", {}).get("takeover")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if takeover_stats:
-        lines.append('')
-        lines.append('== Takeover Checks ==')
+        lines.append("")
+        lines.append("== Takeover Checks ==")
         lines.append(f"Hosts checked: {takeover_stats.get('checked', 0)}")
         lines.append(f"Findings: {takeover_stats.get('findings', 0)}")
-    vuln_stats = getattr(metadata, 'stats', {}).get('vuln_scan') if hasattr(metadata, 'stats') else None
+    vuln_stats = (
+        getattr(metadata, "stats", {}).get("vuln_scan")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if vuln_stats:
-        lines.append('')
-        lines.append('== Vuln Scanners ==')
+        lines.append("")
+        lines.append("== Vuln Scanners ==")
         lines.append(f"Findings: {vuln_stats.get('findings', 0)}")
-    verify_stats = getattr(metadata, 'stats', {}).get('verification') if hasattr(metadata, 'stats') else None
+    verify_stats = (
+        getattr(metadata, "stats", {}).get("verification")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if verify_stats:
-        lines.append('')
-        lines.append('== Verification ==')
+        lines.append("")
+        lines.append("== Verification ==")
         lines.append(
             f"Attempted: {verify_stats.get('attempted', 0)} | "
             f"Verified: {verify_stats.get('verified', 0)} | "
             f"Failed: {verify_stats.get('failed', 0)} | "
             f"Skipped: {verify_stats.get('skipped', 0)}"
         )
-        status_codes = verify_stats.get('status_codes')
+        status_codes = verify_stats.get("status_codes")
         if isinstance(status_codes, dict) and status_codes:
-            status_summary = ', '.join(f"{code}:{count}" for code, count in sorted(status_codes.items()))
+            status_summary = ", ".join(
+                f"{code}:{count}" for code, count in sorted(status_codes.items())
+            )
             lines.append(f"Status codes: {status_summary}")
-        if verify_stats.get('artifact'):
+        if verify_stats.get("artifact"):
             lines.append(f"Artifact: {verify_stats.get('artifact')}")
-    idor_stats = getattr(metadata, 'stats', {}).get('idor') if hasattr(metadata, 'stats') else None
-    if idor_stats and idor_stats.get('suspects'):
-        lines.append('')
-        lines.append('== IDOR Suspects ==')
+    idor_stats = (
+        getattr(metadata, "stats", {}).get("idor")
+        if hasattr(metadata, "stats")
+        else None
+    )
+    if idor_stats and idor_stats.get("suspects"):
+        lines.append("")
+        lines.append("== IDOR Suspects ==")
         lines.append(f"Suspects: {idor_stats.get('suspects', 0)}")
-    shots_stats = getattr(metadata, 'stats', {}).get('screenshots') if hasattr(metadata, 'stats') else None
+    shots_stats = (
+        getattr(metadata, "stats", {}).get("screenshots")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if shots_stats:
-        lines.append('')
-        lines.append('== Screenshots ==')
+        lines.append("")
+        lines.append("== Screenshots ==")
         lines.append(f"Count: {shots_stats.get('count', 0)}")
-        if shots_stats.get('manifest'):
+        if shots_stats.get("manifest"):
             lines.append(f"Manifest: {shots_stats.get('manifest')}")
-    learning_stats = getattr(metadata, 'stats', {}).get('learning') if hasattr(metadata, 'stats') else None
-    if learning_stats and learning_stats.get('predictions'):
-        lines.append('')
-        lines.append('== Learning Predictions ==')
+    learning_stats = (
+        getattr(metadata, "stats", {}).get("learning")
+        if hasattr(metadata, "stats")
+        else None
+    )
+    if learning_stats and learning_stats.get("predictions"):
+        lines.append("")
+        lines.append("== Learning Predictions ==")
         lines.append(f"Model trained: {learning_stats.get('trained', False)}")
-        for host, prob in learning_stats.get('top_hosts', []):
+        for host, prob in learning_stats.get("top_hosts", []):
             lines.append(f"{host}: {prob:.2f}")
     if top_urls:
         lines.append("")
-        lines.append(f"== RELEVANT URLS (score >= 75, top {min(len(top_urls), SUMMARY_TOP)}) ==")
+        lines.append(
+            f"== RELEVANT URLS (score >= 75, top {min(len(top_urls), SUMMARY_TOP)}) =="
+        )
         for entry in top_urls[:SUMMARY_TOP]:
             label = _format_url_label(entry)
             score = entry.get("score", 0)
             priority = (entry.get("priority") or "med").upper()
             tags = ",".join(entry.get("tags", []))
             lines.append(f"[-] [{score:3}] ({priority:8}) {label} {tags}")
-    
+
     next_actions: list[str] = []
-    secrets_stats = getattr(metadata, 'stats', {}).get('secrets') if hasattr(metadata, 'stats') else None
-    if secrets_stats and secrets_stats.get('findings'):
-        next_actions.append("Rotate/revoke exposed credentials and add to secrets manager.")
-    auth_stats = getattr(metadata, 'stats', {}).get('auth_matrix') if hasattr(metadata, 'stats') else None
+    secrets_stats = (
+        getattr(metadata, "stats", {}).get("secrets")
+        if hasattr(metadata, "stats")
+        else None
+    )
+    if secrets_stats and secrets_stats.get("findings"):
+        next_actions.append(
+            "Rotate/revoke exposed credentials and add to secrets manager."
+        )
+    auth_stats = (
+        getattr(metadata, "stats", {}).get("auth_matrix")
+        if hasattr(metadata, "stats")
+        else None
+    )
     if auth_stats and auth_stats.get("issues"):
-        next_actions.append("Review auth-matrix issues; ensure least-privilege tokens differ in content.")
-    if getattr(metadata, 'stats', {}).get('idor', {}).get('suspects'):
+        next_actions.append(
+            "Review auth-matrix issues; ensure least-privilege tokens differ in content."
+        )
+    if getattr(metadata, "stats", {}).get("idor", {}).get("suspects"):
         next_actions.append("Validate IDOR suspects and add authorization checks.")
     if missing_tools:
         next_actions.append("Install missing external tools for fuller coverage.")
-    if not next_actions and (priority_counter.get("high", 0) > 0 or priority_counter.get("critical", 0) > 0):
-        next_actions.append("Investigate high/critical items first; rerun with full profile if needed.")
+    if not next_actions and (
+        priority_counter.get("high", 0) > 0 or priority_counter.get("critical", 0) > 0
+    ):
+        next_actions.append(
+            "Investigate high/critical items first; rerun with full profile if needed."
+        )
     if next_actions:
         lines.append("")
         lines.append("== Next Actions ==")
@@ -476,7 +625,13 @@ def generate_summary(context) -> None:
         if entry.get("finding_type"):
             return True
         etype = entry.get("type")
-        return isinstance(etype, str) and etype in {"finding", "idor_suspect", "idor_candidate", "vulnerability", "vuln"}
+        return isinstance(etype, str) and etype in {
+            "finding",
+            "idor_suspect",
+            "idor_candidate",
+            "vulnerability",
+            "vuln",
+        }
 
     bigger_path = record.paths.root / "results_bigger.txt"
     big_lines: List[str] = []
@@ -501,10 +656,16 @@ def generate_summary(context) -> None:
         score = entry.get("score", 0)
         priority = entry.get("priority", "unknown")
         tags = ",".join(entry.get("tags", []))
-        url_value = entry.get("url") or entry.get("details", {}).get("url") if isinstance(entry.get("details"), dict) else ""
+        url_value = (
+            entry.get("url") or entry.get("details", {}).get("url")
+            if isinstance(entry.get("details"), dict)
+            else ""
+        )
         status_label = "CONFIRMED" if confirmed else "CANDIDATE"
         if url_value:
-            big_lines.append(f"[{score:4}] ({priority}) {status_label} {label} | {url_value} {tags}")
+            big_lines.append(
+                f"[{score:4}] ({priority}) {status_label} {label} | {url_value} {tags}"
+            )
         else:
             big_lines.append(f"[{score:4}] ({priority}) {status_label} {label} {tags}")
     bigger_path.write_text("\n".join(big_lines) + "\n", encoding="utf-8")
@@ -530,15 +691,23 @@ def generate_summary(context) -> None:
         score = entry.get("score", 0)
         priority = entry.get("priority", "unknown")
         tags = ",".join(entry.get("tags", []))
-        url_value = entry.get("url") or entry.get("details", {}).get("url") if isinstance(entry.get("details"), dict) else ""
+        url_value = (
+            entry.get("url") or entry.get("details", {}).get("url")
+            if isinstance(entry.get("details"), dict)
+            else ""
+        )
         if url_value:
-            confirmed_lines.append(f"[{score:4}] ({priority}) {label} | {url_value} {tags}")
+            confirmed_lines.append(
+                f"[{score:4}] ({priority}) {label} | {url_value} {tags}"
+            )
         else:
             confirmed_lines.append(f"[{score:4}] ({priority}) {label} {tags}")
     confirmed_path.write_text("\n".join(confirmed_lines) + "\n", encoding="utf-8")
 
     metadata.stats.update({f"type_{key}": value for key, value in counts.items()})
-    metadata.stats.update({f"status_{code}": value for code, value in status_counter.items()})
+    metadata.stats.update(
+        {f"status_{code}": value for code, value in status_counter.items()}
+    )
     metadata.stats["noise_suppressed"] = noise_count
     metadata.stats["confirmed_findings"] = len(confirmed_entries)
     metadata.stats["quality"] = {

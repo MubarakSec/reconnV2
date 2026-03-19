@@ -17,11 +17,11 @@ def _encode_idna(value: str) -> str:
 
 
 def normalize_hostname(value: str) -> str:
-    value = value.strip().rstrip('.')
+    value = value.strip().rstrip(".")
     if not value:
         raise ValueError("Hostname cannot be empty")
     ascii_value = _encode_idna(value)
-    labels = ascii_value.split('.')
+    labels = ascii_value.split(".")
     if len(ascii_value) > 253:
         raise ValueError("Hostname exceeds 253 characters")
     for label in labels:
@@ -47,7 +47,9 @@ def _coerce_hostname(value: str) -> str:
         parsed = urlparse(candidate)
     else:
         # Treat host:port or host/path as URL-like input.
-        if any(ch in candidate for ch in ("/", "?", "#")) or (":" in candidate and not is_ip(candidate)):
+        if any(ch in candidate for ch in ("/", "?", "#")) or (
+            ":" in candidate and not is_ip(candidate)
+        ):
             parsed = urlparse(f"http://{candidate}")
     if parsed and parsed.hostname:
         return parsed.hostname

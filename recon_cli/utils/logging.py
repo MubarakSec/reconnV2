@@ -28,7 +28,9 @@ _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
 _DATEFMT = "%Y-%m-%dT%H:%M:%S"
 
 
-def build_file_logger(name: str, logfile: Path, level: int = logging.INFO, log_format: str = "text") -> Logger:
+def build_file_logger(
+    name: str, logfile: Path, level: int = logging.INFO, log_format: str = "text"
+) -> Logger:
     logfile.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(name)
     logger.setLevel(level)

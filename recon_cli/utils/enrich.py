@@ -221,7 +221,7 @@ def classify_provider(org: Optional[str]) -> tuple[Optional[str], bool, bool]:
 def hostname_tags(hostname: str) -> set[str]:
     tags: set[str] = set()
     lowered = hostname.lower()
-    parts = lowered.replace("_", "-").split('.')
+    parts = lowered.replace("_", "-").split(".")
     for token in parts:
         for keyword, tag in ENV_KEYWORDS.items():
             if keyword in token:
@@ -385,14 +385,18 @@ def get_soft_404_fingerprint(body: str, title: str = "") -> dict:
     }
 
 
-def looks_like_soft_404(status_code: Optional[int], body_snippet: str, title: str = "") -> bool:
+def looks_like_soft_404(
+    status_code: Optional[int], body_snippet: str, title: str = ""
+) -> bool:
     if status_code not in {200, 301, 302}:
         return False
     combined = f"{title} {body_snippet}".lower()
     return any(pattern in combined for pattern in SOFT_404_PATTERNS)
 
 
-def detect_noise(url: str, status_code: Optional[int], source: str, length: Optional[int]) -> bool:
+def detect_noise(
+    url: str, status_code: Optional[int], source: str, length: Optional[int]
+) -> bool:
     parsed = urlparse(url)
     path = (parsed.path or "").lower()
     for ext in NOISE_EXTENSIONS:
@@ -427,4 +431,3 @@ def classify_priority(score: int) -> str:
     if score <= 0:
         return "noise"
     return "low"
-

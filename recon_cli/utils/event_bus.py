@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from typing import Any, Dict, List, Set, Optional, Callable
+from typing import Any, Dict, List, Optional
 
 
 class PipelineEventBus:
@@ -23,11 +23,11 @@ class PipelineEventBus:
         """Publish an event to all interested subscribers."""
         self._event_count += 1
         payload = {"type": event_type, "data": data, "index": self._event_count}
-        
+
         # Publish to specific type subscribers
         for queue in self._subscribers.get(event_type, []):
             await queue.put(payload)
-            
+
         # Publish to 'all' subscribers
         for queue in self._all_subscribers:
             await queue.put(payload)
@@ -52,7 +52,7 @@ class PipelineEventBus:
             for etypes in self._subscribers.values():
                 if queue in etypes:
                     etypes.remove(queue)
-            
+
             # Remove from global list
             if queue in self._all_subscribers:
                 self._all_subscribers.remove(queue)

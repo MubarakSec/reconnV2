@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import aiohttp
-from recon_cli import config
 from recon_cli.jobs.manager import JobManager
 from recon_cli.jobs.models import JobSpec
 from recon_cli.jobs import summary as jobs_summary
 
 logger = logging.getLogger(__name__)
+
 
 class TelegramBot:
     """
@@ -29,18 +26,18 @@ class TelegramBot:
         self.offset = 0
         self.running = False
 
-    async def send_message(self, chat_id: str, text: str, parse_mode: str = "Markdown") -> None:
+    async def send_message(
+        self, chat_id: str, text: str, parse_mode: str = "Markdown"
+    ) -> None:
         url = f"{self.base_url}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": parse_mode
-        }
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as resp:
                     if resp.status != 200:
-                        logger.error("Failed to send telegram message: %s", await resp.text())
+                        logger.error(
+                            "Failed to send telegram message: %s", await resp.text()
+                        )
         except Exception as e:
             logger.error("Telegram send error: %s", e)
 
@@ -62,7 +59,9 @@ class TelegramBot:
     async def handle_command(self, chat_id: str, text: str) -> None:
         if str(chat_id) != self.allowed_chat_id:
             logger.warning("Unauthorized access attempt from chat_id: %s", chat_id)
-            await self.send_message(chat_id, "⚠️ Unauthorized. This bot is locked to a specific chat ID.")
+            await self.send_message(
+                chat_id, "⚠️ Unauthorized. This bot is locked to a specific chat ID."
+            )
             return
 
         parts = text.split()
@@ -73,14 +72,15 @@ class TelegramBot:
         args = parts[1:]
 
         if command == "/start":
-            await self.send_message(chat_id, 
+            await self.send_message(
+                chat_id,
                 "🚀 *ReconnV2 Honest Bot Ready*\n\n"
                 "Available commands:\n"
                 "/status - Global job status\n"
                 "/list - List last 5 jobs\n"
                 "/scan <target> [profile] - Start a new scan\n"
                 "/report <job_id> - Get job summary\n"
-                "/cancel <job_id> - Stop a running job"
+                "/cancel <job_id> - Stop a running job",
             )
         elif command == "/status":
             await self._cmd_status(chat_id)
@@ -93,7 +93,9 @@ class TelegramBot:
         elif command == "/cancel":
             await self._cmd_cancel(chat_id, args)
         else:
-            await self.send_message(chat_id, "❓ Unknown command. Use /start to see available commands.")
+            await self.send_message(
+                chat_id, "❓ Unknown command. Use /start to see available commands."
+            )
 
     async def _cmd_status(self, chat_id: str) -> None:
         counts = self.manager.get_job_counts()
@@ -109,10 +111,18 @@ class TelegramBot:
         if not jobs:
             await self.send_message(chat_id, "No jobs found.")
             return
-        
+
         text = "*📝 Recent Jobs*\n\n"
         for job in jobs:
-            status_emoji = "✅" if job.metadata.status == "finished" else "🔄" if job.metadata.status == "running" else "❌" if job.metadata.status == "failed" else "🕒"
+            status_emoji = (
+                "✅"
+                if job.metadata.status == "finished"
+                else "🔄"
+                if job.metadata.status == "running"
+                else "❌"
+                if job.metadata.status == "failed"
+                else "🕒"
+            )
             text += f"{status_emoji} `{job.metadata.job_id}`\n   Target: {job.spec.target} ({job.spec.profile})\n\n"
         await self.send_message(chat_id, text)
 
@@ -120,10 +130,10 @@ class TelegramBot:
         if not args:
             await self.send_message(chat_id, "Usage: `/scan <target> [profile]`")
             return
-        
+
         target = args[0]
         profile = args[1] if len(args) > 1 else "passive"
-        
+
         try:
             # Create a basic spec
             spec = JobSpec(
@@ -131,7 +141,9 @@ class TelegramBot:
                 profile=profile,
             )
             record = self.manager.create_job(spec)
-            await self.send_message(chat_id, f"✅ Scan queued!\nJob ID: `{record.metadata.job_id}`")
+            await self.send_message(
+                chat_id, f"✅ Scan queued!\nJob ID: `{record.metadata.job_id}`"
+            )
         except Exception as e:
             await self.send_message(chat_id, f"❌ Error launching scan: {str(e)}")
 
@@ -139,26 +151,26 @@ class TelegramBot:
         if not args:
             await self.send_message(chat_id, "Usage: `/report <job_id>`")
             return
-        
+
         job_id = args[0]
         record = self.manager.load_job(job_id)
         if not record:
             await self.send_message(chat_id, f"❌ Job `{job_id}` not found.")
             return
-        
+
         try:
             summary_data = jobs_summary.generate_summary_data(record)
             counts = summary_data.get("counts", {})
-            
+
             text = f"*📋 Report: {record.spec.target}*\n"
             text += f"Status: {record.metadata.status}\n"
             text += f"Profile: {record.spec.profile}\n\n"
-            
+
             text += "*Stats:*\n"
             for k, v in counts.items():
                 if v > 0:
                     text += f" - {k}: {v}\n"
-            
+
             await self.send_message(chat_id, text)
         except Exception as e:
             await self.send_message(chat_id, f"❌ Error generating report: {str(e)}")
@@ -167,14 +179,14 @@ class TelegramBot:
         if not args:
             await self.send_message(chat_id, "Usage: `/cancel <job_id>`")
             return
-        
+
         job_id = args[0]
         # Simplistic cancel: write stop.request
         record = self.manager.load_job(job_id)
         if not record:
             await self.send_message(chat_id, f"❌ Job `{job_id}` not found.")
             return
-        
+
         stop_file = record.paths.root / "stop.request"
         stop_file.touch()
         await self.send_message(chat_id, f"🛑 Stop request sent for `{job_id}`.")
@@ -182,7 +194,7 @@ class TelegramBot:
     async def start(self) -> None:
         self.running = True
         logger.info("Telegram Bot started for chat_id: %s", self.allowed_chat_id)
-        
+
         while self.running:
             updates = await self.get_updates()
             for update in updates:
@@ -190,12 +202,12 @@ class TelegramBot:
                 message = update.get("message")
                 if not message:
                     continue
-                
+
                 chat = message.get("chat")
                 text = message.get("text")
                 if chat and text:
                     await self.handle_command(chat["id"], text)
-            
+
             await asyncio.sleep(1)
 
     def stop(self) -> None:

@@ -6,12 +6,20 @@ from collections import Counter
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, Optional, TYPE_CHECKING
 from urllib.parse import parse_qsl, urlparse
 
+if TYPE_CHECKING:
+    from recon_cli.utils.event_bus import PipelineEventBus
+
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import JsonlWriter, read_jsonl, iter_jsonl
-from recon_cli.utils.reporting import build_finding_fingerprint, confidence_to_score, is_finding, resolve_confidence_label
+from recon_cli.utils.jsonl import JsonlWriter, iter_jsonl
+from recon_cli.utils.reporting import (
+    build_finding_fingerprint,
+    confidence_to_score,
+    is_finding,
+    resolve_confidence_label,
+)
 from recon_cli.jobs.manager import JobManager
 
 
@@ -24,7 +32,9 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         except ValueError:
             return None, ()
         path = parsed.path or ""
-        params = tuple(sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)))
+        params = tuple(
+            sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True))
+        )
         return path, params
 
     def _parameter_hint(entry: Dict[str, object]) -> object:
@@ -54,7 +64,12 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
     if ptype == "parameter":
         return (ptype, payload.get("name"), payload.get("source"))
     if ptype == "param_mutation":
-        return (ptype, payload.get("name"), payload.get("category"), payload.get("source"))
+        return (
+            ptype,
+            payload.get("name"),
+            payload.get("category"),
+            payload.get("source"),
+        )
     if ptype == "form":
         return (ptype, payload.get("url"), payload.get("action"), payload.get("method"))
     if ptype == "auth_form":
@@ -70,7 +85,9 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (
             ptype,
             payload.get("finding_type"),
-            payload.get("template_id") or payload.get("template") or payload.get("templateID"),
+            payload.get("template_id")
+            or payload.get("template")
+            or payload.get("templateID"),
             url_value,
             path_fp,
             query_param_fp,
@@ -79,7 +96,12 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
             _parameter_hint(payload),
         )
     if ptype == "cms":
-        return (ptype, payload.get("hostname"), payload.get("cms"), payload.get("source"))
+        return (
+            ptype,
+            payload.get("hostname"),
+            payload.get("cms"),
+            payload.get("source"),
+        )
     if ptype == "learning_prediction":
         return (ptype, payload.get("hostname"))
     if ptype == "screenshot":
@@ -124,11 +146,15 @@ class ResultsTracker:
     _lock: threading.RLock = field(init=False, default_factory=threading.RLock)
     _seen: set[tuple] = field(default_factory=set)
     stats: Counter = field(default_factory=Counter)
-    
+
     # Permanently buffer critical types (findings, signals)
-    _critical_records: Dict[tuple, Dict[str, object]] = field(init=False, default_factory=dict)
+    _critical_records: Dict[tuple, Dict[str, object]] = field(
+        init=False, default_factory=dict
+    )
     # LRU buffer for other types (urls, etc) to allow merging without loading everything
-    _lru_records: Dict[tuple, Dict[str, object]] = field(init=False, default_factory=dict)
+    _lru_records: Dict[tuple, Dict[str, object]] = field(
+        init=False, default_factory=dict
+    )
     _order: list[tuple] = field(init=False, default_factory=list)
     MAX_LRU_SIZE = 10000
 
@@ -154,11 +180,11 @@ class ResultsTracker:
                 if key in self._seen:
                     continue
                 self._seen.add(key)
-                
+
                 ptype = payload.get("type")
                 # All unique records must be in _order to be written to file
                 self._order.append(key)
-                
+
                 # Permanently buffer critical types
                 if ptype in {"finding", "signal", "attack_path", "meta"}:
                     self._critical_records[key] = payload
@@ -168,7 +194,7 @@ class ResultsTracker:
                     if len(self._lru_records) > self.MAX_LRU_SIZE:
                         oldest_lru_key = next(iter(self._lru_records))
                         self._lru_records.pop(oldest_lru_key)
-                
+
                 self.stats["records_seen"] += 1
                 self.stats["records_unique"] += 1
                 if ptype:
@@ -178,15 +204,17 @@ class ResultsTracker:
         with self._lock:
             if self.allow and not self.allow(payload):
                 return False
-            
+
             # Redact sensitive data from proof and details
             from recon_cli.utils.sanitizer import redact_json_value
+
             payload = redact_json_value(payload)
-            
+
             # Pydantic validation (optional, can be disabled for performance on large URL lists)
             ptype = str(payload.get("type") or "unknown")
             if ptype in {"finding", "signal", "attack_path"}:
                 from recon_cli.db.schemas import validate_result
+
                 try:
                     payload = validate_result(payload)
                 except Exception:
@@ -197,21 +225,25 @@ class ResultsTracker:
                 payload = self._normalize_payload(payload)
             key = dedupe_key(payload)
             self.stats["records_seen"] += 1
-            
+
             if key in self._seen:
                 self.stats["records_duplicate"] += 1
                 if ptype:
                     self.stats[f"duplicate:{ptype}"] += 1
-                
+
                 # Check critical buffer first, then LRU buffer
-                buffer = self._critical_records if key in self._critical_records else self._lru_records
+                buffer = (
+                    self._critical_records
+                    if key in self._critical_records
+                    else self._lru_records
+                )
                 if key in buffer:
                     merged = self._merge_entries(buffer.get(key, {}), payload)
                     if merged != buffer.get(key):
                         buffer[key] = merged
                         self._rewrite_all()
                 return True
-            
+
             self._seen.add(key)
             self.stats["records_unique"] += 1
             payload.setdefault("timestamp", time_utils.iso_now())
@@ -233,8 +265,7 @@ class ResultsTracker:
                         # Use call_soon_threadsafe if we are in a thread, or just create task if in loop
                         # To keep it simple and robust, we'll try to publish
                         asyncio.run_coroutine_threadsafe(
-                            self.event_bus.publish(ptype, payload), 
-                            loop
+                            self.event_bus.publish(ptype, payload), loop
                         )
                 except RuntimeError:
                     # No loop running, skip publishing
@@ -244,7 +275,7 @@ class ResultsTracker:
 
             with self._writer as writer:
                 writer.write(payload)
-            
+
             if ptype:
                 self.stats[f"type:{ptype}"] += 1
             return True
@@ -272,15 +303,19 @@ class ResultsTracker:
                 payload = self._normalize_payload(payload)
                 key = dedupe_key(payload)
                 ptype = payload.get("type")
-                
+
                 if key in self._seen:
-                    buffer = self._critical_records if key in self._critical_records else self._lru_records
+                    buffer = (
+                        self._critical_records
+                        if key in self._critical_records
+                        else self._lru_records
+                    )
                     if key in buffer:
                         merged = self._merge_entries(buffer.get(key, {}), payload)
                         if merged != buffer.get(key):
                             buffer[key] = merged
                     continue
-                
+
                 self._seen.add(key)
                 self._order.append(key)
                 if ptype in {"finding", "signal", "attack_path", "meta"}:
@@ -290,7 +325,7 @@ class ResultsTracker:
                     if len(self._lru_records) > self.MAX_LRU_SIZE:
                         oldest_lru_key = next(iter(self._lru_records))
                         self._lru_records.pop(oldest_lru_key)
-                
+
                 self.stats["records_seen"] += 1
                 self.stats["records_unique"] += 1
                 if ptype:
@@ -300,7 +335,11 @@ class ResultsTracker:
 
             if not has_schema:
                 schema_key = ("meta", "1.0.0")
-                payload = {"type": "meta", "schema_version": "1.0.0", "timestamp": time_utils.iso_now()}
+                payload = {
+                    "type": "meta",
+                    "schema_version": "1.0.0",
+                    "timestamp": time_utils.iso_now(),
+                }
                 self._seen.add(schema_key)
                 self._critical_records[schema_key] = payload
                 self._order.insert(0, schema_key)
@@ -315,7 +354,11 @@ class ResultsTracker:
         schema_key = ("meta", "1.0.0")
         if schema_key in self._seen:
             return
-        payload = {"type": "meta", "schema_version": "1.0.0", "timestamp": time_utils.iso_now()}
+        payload = {
+            "type": "meta",
+            "schema_version": "1.0.0",
+            "timestamp": time_utils.iso_now(),
+        }
         self._seen.add(schema_key)
         self._critical_records[schema_key] = payload
         self._order.insert(0, schema_key)
@@ -353,7 +396,9 @@ class ResultsTracker:
             normalized["finding_fingerprint"] = build_finding_fingerprint(normalized)
         return normalized
 
-    def _merge_entries(self, existing: Dict[str, object], new: Dict[str, object]) -> Dict[str, object]:
+    def _merge_entries(
+        self, existing: Dict[str, object], new: Dict[str, object]
+    ) -> Dict[str, object]:
         merged = dict(existing)
         # Merge sources
         existing_sources = merged.get("sources") or []
@@ -389,7 +434,9 @@ class ResultsTracker:
                 current_set = set(current) if isinstance(current, list) else set()
                 if isinstance(value, list):
                     current_set.update(value)
-                merged["tags"] = sorted(current_set) if current_set else merged.get("tags", [])
+                merged["tags"] = (
+                    sorted(current_set) if current_set else merged.get("tags", [])
+                )
                 continue
             if key == "score":
                 try:

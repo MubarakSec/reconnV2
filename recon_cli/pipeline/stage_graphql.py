@@ -133,8 +133,12 @@ class GraphQLReconStage(Stage):
 
             if self._has_introspection_schema(data):
                 introspection_enabled += 1
-                schema_path = context.record.paths.artifact(f"graphql_schema_{host or 'unknown'}.json")
-                schema_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+                schema_path = context.record.paths.artifact(
+                    f"graphql_schema_{host or 'unknown'}.json"
+                )
+                schema_path.write_text(
+                    json.dumps(data, indent=2, sort_keys=True), encoding="utf-8"
+                )
                 artifacts.append(str(schema_path))
                 context.emit_signal(
                     "graphql_introspection_enabled",
@@ -182,7 +186,11 @@ class GraphQLReconStage(Stage):
 
         js_endpoints = context.get_data("js_endpoints", []) or []
         for url in js_endpoints:
-            if isinstance(url, str) and "graphql" in url.lower() and url not in urls_seen:
+            if (
+                isinstance(url, str)
+                and "graphql" in url.lower()
+                and url not in urls_seen
+            ):
                 candidates.append(url)
                 urls_seen.add(url)
 
@@ -208,7 +216,9 @@ class GraphQLReconStage(Stage):
         return {}
 
     @staticmethod
-    def _is_graphql_response(status_code: int, content_type: str, data: Dict[str, object]) -> bool:
+    def _is_graphql_response(
+        status_code: int, content_type: str, data: Dict[str, object]
+    ) -> bool:
         if not data:
             return False
         if "application/json" in content_type or status_code in {200, 400}:
@@ -218,5 +228,9 @@ class GraphQLReconStage(Stage):
 
     @staticmethod
     def _has_introspection_schema(data: Dict[str, object]) -> bool:
-        schema = data.get("data", {}).get("__schema") if isinstance(data.get("data"), dict) else None
+        schema = (
+            data.get("data", {}).get("__schema")
+            if isinstance(data.get("data"), dict)
+            else None
+        )
         return isinstance(schema, dict) and bool(schema)

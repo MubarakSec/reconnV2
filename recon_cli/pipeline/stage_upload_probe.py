@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import asyncio
-from typing import Dict, List, Set
+from typing import Dict, List
 from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -14,16 +14,31 @@ try:
 except ImportError:
     AsyncHTTPClient = None
 
+
 class UploadProbeStage(Stage):
     name = "upload_probe"
 
     PATH_HINTS = (
-        "/upload", "/uploads", "/file", "/files", "/media",
-        "/attachments", "/avatar", "/profile", "/images", "/userfiles",
+        "/upload",
+        "/uploads",
+        "/file",
+        "/files",
+        "/media",
+        "/attachments",
+        "/avatar",
+        "/profile",
+        "/images",
+        "/userfiles",
     )
     DIR_PROBE_PATHS = (
-        "/uploads/", "/upload/", "/files/", "/media/",
-        "/attachments/", "/images/", "/assets/uploads/", "/static/uploads/",
+        "/uploads/",
+        "/upload/",
+        "/files/",
+        "/media/",
+        "/attachments/",
+        "/images/",
+        "/assets/uploads/",
+        "/static/uploads/",
     )
     DIR_LISTING_MARKERS = ("Index of /", "Directory listing", "Parent Directory")
 
@@ -33,16 +48,18 @@ class UploadProbeStage(Stage):
     async def run_async(self, context: PipelineContext) -> bool:
         if not self.is_enabled(context):
             return False
-        
+
         if not AsyncHTTPClient:
-            context.logger.warning("AsyncHTTPClient unavailable. Skipping async upload probe.")
+            context.logger.warning(
+                "AsyncHTTPClient unavailable. Skipping async upload probe."
+            )
             return False
 
         runtime = context.runtime_config
         max_hosts = int(getattr(runtime, "upload_max_hosts", 60))
         max_urls = int(getattr(runtime, "upload_max_urls", 120))
         timeout = int(getattr(runtime, "upload_timeout", 8))
-        
+
         candidates = self._collect_candidates(context)
         if max_urls > 0:
             candidates = candidates[:max_urls]
@@ -58,7 +75,7 @@ class UploadProbeStage(Stage):
                 url = urljoin(base, path)
                 if context.url_allowed(url):
                     probe_urls.add(url)
-                    
+
         all_urls_to_check = set(candidates) | set(probe_urls)
         if not all_urls_to_check:
             return True
@@ -67,13 +84,13 @@ class UploadProbeStage(Stage):
         surfaced = 0
         dir_exposed = 0
         artifacts: List[Dict[str, object]] = []
-        
+
         config = HTTPClientConfig(
             max_concurrent=int(getattr(runtime, "upload_concurrency", 20)),
             total_timeout=timeout,
             verify_ssl=context.runtime_config.verify_tls,
         )
-        
+
         headers = context.auth_headers({"User-Agent": "recon-cli upload-probe"})
 
         async with AsyncHTTPClient(config) as client:
@@ -87,7 +104,7 @@ class UploadProbeStage(Stage):
                 if isinstance(resp, Exception) or resp.status == 0:
                     continue
                 checked += 1
-                
+
                 body = resp.body or ""
                 has_dir_listing = self._looks_like_dir_listing(body)
                 has_upload_indicators = self._has_upload_indicators(body)
@@ -97,75 +114,107 @@ class UploadProbeStage(Stage):
                 if has_dir_listing or has_upload_indicators:
                     dir_exposed += 1
                     tags = ["upload", "exposed"]
-                    if has_dir_listing: tags.append("directory")
-                    if has_upload_indicators: tags.append("form")
-                    
+                    if has_dir_listing:
+                        tags.append("directory")
+                    if has_upload_indicators:
+                        tags.append("form")
+
                     host = urlparse(url).hostname
                     signal_id = context.emit_signal(
-                        "upload_exposed" if has_upload_indicators else "upload_dir_exposed", 
-                        "url", url,
-                        confidence=0.8, source="upload-probe",
-                        tags=tags, evidence={
-                            "status_code": resp.status, 
+                        "upload_exposed"
+                        if has_upload_indicators
+                        else "upload_dir_exposed",
+                        "url",
+                        url,
+                        confidence=0.8,
+                        source="upload-probe",
+                        tags=tags,
+                        evidence={
+                            "status_code": resp.status,
                             "has_indicators": has_upload_indicators,
-                            "has_dir_listing": has_dir_listing
+                            "has_dir_listing": has_dir_listing,
                         },
                     )
-                    context.results.append({
-                        "type": "finding",
-                        "source": "upload-probe",
-                        "finding_type": "upload_exposed",
-                        "hostname": host,
-                        "url": url,
-                        "description": "Exposed upload surface with proof" if has_upload_indicators else "Upload directory listing exposed",
-                        "tags": tags,
-                        "score": 85 if has_dir_listing else 75,
-                        "priority": "high",
-                        "evidence_id": signal_id or None,
-                    })
-                    artifacts.append({
-                        "url": url, 
-                        "status": resp.status, 
-                        "has_indicators": has_upload_indicators,
-                        "has_dir_listing": has_dir_listing
-                    })
-                
+                    context.results.append(
+                        {
+                            "type": "finding",
+                            "source": "upload-probe",
+                            "finding_type": "upload_exposed",
+                            "hostname": host,
+                            "url": url,
+                            "description": "Exposed upload surface with proof"
+                            if has_upload_indicators
+                            else "Upload directory listing exposed",
+                            "tags": tags,
+                            "score": 85 if has_dir_listing else 75,
+                            "priority": "high",
+                            "evidence_id": signal_id or None,
+                        }
+                    )
+                    artifacts.append(
+                        {
+                            "url": url,
+                            "status": resp.status,
+                            "has_indicators": has_upload_indicators,
+                            "has_dir_listing": has_dir_listing,
+                        }
+                    )
+
                 # Signal only: if it looks like an upload path but has no proof in body
-                elif (is_candidate or url in probe_urls) and resp.status in {200, 401, 403, 405, 302}:
+                elif (is_candidate or url in probe_urls) and resp.status in {
+                    200,
+                    401,
+                    403,
+                    405,
+                    302,
+                }:
                     surfaced += 1
                     tags = ["surface:upload", "service:upload"]
-                    context.results.append({
-                        "type": "url",
-                        "source": "upload-probe",
-                        "url": url,
-                        "hostname": urlparse(url).hostname,
-                        "tags": tags,
-                        "score": 20,
-                    })
-                    context.emit_signal(
-                        "upload_surface", "url", url,
-                        confidence=0.3, source="upload-probe",
-                        tags=tags, evidence={"status_code": resp.status},
+                    context.results.append(
+                        {
+                            "type": "url",
+                            "source": "upload-probe",
+                            "url": url,
+                            "hostname": urlparse(url).hostname,
+                            "tags": tags,
+                            "score": 20,
+                        }
                     )
-                    artifacts.append({"url": url, "status": resp.status, "proof": False})
+                    context.emit_signal(
+                        "upload_surface",
+                        "url",
+                        url,
+                        confidence=0.3,
+                        source="upload-probe",
+                        tags=tags,
+                        evidence={"status_code": resp.status},
+                    )
+                    artifacts.append(
+                        {"url": url, "status": resp.status, "proof": False}
+                    )
 
         if artifacts:
             artifact_path = context.record.paths.artifact("upload_probe.json")
-            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            artifact_path.write_text(
+                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
         stats = context.record.metadata.stats.setdefault("upload_probe", {})
-        stats.update({
-            "candidates": len(candidates),
-            "checked": checked,
-            "surface": surfaced,
-            "dir_exposed": dir_exposed,
-        })
+        stats.update(
+            {
+                "candidates": len(candidates),
+                "checked": checked,
+                "surface": surfaced,
+                "dir_exposed": dir_exposed,
+            }
+        )
         context.manager.update_metadata(context.record)
         return True
 
     def execute(self, context: PipelineContext) -> None:
         # Wrapper for synchronous execution if runner isn't fully async
         import asyncio
+
         asyncio.run(self.run_async(context))
 
     def _collect_candidates(self, context: PipelineContext) -> List[str]:
@@ -220,6 +269,6 @@ class UploadProbeStage(Stage):
         lowered = body.lower()
         if 'enctype="multipart/form-data"' in lowered:
             return True
-        if '<input' in lowered and 'type="file"' in lowered:
+        if "<input" in lowered and 'type="file"' in lowered:
             return True
         return False

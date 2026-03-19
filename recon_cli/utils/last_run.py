@@ -47,7 +47,9 @@ def update_last_report_pointer(report_path: Path) -> Path:
     return _replace_pointer(reports_last_path(), Path(report_path))
 
 
-def update_last_trace_pointers(trace_path: Path, events_path: Path | None = None) -> None:
+def update_last_trace_pointers(
+    trace_path: Path, events_path: Path | None = None
+) -> None:
     trace_file = Path(trace_path)
     if trace_file.exists():
         _replace_pointer(artifacts_last_trace_path(), trace_file)
@@ -106,7 +108,9 @@ def _replace_pointer(pointer_path: Path, target_path: Path) -> Path:
             try:
                 os.link(str(target_path), str(pointer_path))
             except OSError:
-                pointer_path.write_text(str(target_path.resolve()) + "\n", encoding="utf-8")
+                pointer_path.write_text(
+                    str(target_path.resolve()) + "\n", encoding="utf-8"
+                )
         else:
             pointer_path.write_text(str(target_path.resolve()) + "\n", encoding="utf-8")
     return pointer_path

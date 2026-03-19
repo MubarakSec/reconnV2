@@ -13,7 +13,15 @@ from recon_cli.utils.jsonl import read_jsonl
 class WsGrpcDiscoveryStage(Stage):
     name = "ws_grpc_discovery"
 
-    WS_HINTS = ("/ws", "/websocket", "/socket", "/socket.io", "/sockjs", "/live", "/stream")
+    WS_HINTS = (
+        "/ws",
+        "/websocket",
+        "/socket",
+        "/socket.io",
+        "/sockjs",
+        "/live",
+        "/stream",
+    )
     GRPC_PORTS = {50051, 50052, 50053}
 
     def is_enabled(self, context: PipelineContext) -> bool:
@@ -138,7 +146,9 @@ class WsGrpcDiscoveryStage(Stage):
                 urls.append(self._normalize_ws_url(url))
         js_endpoints = context.get_data("js_endpoints", []) or []
         for url in js_endpoints:
-            if isinstance(url, str) and ("ws://" in url or "wss://" in url or self._has_ws_hint(url)):
+            if isinstance(url, str) and (
+                "ws://" in url or "wss://" in url or self._has_ws_hint(url)
+            ):
                 urls.append(self._normalize_ws_url(url))
         for entry in read_jsonl(context.record.paths.results_jsonl):
             if entry.get("type") != "url":
@@ -155,10 +165,14 @@ class WsGrpcDiscoveryStage(Stage):
         for entry in read_jsonl(context.record.paths.results_jsonl):
             if entry.get("type") != "url":
                 continue
-            content_type = str(entry.get("content_type") or entry.get("content-type") or "").lower()
+            content_type = str(
+                entry.get("content_type") or entry.get("content-type") or ""
+            ).lower()
             url_value = entry.get("url")
             if "application/grpc" in content_type:
-                host = entry.get("hostname") or (urlparse(url_value).hostname if isinstance(url_value, str) else None)
+                host = entry.get("hostname") or (
+                    urlparse(url_value).hostname if isinstance(url_value, str) else None
+                )
                 if host:
                     hosts.add(host)
                     payload = {
@@ -180,7 +194,11 @@ class WsGrpcDiscoveryStage(Stage):
             port = entry.get("port")
             service = str(entry.get("service") or "").lower()
             product = str(entry.get("product") or "").lower()
-            if (isinstance(port, int) and port in self.GRPC_PORTS) or "grpc" in service or "grpc" in product:
+            if (
+                (isinstance(port, int) and port in self.GRPC_PORTS)
+                or "grpc" in service
+                or "grpc" in product
+            ):
                 host = entry.get("hostname")
                 if host:
                     hosts.add(host)
@@ -195,4 +213,13 @@ class WsGrpcDiscoveryStage(Stage):
         if parsed.scheme in {"ws", "wss"}:
             return url
         scheme = "wss" if parsed.scheme == "https" else "ws"
-        return urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+        return urlunparse(
+            (
+                scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )

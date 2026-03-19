@@ -75,6 +75,7 @@ class JobLifecycle:
         if not record:
             return {"success": False, "error": "Job not found"}
         from recon_cli.pipeline.runner import run_pipeline
+
         try:
             try:
                 loop = asyncio.get_running_loop()
@@ -88,7 +89,9 @@ class JobLifecycle:
         except Exception as exc:  # pragma: no cover - runtime path
             return {"success": False, "error": str(exc)}
 
-    def move_to_running(self, job_id: str, owner: Optional[str] = None) -> Optional[JobRecord]:
+    def move_to_running(
+        self, job_id: str, owner: Optional[str] = None
+    ) -> Optional[JobRecord]:
         if not self.manager.acquire_lock(job_id, owner=owner or "worker"):
             return None
         new_root = self.manager.move_job(job_id, config.RUNNING_JOBS)
@@ -103,7 +106,9 @@ class JobLifecycle:
             self.manager.update_metadata(record)
         return record
 
-    def move_to_finished(self, job_id: str, status: str = "finished") -> Optional[JobRecord]:
+    def move_to_finished(
+        self, job_id: str, status: str = "finished"
+    ) -> Optional[JobRecord]:
         new_root = self.manager.move_job(job_id, config.FINISHED_JOBS)
         if not new_root:
             return None

@@ -188,7 +188,9 @@ class OAuthDiscoveryStage(Stage):
 
         if configs:
             artifact_path = context.record.paths.artifact("oauth_discovery.json")
-            artifact_path.write_text(json.dumps(configs, indent=2, sort_keys=True), encoding="utf-8")
+            artifact_path.write_text(
+                json.dumps(configs, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
         stats = context.record.metadata.stats.setdefault("oauth_discovery", {})
         stats.update(
@@ -209,22 +211,34 @@ class OAuthDiscoveryStage(Stage):
                 host = entry.get("hostname")
             elif etype == "url":
                 url_value = entry.get("url")
-                host = urlparse(url_value).hostname if isinstance(url_value, str) else None
+                host = (
+                    urlparse(url_value).hostname if isinstance(url_value, str) else None
+                )
             else:
                 host = None
             if isinstance(host, str) and host:
                 hosts.append(host)
         return list(dict.fromkeys(hosts))
 
-    def _emit_endpoints_from_config(self, context: PipelineContext, data: Dict[str, object]) -> int:
+    def _emit_endpoints_from_config(
+        self, context: PipelineContext, data: Dict[str, object]
+    ) -> int:
         keys = [
             ("authorization_endpoint", "oauth_authorize_endpoint", "surface:authorize"),
             ("token_endpoint", "oauth_token_endpoint", "surface:token"),
             ("userinfo_endpoint", "oauth_userinfo_endpoint", "surface:userinfo"),
             ("jwks_uri", "oauth_jwks_uri", "surface:jwks"),
             ("revocation_endpoint", "oauth_revocation_endpoint", "surface:revoke"),
-            ("introspection_endpoint", "oauth_introspection_endpoint", "surface:introspect"),
-            ("device_authorization_endpoint", "oauth_device_endpoint", "surface:device"),
+            (
+                "introspection_endpoint",
+                "oauth_introspection_endpoint",
+                "surface:introspect",
+            ),
+            (
+                "device_authorization_endpoint",
+                "oauth_device_endpoint",
+                "surface:device",
+            ),
         ]
         found = 0
         for key, signal_type, tag in keys:

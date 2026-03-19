@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 #                     Asset Types
 # ═══════════════════════════════════════════════════════════
 
+
 class AssetType(Enum):
     """أنواع الأصول"""
+
     DOMAIN = "domain"
     SUBDOMAIN = "subdomain"
     IP = "ip"
@@ -53,6 +55,7 @@ class AssetType(Enum):
 
 class AssetStatus(Enum):
     """حالة الأصل"""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
     UNKNOWN = "unknown"
@@ -61,6 +64,7 @@ class AssetStatus(Enum):
 
 class RiskLevel(Enum):
     """مستوى الخطورة"""
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -71,29 +75,29 @@ class RiskLevel(Enum):
 @dataclass
 class Asset:
     """أصل واحد"""
-    
+
     id: Optional[int] = None
     type: AssetType = AssetType.OTHER
     value: str = ""
-    
+
     # Metadata
     status: AssetStatus = AssetStatus.UNKNOWN
     risk_level: RiskLevel = RiskLevel.INFO
     confidence: float = 1.0  # 0-1
-    
+
     # Discovery
     source: str = ""
     first_seen: datetime = field(default_factory=datetime.now)
     last_seen: datetime = field(default_factory=datetime.now)
-    
+
     # Relations
     parent_id: Optional[int] = None
-    
+
     # Extra data
     attributes: Dict[str, Any] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
     notes: str = ""
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -110,7 +114,7 @@ class Asset:
             "tags": self.tags,
             "notes": self.notes,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Asset":
         data = data.copy()
@@ -125,7 +129,7 @@ class Asset:
 @dataclass
 class AssetRelation:
     """علاقة بين أصلين"""
-    
+
     id: Optional[int] = None
     source_id: int = 0
     target_id: int = 0
@@ -138,33 +142,34 @@ class AssetRelation:
 #                     Asset Inventory
 # ═══════════════════════════════════════════════════════════
 
+
 class AssetInventory:
     """
     جرد الأصول.
-    
+
     Example:
         >>> inventory = AssetInventory("./inventory.db")
-        >>> 
+        >>>
         >>> # إضافة أصول
         >>> domain = inventory.add(
         ...     type=AssetType.DOMAIN,
         ...     value="example.com",
         ...     source="manual"
         ... )
-        >>> 
+        >>>
         >>> subdomain = inventory.add(
         ...     type=AssetType.SUBDOMAIN,
         ...     value="api.example.com",
         ...     parent_id=domain.id
         ... )
-        >>> 
+        >>>
         >>> # البحث
         >>> results = inventory.search(type=AssetType.SUBDOMAIN)
-        >>> 
+        >>>
         >>> # التصدير
         >>> inventory.export("assets.json")
     """
-    
+
     def __init__(self, db_path: Union[str, Path]):
         """
         Args:
@@ -172,9 +177,9 @@ class AssetInventory:
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self._init_db()
-    
+
     def _init_db(self) -> None:
         """تهيئة قاعدة البيانات"""
         with self._get_conn() as conn:
@@ -219,7 +224,7 @@ class AssetInventory:
                 CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_id);
                 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_id);
             """)
-    
+
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
         """اتصال قاعدة البيانات"""
@@ -230,11 +235,11 @@ class AssetInventory:
             conn.commit()
         finally:
             conn.close()
-    
+
     # ─────────────────────────────────────────────────────────
     #                     CRUD Operations
     # ─────────────────────────────────────────────────────────
-    
+
     def add(
         self,
         type: AssetType,
@@ -250,26 +255,25 @@ class AssetInventory:
     ) -> Asset:
         """
         إضافة أصل جديد.
-        
+
         إذا كان الأصل موجوداً، يتم تحديث last_seen.
         """
         now = datetime.now()
-        
+
         with self._get_conn() as conn:
             # Check if exists
             existing = conn.execute(
-                "SELECT * FROM assets WHERE type = ? AND value = ?",
-                (type.value, value)
+                "SELECT * FROM assets WHERE type = ? AND value = ?", (type.value, value)
             ).fetchone()
-            
+
             if existing:
                 # Update last_seen
                 conn.execute(
                     "UPDATE assets SET last_seen = ? WHERE id = ?",
-                    (now.isoformat(), existing["id"])
+                    (now.isoformat(), existing["id"]),
                 )
                 return self._row_to_asset(existing)
-            
+
             # Insert new
             cursor = conn.execute(
                 """
@@ -280,13 +284,21 @@ class AssetInventory:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    type.value, value, status.value, risk_level.value,
-                    confidence, source, now.isoformat(), now.isoformat(),
-                    parent_id, json.dumps(attributes or {}),
-                    json.dumps(tags or []), notes
-                )
+                    type.value,
+                    value,
+                    status.value,
+                    risk_level.value,
+                    confidence,
+                    source,
+                    now.isoformat(),
+                    now.isoformat(),
+                    parent_id,
+                    json.dumps(attributes or {}),
+                    json.dumps(tags or []),
+                    notes,
+                ),
             )
-            
+
             asset = Asset(
                 id=cursor.lastrowid,
                 type=type,
@@ -302,27 +314,26 @@ class AssetInventory:
                 tags=tags or [],
                 notes=notes,
             )
-            
+
             logger.debug("Added asset: %s (%s)", value, type.value)
             return asset
-    
+
     def get(self, asset_id: int) -> Optional[Asset]:
         """الحصول على أصل"""
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM assets WHERE id = ?",
-                (asset_id,)
+                "SELECT * FROM assets WHERE id = ?", (asset_id,)
             ).fetchone()
-            
+
             if row:
                 return self._row_to_asset(row)
         return None
-    
+
     def update(self, asset: Asset) -> bool:
         """تحديث أصل"""
         if asset.id is None:
             return False
-        
+
         with self._get_conn() as conn:
             conn.execute(
                 """
@@ -333,35 +344,39 @@ class AssetInventory:
                 WHERE id = ?
                 """,
                 (
-                    asset.type.value, asset.value, asset.status.value,
-                    asset.risk_level.value, asset.confidence, asset.source,
-                    datetime.now().isoformat(), asset.parent_id,
-                    json.dumps(asset.attributes), json.dumps(asset.tags),
-                    asset.notes, asset.id
-                )
+                    asset.type.value,
+                    asset.value,
+                    asset.status.value,
+                    asset.risk_level.value,
+                    asset.confidence,
+                    asset.source,
+                    datetime.now().isoformat(),
+                    asset.parent_id,
+                    json.dumps(asset.attributes),
+                    json.dumps(asset.tags),
+                    asset.notes,
+                    asset.id,
+                ),
             )
             return True
-    
+
     def delete(self, asset_id: int) -> bool:
         """حذف أصل"""
         with self._get_conn() as conn:
             # Delete relations
             conn.execute(
                 "DELETE FROM relations WHERE source_id = ? OR target_id = ?",
-                (asset_id, asset_id)
+                (asset_id, asset_id),
             )
-            
+
             # Delete asset
-            cursor = conn.execute(
-                "DELETE FROM assets WHERE id = ?",
-                (asset_id,)
-            )
+            cursor = conn.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
             return cursor.rowcount > 0
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Search
     # ─────────────────────────────────────────────────────────
-    
+
     def search(
         self,
         type: Optional[AssetType] = None,
@@ -376,7 +391,7 @@ class AssetInventory:
     ) -> List[Asset]:
         """
         بحث في الأصول.
-        
+
         Args:
             type: نوع الأصل
             value_contains: قيمة تحتوي على
@@ -390,37 +405,37 @@ class AssetInventory:
         """
         conditions = []
         params = []
-        
+
         if type:
             conditions.append("type = ?")
             params.append(type.value)
-        
+
         if value_contains:
             conditions.append("value LIKE ?")
             params.append(f"%{value_contains}%")
-        
+
         if status:
             conditions.append("status = ?")
             params.append(status.value)
-        
+
         if risk_level:
             conditions.append("risk_level = ?")
             params.append(risk_level.value)
-        
+
         if source:
             conditions.append("source = ?")
             params.append(source)
-        
+
         if parent_id is not None:
             conditions.append("parent_id = ?")
             params.append(parent_id)
-        
+
         if tag:
             conditions.append("tags LIKE ?")
             params.append(f'%"{tag}"%')
-        
+
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
-        
+
         query = f"""
             SELECT * FROM assets
             {where}
@@ -428,23 +443,22 @@ class AssetInventory:
             LIMIT ? OFFSET ?
         """
         params.extend([limit, offset])
-        
+
         with self._get_conn() as conn:
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_asset(row) for row in rows]
-    
+
     def find_by_value(self, value: str) -> Optional[Asset]:
         """البحث بالقيمة"""
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM assets WHERE value = ?",
-                (value,)
+                "SELECT * FROM assets WHERE value = ?", (value,)
             ).fetchone()
-            
+
             if row:
                 return self._row_to_asset(row)
         return None
-    
+
     def count(
         self,
         type: Optional[AssetType] = None,
@@ -453,28 +467,27 @@ class AssetInventory:
         """عدد الأصول"""
         conditions = []
         params = []
-        
+
         if type:
             conditions.append("type = ?")
             params.append(type.value)
-        
+
         if status:
             conditions.append("status = ?")
             params.append(status.value)
-        
+
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
-        
+
         with self._get_conn() as conn:
             row = conn.execute(
-                f"SELECT COUNT(*) as cnt FROM assets {where}",
-                params
+                f"SELECT COUNT(*) as cnt FROM assets {where}", params
             ).fetchone()
             return row["cnt"]
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Relations
     # ─────────────────────────────────────────────────────────
-    
+
     def add_relation(
         self,
         source_id: int,
@@ -484,7 +497,7 @@ class AssetInventory:
     ) -> Optional[AssetRelation]:
         """إضافة علاقة"""
         now = datetime.now()
-        
+
         with self._get_conn() as conn:
             try:
                 cursor = conn.execute(
@@ -494,11 +507,14 @@ class AssetInventory:
                     ) VALUES (?, ?, ?, ?, ?)
                     """,
                     (
-                        source_id, target_id, relation_type,
-                        now.isoformat(), json.dumps(attributes or {})
-                    )
+                        source_id,
+                        target_id,
+                        relation_type,
+                        now.isoformat(),
+                        json.dumps(attributes or {}),
+                    ),
                 )
-                
+
                 return AssetRelation(
                     id=cursor.lastrowid,
                     source_id=source_id,
@@ -509,7 +525,7 @@ class AssetInventory:
                 )
             except sqlite3.IntegrityError:
                 return None
-    
+
     def get_relations(
         self,
         asset_id: int,
@@ -517,13 +533,13 @@ class AssetInventory:
     ) -> List[Tuple[AssetRelation, Asset]]:
         """
         الحصول على علاقات أصل.
-        
+
         Args:
             asset_id: معرف الأصل
             direction: both, outgoing, incoming
         """
         results = []
-        
+
         with self._get_conn() as conn:
             if direction in ("both", "outgoing"):
                 rows = conn.execute(
@@ -532,9 +548,9 @@ class AssetInventory:
                     JOIN assets a ON r.target_id = a.id
                     WHERE r.source_id = ?
                     """,
-                    (asset_id,)
+                    (asset_id,),
                 ).fetchall()
-                
+
                 for row in rows:
                     relation = AssetRelation(
                         id=row["id"],
@@ -546,7 +562,7 @@ class AssetInventory:
                     )
                     asset = self._row_to_asset(row)
                     results.append((relation, asset))
-            
+
             if direction in ("both", "incoming"):
                 rows = conn.execute(
                     """
@@ -554,9 +570,9 @@ class AssetInventory:
                     JOIN assets a ON r.source_id = a.id
                     WHERE r.target_id = ?
                     """,
-                    (asset_id,)
+                    (asset_id,),
                 ).fetchall()
-                
+
                 for row in rows:
                     relation = AssetRelation(
                         id=row["id"],
@@ -568,29 +584,29 @@ class AssetInventory:
                     )
                     asset = self._row_to_asset(row)
                     results.append((relation, asset))
-        
+
         return results
-    
+
     def get_children(self, parent_id: int) -> List[Asset]:
         """الحصول على الأبناء"""
         return self.search(parent_id=parent_id)
-    
+
     def get_tree(self, root_id: int, max_depth: int = 5) -> Dict[str, Any]:
         """
         شجرة الأصول.
-        
+
         Returns:
             {"asset": Asset, "children": [subtrees]}
         """
         asset = self.get(root_id)
         if not asset:
             return {}
-        
+
         tree = {
             "asset": asset.to_dict(),
             "children": [],
         }
-        
+
         if max_depth > 0:
             children = self.get_children(root_id)
             for child in children:
@@ -598,22 +614,22 @@ class AssetInventory:
                     subtree = self.get_tree(child.id, max_depth - 1)
                     if subtree:
                         tree["children"].append(subtree)
-        
+
         return tree
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Bulk Operations
     # ─────────────────────────────────────────────────────────
-    
+
     def bulk_add(self, assets: List[Dict[str, Any]]) -> int:
         """إضافة أصول بالجملة"""
         added = 0
-        
+
         for asset_data in assets:
             try:
                 asset_type = AssetType(asset_data.get("type", "other"))
                 value = asset_data.get("value", "")
-                
+
                 if value:
                     self.add(
                         type=asset_type,
@@ -625,9 +641,9 @@ class AssetInventory:
                     added += 1
             except Exception as e:
                 logger.warning("Failed to add asset: %s", e)
-        
+
         return added
-    
+
     def import_from_scan(
         self,
         results: List[Dict[str, Any]],
@@ -635,7 +651,7 @@ class AssetInventory:
     ) -> Dict[str, int]:
         """
         استيراد من نتائج الفحص.
-        
+
         يكتشف تلقائياً نوع كل نتيجة ويضيفها.
         """
         stats = {
@@ -643,7 +659,7 @@ class AssetInventory:
             "imported": 0,
             "skipped": 0,
         }
-        
+
         for result in results:
             try:
                 asset = self._result_to_asset(result, source)
@@ -655,9 +671,9 @@ class AssetInventory:
             except Exception as e:
                 logger.warning("Import error: %s", e)
                 stats["skipped"] += 1
-        
+
         return stats
-    
+
     def _result_to_asset(
         self,
         result: Dict[str, Any],
@@ -674,7 +690,7 @@ class AssetInventory:
                     "source": source,
                     "attributes": result,
                 }
-        
+
         if "ip" in result:
             return {
                 "type": AssetType.IP,
@@ -682,7 +698,7 @@ class AssetInventory:
                 "source": source,
                 "attributes": result,
             }
-        
+
         if "port" in result:
             host = result.get("host", result.get("ip", ""))
             port = result["port"]
@@ -692,7 +708,7 @@ class AssetInventory:
                 "source": source,
                 "attributes": result,
             }
-        
+
         if "url" in result or "endpoint" in result:
             return {
                 "type": AssetType.ENDPOINT,
@@ -700,7 +716,7 @@ class AssetInventory:
                 "source": source,
                 "attributes": result,
             }
-        
+
         if "vulnerability" in result or "cve" in result:
             return {
                 "type": AssetType.VULNERABILITY,
@@ -709,13 +725,13 @@ class AssetInventory:
                 "risk_level": self._detect_risk(result),
                 "attributes": result,
             }
-        
+
         return None
-    
+
     def _detect_risk(self, result: Dict[str, Any]) -> RiskLevel:
         """اكتشاف مستوى الخطورة"""
         severity = result.get("severity", "").lower()
-        
+
         if severity in ("critical", "crit"):
             return RiskLevel.CRITICAL
         elif severity in ("high", "hi"):
@@ -724,13 +740,13 @@ class AssetInventory:
             return RiskLevel.MEDIUM
         elif severity in ("low", "lo"):
             return RiskLevel.LOW
-        
+
         return RiskLevel.INFO
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Export/Import
     # ─────────────────────────────────────────────────────────
-    
+
     def export(
         self,
         output_path: Union[str, Path],
@@ -738,46 +754,62 @@ class AssetInventory:
     ) -> int:
         """
         تصدير الأصول.
-        
+
         Args:
             output_path: مسار الملف
             format: json, csv
         """
         assets = self.search(limit=100000)
-        
+
         output_path = Path(output_path)
-        
+
         if format == "json":
             data = {
                 "exported_at": datetime.now().isoformat(),
                 "count": len(assets),
                 "assets": [a.to_dict() for a in assets],
             }
-            
+
             with open(output_path, "w") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-        
+
         elif format == "csv":
             import csv
-            
+
             with open(output_path, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow([
-                    "id", "type", "value", "status", "risk_level",
-                    "source", "first_seen", "last_seen", "tags"
-                ])
-                
+                writer.writerow(
+                    [
+                        "id",
+                        "type",
+                        "value",
+                        "status",
+                        "risk_level",
+                        "source",
+                        "first_seen",
+                        "last_seen",
+                        "tags",
+                    ]
+                )
+
                 for asset in assets:
-                    writer.writerow([
-                        asset.id, asset.type.value, asset.value,
-                        asset.status.value, asset.risk_level.value,
-                        asset.source, asset.first_seen.isoformat(),
-                        asset.last_seen.isoformat(), ",".join(asset.tags)
-                    ])
-        
+                    writer.writerow(
+                        [
+                            asset.id,
+                            asset.type.value,
+                            asset.value,
+                            asset.status.value,
+                            asset.risk_level.value,
+                            asset.source,
+                            asset.first_seen.isoformat(),
+                            asset.last_seen.isoformat(),
+                            ",".join(asset.tags),
+                        ]
+                    )
+
         logger.info("Exported %d assets to %s", len(assets), output_path)
         return len(assets)
-    
+
     def import_file(
         self,
         input_path: Union[str, Path],
@@ -785,18 +817,18 @@ class AssetInventory:
     ) -> int:
         """
         استيراد الأصول.
-        
+
         Args:
             input_path: مسار الملف
             format: json, csv
         """
         input_path = Path(input_path)
         imported = 0
-        
+
         if format == "json":
             with open(input_path, "r") as f:
                 data = json.load(f)
-            
+
             assets = data.get("assets", [])
             for asset_data in assets:
                 try:
@@ -812,10 +844,10 @@ class AssetInventory:
                     imported += 1
                 except Exception as e:
                     logger.warning("Failed to import asset: %s", e)
-        
+
         elif format == "csv":
             import csv
-            
+
             with open(input_path, "r") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
@@ -831,43 +863,41 @@ class AssetInventory:
                         imported += 1
                     except Exception as e:
                         logger.warning("Failed to import row: %s", e)
-        
+
         logger.info("Imported %d assets from %s", imported, input_path)
         return imported
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Statistics
     # ─────────────────────────────────────────────────────────
-    
+
     def stats(self) -> Dict[str, Any]:
         """إحصائيات الجرد"""
         with self._get_conn() as conn:
             # Total count
-            total = conn.execute(
-                "SELECT COUNT(*) as cnt FROM assets"
-            ).fetchone()["cnt"]
-            
+            total = conn.execute("SELECT COUNT(*) as cnt FROM assets").fetchone()["cnt"]
+
             # By type
             by_type = {}
             for row in conn.execute(
                 "SELECT type, COUNT(*) as cnt FROM assets GROUP BY type"
             ):
                 by_type[row["type"]] = row["cnt"]
-            
+
             # By status
             by_status = {}
             for row in conn.execute(
                 "SELECT status, COUNT(*) as cnt FROM assets GROUP BY status"
             ):
                 by_status[row["status"]] = row["cnt"]
-            
+
             # By risk
             by_risk = {}
             for row in conn.execute(
                 "SELECT risk_level, COUNT(*) as cnt FROM assets GROUP BY risk_level"
             ):
                 by_risk[row["risk_level"]] = row["cnt"]
-            
+
             # Recent
             recent = conn.execute(
                 """
@@ -876,7 +906,7 @@ class AssetInventory:
                 LIMIT 5
                 """
             ).fetchall()
-            
+
             return {
                 "total": total,
                 "by_type": by_type,
@@ -884,7 +914,7 @@ class AssetInventory:
                 "by_risk": by_risk,
                 "recent": [self._row_to_asset(r).to_dict() for r in recent],
             }
-    
+
     def _row_to_asset(self, row: sqlite3.Row) -> Asset:
         """تحويل صف إلى أصل"""
         return Asset(

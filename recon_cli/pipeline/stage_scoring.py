@@ -14,7 +14,15 @@ from recon_cli import rules as rules_engine
 class ScoringStage(Stage):
     name = "scoring_tagging"
 
-    ADMIN_PATTERNS = ["/admin", "/wp-admin", "/login", "/signin", "/auth", "/account/login", "/user/login"]
+    ADMIN_PATTERNS = [
+        "/admin",
+        "/wp-admin",
+        "/login",
+        "/signin",
+        "/auth",
+        "/account/login",
+        "/user/login",
+    ]
     RESET_PATTERNS = ["/forgot", "/reset", "/password", "/recover"]
     REGISTER_PATTERNS = ["/register", "/signup", "/sign-up"]
     SENSITIVE_QUERY_KEYS = {"password", "token", "secret", "key"}
@@ -62,11 +70,15 @@ class ScoringStage(Stage):
             try:
                 import json as _json
 
-                enrichment_map = _json.loads(enrichment_artifact.read_text(encoding="utf-8"))
+                enrichment_map = _json.loads(
+                    enrichment_artifact.read_text(encoding="utf-8")
+                )
             except Exception:
                 enrichment_map = {}
 
-        soft_404_hosts = set(context.record.metadata.stats.get("soft_404", {}).get("hosts", []))
+        soft_404_hosts = set(
+            context.record.metadata.stats.get("soft_404", {}).get("hosts", [])
+        )
         auth_cluster_sizes = self._build_auth_surface_clusters(items)
         updated: List[dict] = []
         for entry in items:
@@ -133,7 +145,9 @@ class ScoringStage(Stage):
             lower_url = url.lower()
             host = entry.get("hostname") or parsed_url.hostname
             url_signals = signals.get("by_url", {}).get(url, set())
-            host_signals = signals.get("by_host", {}).get(host, set()) if host else set()
+            host_signals = (
+                signals.get("by_host", {}).get(host, set()) if host else set()
+            )
             host_enrichments = enrichment_map.get(host, []) if host else []
             if host_enrichments:
                 for enriched in host_enrichments:
@@ -265,7 +279,10 @@ class ScoringStage(Stage):
             if "vhost_found" in host_signals:
                 tags.add("surface:vhost")
                 score += 10
-            if "cloud_asset_public" in url_signals or "cloud_asset_public" in host_signals:
+            if (
+                "cloud_asset_public" in url_signals
+                or "cloud_asset_public" in host_signals
+            ):
                 tags.add("cloud:exposed")
                 score += 25
             if "cms_drupal" in host_signals:
@@ -314,8 +331,14 @@ class ScoringStage(Stage):
                 score += 35
 
             status_code = entry.get("status_code")
-            length = entry.get("length") or entry.get("content_length") or entry.get("content-length")
-            if enrich_utils.detect_noise(url, status_code, entry.get("source", ""), length):
+            length = (
+                entry.get("length")
+                or entry.get("content_length")
+                or entry.get("content-length")
+            )
+            if enrich_utils.detect_noise(
+                url, status_code, entry.get("source", ""), length
+            ):
                 tags.add("noise")
                 entry["noise"] = True
                 score = 0
@@ -373,11 +396,15 @@ class ScoringStage(Stage):
                 encoding="utf-8",
             )
         surface_stats = context.record.metadata.stats.setdefault("auth_surface", {})
-        surface_stats["login"] = sum(1 for entry in updated if "surface:login" in entry.get("tags", []))
+        surface_stats["login"] = sum(
+            1 for entry in updated if "surface:login" in entry.get("tags", [])
+        )
         surface_stats["password_reset"] = sum(
             1 for entry in updated if "surface:password-reset" in entry.get("tags", [])
         )
-        surface_stats["register"] = sum(1 for entry in updated if "surface:register" in entry.get("tags", []))
+        surface_stats["register"] = sum(
+            1 for entry in updated if "surface:register" in entry.get("tags", [])
+        )
         context.manager.update_metadata(context.record)
 
     def _calibrate_risk_score(
@@ -408,7 +435,11 @@ class ScoringStage(Stage):
         if status == 410 and not has_high_signal:
             tags.add("surface:retired")
             score = min(score, 35)
-        elif status == 404 and not has_high_signal and tags.intersection({"surface:login", "surface:admin"}):
+        elif (
+            status == 404
+            and not has_high_signal
+            and tags.intersection({"surface:login", "surface:admin"})
+        ):
             score = min(score, 40)
         if (
             auth_cluster_size >= self.AUTH_SURFACE_CLUSTER_THRESHOLD
@@ -426,7 +457,9 @@ class ScoringStage(Stage):
             self.HIGH_SIGNAL_TAGS.intersection(tags)
         )
 
-    def _build_auth_surface_clusters(self, items: List[dict]) -> Dict[tuple[str, int], int]:
+    def _build_auth_surface_clusters(
+        self, items: List[dict]
+    ) -> Dict[tuple[str, int], int]:
         clusters: Dict[tuple[str, int], set[str]] = {}
         for entry in items:
             if entry.get("type") != "url":

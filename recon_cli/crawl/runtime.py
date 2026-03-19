@@ -158,7 +158,9 @@ def crawl_urls(
             async def run_single(target: str) -> None:
                 async with semaphore:
                     try:
-                        results[target] = await _crawl_single(browser_ctx, target, timeout_ms)
+                        results[target] = await _crawl_single(
+                            browser_ctx, target, timeout_ms
+                        )
                     except Exception as exc:  # pragma: no cover - defensive
                         results[target] = CrawlResult(
                             url=target,

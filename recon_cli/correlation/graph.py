@@ -91,7 +91,9 @@ class Graph:
     def nodes(self) -> Iterable[GraphNode]:
         return self._nodes.values()
 
-    def degree_counts(self, node_type: Optional[str] = None) -> Dict[Tuple[str, str], int]:
+    def degree_counts(
+        self, node_type: Optional[str] = None
+    ) -> Dict[Tuple[str, str], int]:
         counts: Dict[Tuple[str, str], int] = {}
         for key in self._nodes.keys():
             if node_type and key[0] != node_type:
@@ -99,13 +101,22 @@ class Graph:
             counts[key] = len(self._adjacency.get(key, set()))
         return counts
 
-    def top_connected(self, limit: int = 10, node_type: Optional[str] = None) -> List[Dict[str, object]]:
+    def top_connected(
+        self, limit: int = 10, node_type: Optional[str] = None
+    ) -> List[Dict[str, object]]:
         counts = self.degree_counts(node_type=node_type)
         ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:limit]
         results: List[Dict[str, object]] = []
         for (node_type_value, node_id), degree in ordered:
             node = self._nodes[(node_type_value, node_id)]
-            results.append({"type": node_type_value, "id": node_id, "degree": degree, "attrs": node.attrs})
+            results.append(
+                {
+                    "type": node_type_value,
+                    "id": node_id,
+                    "degree": degree,
+                    "attrs": node.attrs,
+                }
+            )
         return results
 
     def to_dot(self) -> str:
@@ -129,17 +140,24 @@ class Graph:
         dot_exe = shutil.which("dot")
         if not dot_exe:
             return False
-        dot_path = path.with_suffix('.dot')
+        dot_path = path.with_suffix(".dot")
         self.save_dot(dot_path)
         try:
-            subprocess.run([dot_exe, "-Tsvg", str(dot_path), "-o", str(path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [dot_exe, "-Tsvg", str(dot_path), "-o", str(path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             return False
         return True
 
     def save(self, path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+        path.write_text(
+            json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     def node_count(self) -> int:
         return len(self._nodes)

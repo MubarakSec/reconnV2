@@ -10,10 +10,10 @@ Provides auto-completion for:
 Example:
     # Bash
     $ recon --install-completion bash
-    
+
     # Zsh
     $ recon --install-completion zsh
-    
+
     # Fish
     $ recon --install-completion fish
 """
@@ -38,7 +38,7 @@ __all__ = [
 
 class Shell(Enum):
     """Supported shell types."""
-    
+
     BASH = "bash"
     ZSH = "zsh"
     FISH = "fish"
@@ -48,12 +48,12 @@ class Shell(Enum):
 @dataclass
 class Command:
     """CLI command definition for completion."""
-    
+
     name: str
     description: str
     subcommands: List["Command"] = None
     options: List["Option"] = None
-    
+
     def __post_init__(self):
         self.subcommands = self.subcommands or []
         self.options = self.options or []
@@ -62,7 +62,7 @@ class Command:
 @dataclass
 class Option:
     """CLI option definition for completion."""
-    
+
     name: str
     short: Optional[str] = None
     description: str = ""
@@ -82,13 +82,34 @@ RECON_COMMANDS = Command(
             description="Start a new scan",
             options=[
                 Option("-t", "--target", "Target domain or IP", takes_value=True),
-                Option("-p", "--profile", "Scan profile", takes_value=True, 
-                       choices=["quick", "standard", "deep", "passive"]),
+                Option(
+                    "-p",
+                    "--profile",
+                    "Scan profile",
+                    takes_value=True,
+                    choices=["quick", "standard", "deep", "passive"],
+                ),
                 Option("-c", "--concurrency", "Concurrency level", takes_value=True),
-                Option("-o", "--output", "Output directory", takes_value=True, directory_completion=True),
-                Option("-f", "--format", "Output format", takes_value=True, 
-                       choices=["json", "jsonl", "csv", "html"]),
-                Option("--targets-file", description="File with targets", takes_value=True, file_completion=True),
+                Option(
+                    "-o",
+                    "--output",
+                    "Output directory",
+                    takes_value=True,
+                    directory_completion=True,
+                ),
+                Option(
+                    "-f",
+                    "--format",
+                    "Output format",
+                    takes_value=True,
+                    choices=["json", "jsonl", "csv", "html"],
+                ),
+                Option(
+                    "--targets-file",
+                    description="File with targets",
+                    takes_value=True,
+                    file_completion=True,
+                ),
                 Option("--notify", description="Enable notifications"),
                 Option("--no-passive", description="Skip passive stages"),
             ],
@@ -98,17 +119,30 @@ RECON_COMMANDS = Command(
             description="Job management",
             subcommands=[
                 Command("list", "List all jobs"),
-                Command("show", "Show job details", options=[
-                    Option("--full", description="Show full details"),
-                ]),
+                Command(
+                    "show",
+                    "Show job details",
+                    options=[
+                        Option("--full", description="Show full details"),
+                    ],
+                ),
                 Command("cancel", "Cancel a running job"),
                 Command("resume", "Resume a paused job"),
                 Command("retry", "Retry a failed job"),
                 Command("delete", "Delete a job"),
-                Command("export", "Export job results", options=[
-                    Option("-f", "--format", "Export format", takes_value=True,
-                           choices=["json", "csv", "html", "pdf"]),
-                ]),
+                Command(
+                    "export",
+                    "Export job results",
+                    options=[
+                        Option(
+                            "-f",
+                            "--format",
+                            "Export format",
+                            takes_value=True,
+                            choices=["json", "csv", "html", "pdf"],
+                        ),
+                    ],
+                ),
             ],
         ),
         Command(
@@ -120,9 +154,19 @@ RECON_COMMANDS = Command(
                 Command("create", "Create a new profile"),
                 Command("edit", "Edit a profile"),
                 Command("delete", "Delete a profile"),
-                Command("import", "Import profiles", options=[
-                    Option("-f", "--file", "Profile file", takes_value=True, file_completion=True),
-                ]),
+                Command(
+                    "import",
+                    "Import profiles",
+                    options=[
+                        Option(
+                            "-f",
+                            "--file",
+                            "Profile file",
+                            takes_value=True,
+                            file_completion=True,
+                        ),
+                    ],
+                ),
                 Command("export", "Export profiles"),
             ],
         ),
@@ -165,11 +209,15 @@ RECON_COMMANDS = Command(
             name="api",
             description="API server management",
             subcommands=[
-                Command("start", "Start API server", options=[
-                    Option("-p", "--port", "Port number", takes_value=True),
-                    Option("-h", "--host", "Host address", takes_value=True),
-                    Option("--reload", description="Enable auto-reload"),
-                ]),
+                Command(
+                    "start",
+                    "Start API server",
+                    options=[
+                        Option("-p", "--port", "Port number", takes_value=True),
+                        Option("-h", "--host", "Host address", takes_value=True),
+                        Option("--reload", description="Enable auto-reload"),
+                    ],
+                ),
                 Command("stop", "Stop API server"),
                 Command("status", "Show API server status"),
             ],
@@ -188,17 +236,22 @@ RECON_COMMANDS = Command(
         Option("-q", "--quiet", "Quiet mode"),
         Option("--debug", description="Debug mode"),
         Option("--no-color", description="Disable colors"),
-        Option("--config", description="Config file path", takes_value=True, file_completion=True),
+        Option(
+            "--config",
+            description="Config file path",
+            takes_value=True,
+            file_completion=True,
+        ),
     ],
 )
 
 
 class CompletionGenerator:
     """Generate shell completion scripts."""
-    
+
     def __init__(self, command: Command):
         self.command = command
-    
+
     def generate(self, shell: Shell) -> str:
         """Generate completion script for specified shell."""
         generators: Dict[Shell, Callable[[], str]] = {
@@ -207,16 +260,16 @@ class CompletionGenerator:
             Shell.FISH: self._generate_fish,
             Shell.POWERSHELL: self._generate_powershell,
         }
-        
+
         generator = generators.get(shell)
         if generator is None:
             raise ValueError(f"Unsupported shell: {shell}")
-        
+
         return generator()
-    
+
     def _generate_bash(self) -> str:
         """Generate Bash completion script."""
-        script = '''#!/bin/bash
+        script = """#!/bin/bash
 # ReconnV2 Bash Completion
 # Generated automatically - do not edit
 
@@ -284,12 +337,12 @@ _recon_completions() {
 }
 
 complete -F _recon_completions recon
-'''
+"""
         return script
-    
+
     def _generate_zsh(self) -> str:
         """Generate Zsh completion script."""
-        script = '''#compdef recon
+        script = """#compdef recon
 # ReconnV2 Zsh Completion
 # Generated automatically - do not edit
 
@@ -407,12 +460,12 @@ _recon() {
 }
 
 _recon "$@"
-'''
+"""
         return script
-    
+
     def _generate_fish(self) -> str:
         """Generate Fish completion script."""
-        script = '''# ReconnV2 Fish Completion
+        script = """# ReconnV2 Fish Completion
 # Generated automatically - do not edit
 
 # Disable file completion by default
@@ -487,12 +540,12 @@ complete -c recon -n '__fish_seen_subcommand_from schedule' -a resume -d 'Resume
 complete -c recon -n '__fish_seen_subcommand_from api' -a start -d 'Start API server'
 complete -c recon -n '__fish_seen_subcommand_from api' -a stop -d 'Stop API server'
 complete -c recon -n '__fish_seen_subcommand_from api' -a status -d 'Show API server status'
-'''
+"""
         return script
-    
+
     def _generate_powershell(self) -> str:
         """Generate PowerShell completion script."""
-        script = '''# ReconnV2 PowerShell Completion
+        script = """# ReconnV2 PowerShell Completion
 # Generated automatically - do not edit
 
 $ReconCommands = @{
@@ -586,40 +639,43 @@ Register-ArgumentCompleter -Native -CommandName recon -ScriptBlock {
         }
     }
 }
-'''
+"""
         return script
 
 
 class CompletionInstaller:
     """Install shell completion scripts."""
-    
+
     COMPLETION_PATHS: Dict[Shell, Path] = {
         Shell.BASH: Path.home() / ".bash_completion.d" / "recon.bash",
         Shell.ZSH: Path.home() / ".zsh" / "completions" / "_recon",
         Shell.FISH: Path.home() / ".config" / "fish" / "completions" / "recon.fish",
-        Shell.POWERSHELL: Path.home() / "Documents" / "WindowsPowerShell" / "recon_completion.ps1",
+        Shell.POWERSHELL: Path.home()
+        / "Documents"
+        / "WindowsPowerShell"
+        / "recon_completion.ps1",
     }
-    
+
     def __init__(self):
         self.generator = CompletionGenerator(RECON_COMMANDS)
-    
+
     def install(self, shell: Shell) -> Path:
         """Install completion script for specified shell."""
         script = self.generator.generate(shell)
         path = self.COMPLETION_PATHS[shell]
-        
+
         # Create parent directory if needed
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Write script
         path.write_text(script)
-        
+
         # Make executable (Unix only)
         if os.name != "nt":
             path.chmod(0o755)
-        
+
         return path
-    
+
     def uninstall(self, shell: Shell) -> bool:
         """Uninstall completion script."""
         path = self.COMPLETION_PATHS[shell]
@@ -627,27 +683,27 @@ class CompletionInstaller:
             path.unlink()
             return True
         return False
-    
+
     def get_source_command(self, shell: Shell) -> str:
         """Get command to source the completion script."""
         path = self.COMPLETION_PATHS[shell]
-        
+
         if shell == Shell.BASH:
             return f'source "{path}"  # Add to ~/.bashrc'
         elif shell == Shell.ZSH:
-            return 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit  # Add to ~/.zshrc'
+            return "fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit  # Add to ~/.zshrc"
         elif shell == Shell.FISH:
-            return f'# Fish loads completions automatically from {path}'
+            return f"# Fish loads completions automatically from {path}"
         elif shell == Shell.POWERSHELL:
             return f'. "{path}"  # Add to $PROFILE'
-        
+
         return ""
 
 
 def get_shell() -> Optional[Shell]:
     """Detect the current shell."""
     shell_env = os.environ.get("SHELL", "")
-    
+
     if "bash" in shell_env:
         return Shell.BASH
     elif "zsh" in shell_env:
@@ -656,7 +712,7 @@ def get_shell() -> Optional[Shell]:
         return Shell.FISH
     elif os.name == "nt" or "powershell" in shell_env.lower():
         return Shell.POWERSHELL
-    
+
     return None
 
 
@@ -664,18 +720,18 @@ def install_completion(shell: Optional[Shell] = None) -> Optional[Path]:
     """Install completion script for shell."""
     if shell is None:
         shell = get_shell()
-    
+
     if shell is None:
         print("Could not detect shell. Please specify: bash, zsh, fish, or powershell")
         return None
-    
+
     installer = CompletionInstaller()
     path = installer.install(shell)
-    
+
     print(f"✅ Installed completion script to: {path}")
     print("\n📋 To activate, run:")
     print(f"   {installer.get_source_command(shell)}")
-    
+
     return path
 
 
@@ -688,14 +744,14 @@ def generate_completion(shell: Shell) -> str:
 if __name__ == "__main__":
     # CLI for testing
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Shell completion installer")
     parser.add_argument("action", choices=["install", "generate", "uninstall"])
     parser.add_argument("--shell", choices=["bash", "zsh", "fish", "powershell"])
-    
+
     args = parser.parse_args()
     shell = Shell(args.shell) if args.shell else get_shell()
-    
+
     if args.action == "install":
         install_completion(shell)
     elif args.action == "generate":

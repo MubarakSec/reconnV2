@@ -24,10 +24,18 @@ MIN_BACKUP_BYTES = 200
 
 JS_SECRET_PATTERNS = [
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("aws_secret", re.compile(r"(?i)aws(.{0,4})?secret(.{0,4})?=\s*['\"]([A-Za-z0-9/+]{40})['\"]")),
+    (
+        "aws_secret",
+        re.compile(r"(?i)aws(.{0,4})?secret(.{0,4})?=\s*['\"]([A-Za-z0-9/+]{40})['\"]"),
+    ),
     ("google_api", re.compile(r"AIza[0-9A-Za-z\-_]{35}")),
     ("slack_token", re.compile(r"xox[aboprs]-[A-Za-z0-9-]{10,48}")),
-    ("generic_token", re.compile(r"(?i)(?:api|access|secret|token|key)[\w.-]{0,10}['\"]?\s*[:=]\s*['\"][A-Za-z0-9_\-]{16,}['\"]")),
+    (
+        "generic_token",
+        re.compile(
+            r"(?i)(?:api|access|secret|token|key)[\w.-]{0,10}['\"]?\s*[:=]\s*['\"][A-Za-z0-9_\-]{16,}['\"]"
+        ),
+    ),
 ]
 
 USER_AGENT = "recon-cli-active/0.1"
@@ -56,13 +64,21 @@ def create_session(
     return session
 
 
-def _top_urls(url_entries: Sequence[Dict[str, object]], limit: int = 50, min_score: int = 10) -> List[Dict[str, object]]:
-    candidates = [entry for entry in url_entries if int(entry.get("score", 0)) >= min_score and not entry.get("noise")]
+def _top_urls(
+    url_entries: Sequence[Dict[str, object]], limit: int = 50, min_score: int = 10
+) -> List[Dict[str, object]]:
+    candidates = [
+        entry
+        for entry in url_entries
+        if int(entry.get("score", 0)) >= min_score and not entry.get("noise")
+    ]
     candidates.sort(key=lambda entry: entry.get("score", 0), reverse=True)
     return candidates[:limit]
 
 
-def run_backup_hunt(url_entries: Sequence[Dict[str, object]], session: requests.Session) -> ActiveResult:
+def run_backup_hunt(
+    url_entries: Sequence[Dict[str, object]], session: requests.Session
+) -> ActiveResult:
     candidates = _top_urls(url_entries, limit=40)
     hits: List[Dict[str, object]] = []
     findings: List[Dict[str, object]] = []
@@ -78,7 +94,9 @@ def run_backup_hunt(url_entries: Sequence[Dict[str, object]], session: requests.
             variant_path = f"{path}{suffix}"
             variant_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", variant_path)
             try:
-                resp = session.get(variant_url, timeout=6, allow_redirects=True, stream=True)
+                resp = session.get(
+                    variant_url, timeout=6, allow_redirects=True, stream=True
+                )
             except requests.RequestException:
                 continue
             status = resp.status_code
@@ -148,15 +166,16 @@ def run_cors_checks(hosts: Iterable[str], session: requests.Session) -> ActiveRe
         except requests.RequestException:
             continue
         allow_origin = resp.headers.get("Access-Control-Allow-Origin")
-        allow_credentials = resp.headers.get("Access-Control-Allow-Credentials", "false").lower() == "true"
+        allow_credentials = (
+            resp.headers.get("Access-Control-Allow-Credentials", "false").lower()
+            == "true"
+        )
         misconfig = False
-        detail = None
         if allow_origin == "*" and allow_credentials:
             misconfig = True
-            detail = "Wildcard ACAO with credentials"
         elif allow_origin and allow_origin.lower() == test_origin.lower():
             misconfig = True
-            detail = "Origin reflection detected"
+
         if misconfig:
             findings.append(
                 {
@@ -198,7 +217,11 @@ def run_response_diff(hosts: Sequence[str], session: requests.Session) -> Active
             continue
         body = resp.text[:4000]
         fp = hashlib.sha256(body.encode("utf-8", "ignore")).hexdigest()
-        fingerprints[host] = {"hash": fp, "status": resp.status_code, "length": len(body)}
+        fingerprints[host] = {
+            "hash": fp,
+            "status": resp.status_code,
+            "length": len(body),
+        }
         groups[fp].append(host)
 
     findings: List[Dict[str, object]] = []
@@ -227,7 +250,9 @@ def run_response_diff(hosts: Sequence[str], session: requests.Session) -> Active
     return ActiveResult(findings, artifact, "http_diff.json")
 
 
-def run_js_secret_harvest(url_entries: Sequence[Dict[str, object]], session: requests.Session) -> ActiveResult:
+def run_js_secret_harvest(
+    url_entries: Sequence[Dict[str, object]], session: requests.Session
+) -> ActiveResult:
     js_candidates = [
         entry
         for entry in url_entries
@@ -252,8 +277,12 @@ def run_js_secret_harvest(url_entries: Sequence[Dict[str, object]], session: req
             for match in pattern.findall(text):
                 match_value = match if isinstance(match, str) else match[-1]
                 match_str = str(match_value)
-                match_hash = hashlib.sha256(match_str.encode("utf-8", "ignore")).hexdigest()[:16]
-                matches.append({"type": name, "hash": match_hash, "length": len(match_str)})
+                match_hash = hashlib.sha256(
+                    match_str.encode("utf-8", "ignore")
+                ).hexdigest()[:16]
+                matches.append(
+                    {"type": name, "hash": match_hash, "length": len(match_str)}
+                )
         if matches:
             findings.append(
                 {

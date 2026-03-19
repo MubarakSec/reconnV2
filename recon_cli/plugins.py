@@ -26,7 +26,11 @@ def load_stage_plugins(logger=None) -> List[Stage]:
         if not token:
             continue
         if ":" not in token:
-            _log(logger, "warning", f"Plugin stage '{token}' invalid, expected module:Class")
+            _log(
+                logger,
+                "warning",
+                f"Plugin stage '{token}' invalid, expected module:Class",
+            )
             continue
         mod_name, class_name = token.split(":", 1)
         try:
@@ -36,12 +40,20 @@ def load_stage_plugins(logger=None) -> List[Stage]:
             continue
         cls = getattr(module, class_name, None)
         if cls is None:
-            _log(logger, "warning", f"Plugin stage class {class_name} not found in {mod_name}")
+            _log(
+                logger,
+                "warning",
+                f"Plugin stage class {class_name} not found in {mod_name}",
+            )
             continue
         try:
             instance = cls() if isinstance(cls, type) else cls
         except Exception as exc:
-            _log(logger, "warning", f"Failed to instantiate plugin stage {class_name}: {exc}")
+            _log(
+                logger,
+                "warning",
+                f"Failed to instantiate plugin stage {class_name}: {exc}",
+            )
             continue
         if not isinstance(instance, Stage):
             _log(logger, "warning", f"Plugin {class_name} is not a Stage; skipping")

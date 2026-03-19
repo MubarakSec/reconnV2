@@ -40,7 +40,9 @@ class VerifyFindingsStage(Stage):
             per_host=float(getattr(runtime, "verify_per_host_rps", 0)),
         )
 
-        candidates_by_host: Dict[str, List[Tuple[int, str, Dict[str, object]]]] = defaultdict(list)
+        candidates_by_host: Dict[str, List[Tuple[int, str, Dict[str, object]]]] = (
+            defaultdict(list)
+        )
         trash_count = 0
         for entry in iter_jsonl(results_path):
             if not isinstance(entry, dict):
@@ -120,7 +122,11 @@ class VerifyFindingsStage(Stage):
             final_url = str(getattr(resp, "url", "")) or url
             content_length = resp.headers.get("Content-Length")
             resp.close()
-            signal_type = "verified_blocked" if resp.status_code in {401, 403, 429, 503} else "verified_live"
+            signal_type = (
+                "verified_blocked"
+                if resp.status_code in {401, 403, 429, 503}
+                else "verified_live"
+            )
             signal_id = context.emit_signal(
                 signal_type,
                 "url",
@@ -148,7 +154,9 @@ class VerifyFindingsStage(Stage):
             records.append(record)
 
         artifact_path = context.record.paths.artifact("verification.json")
-        artifact_path.write_text(json.dumps(records, indent=2, sort_keys=True), encoding="utf-8")
+        artifact_path.write_text(
+            json.dumps(records, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
         stats = context.record.metadata.stats.setdefault("verification", {})
         stats.update(
@@ -170,8 +178,7 @@ class VerifyFindingsStage(Stage):
         An honesty filter to skip low-value or likely false-positive findings.
         """
         etype = str(entry.get("type") or "").lower()
-        source = str(entry.get("source") or "").lower()
-        
+
         # IDOR suspects with no semantic reasons are usually just status code noise
         if etype == "idor_suspect":
             details = entry.get("details")
@@ -179,15 +186,21 @@ class VerifyFindingsStage(Stage):
                 reasons = details.get("reasons", [])
                 if not reasons or (isinstance(reasons, list) and len(reasons) == 0):
                     return True
-        
+
         # Skip findings on common static/CDN hosts unless verified
         url = str(entry.get("url") or "").lower()
-        static_noise = {"cloudfront.net", "s3.amazonaws.com", "storage.googleapis.com", "wp-content", "assets/"}
+        static_noise = {
+            "cloudfront.net",
+            "s3.amazonaws.com",
+            "storage.googleapis.com",
+            "wp-content",
+            "assets/",
+        }
         if any(noise in url for noise in static_noise):
             tags = entry.get("tags", [])
             if not isinstance(tags, list) or "confirmed" not in tags:
                 return True
-                
+
         # Skip findings with very low scores that aren't verified
         if int(entry.get("score", 0)) < 40:
             return True
@@ -199,7 +212,12 @@ class VerifyFindingsStage(Stage):
         if entry.get("finding_type"):
             return True
         entry_type = entry.get("type")
-        if isinstance(entry_type, str) and entry_type in {"finding", "vulnerability", "vuln", "idor_suspect"}:
+        if isinstance(entry_type, str) and entry_type in {
+            "finding",
+            "vulnerability",
+            "vuln",
+            "idor_suspect",
+        }:
             return True
         return False
 

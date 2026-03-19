@@ -46,9 +46,15 @@ class CMSScanStage(Stage):
         "/magento",
     )
     DRUPAL_MODULE_RE = re.compile(r"/modules/(?:contrib/)?([^/\\s\"']+)", re.IGNORECASE)
-    DRUPAL_LEGACY_RE = re.compile(r"/sites/(?:all|default)/modules/([^/\\s\"']+)", re.IGNORECASE)
-    MAGENTO_THEME_RE = re.compile(r"/static/(?:version\\d+/)?frontend/([^/\\s\"']+/[^/\\s\"']+)", re.IGNORECASE)
-    MAGENTO_ADMIN_THEME_RE = re.compile(r"/static/(?:version\\d+/)?adminhtml/([^/\\s\"']+/[^/\\s\"']+)", re.IGNORECASE)
+    DRUPAL_LEGACY_RE = re.compile(
+        r"/sites/(?:all|default)/modules/([^/\\s\"']+)", re.IGNORECASE
+    )
+    MAGENTO_THEME_RE = re.compile(
+        r"/static/(?:version\\d+/)?frontend/([^/\\s\"']+/[^/\\s\"']+)", re.IGNORECASE
+    )
+    MAGENTO_ADMIN_THEME_RE = re.compile(
+        r"/static/(?:version\\d+/)?adminhtml/([^/\\s\"']+/[^/\\s\"']+)", re.IGNORECASE
+    )
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_cms_scan", False))
@@ -115,7 +121,9 @@ class CMSScanStage(Stage):
             for cms in sorted(cms_targets[host]):
                 if limiter and not limiter.wait_for_slot(base_url, timeout=timeout):
                     continue
-                scan_result = self._run_scan(context, cms, host, base_url, timeout, cms_dir)
+                scan_result = self._run_scan(
+                    context, cms, host, base_url, timeout, cms_dir
+                )
                 if not scan_result:
                     continue
                 tool_used = scan_result["tool"]
@@ -140,7 +148,11 @@ class CMSScanStage(Stage):
                 if artifact_path is None:
                     artifact_path = cms_dir / f"{cms}_{safe_host}_{hash_id}.txt"
                     artifact_path.write_text(scan_output, encoding="utf-8")
-                artifact_rel = str(artifact_path.relative_to(context.record.paths.root)) if artifact_path else ""
+                artifact_rel = (
+                    str(artifact_path.relative_to(context.record.paths.root))
+                    if artifact_path
+                    else ""
+                )
 
                 cms_payload = {
                     "type": "cms",
@@ -157,17 +169,31 @@ class CMSScanStage(Stage):
                 if context.results.append(cms_payload):
                     artifacts.append(cms_payload)
 
-                cves = set(re.findall(r"CVE-\\d{4}-\\d{4,7}", scan_output, re.IGNORECASE))
+                cves = set(
+                    re.findall(r"CVE-\\d{4}-\\d{4,7}", scan_output, re.IGNORECASE)
+                )
                 for finding in finding_payloads:
                     if not isinstance(finding, dict):
                         continue
                     description = str(finding.get("description") or "")
-                    details = finding.get("details") if isinstance(finding.get("details"), dict) else {}
+                    details = (
+                        finding.get("details")
+                        if isinstance(finding.get("details"), dict)
+                        else {}
+                    )
                     template_id = str(details.get("template_id") or "")
-                    matched = re.findall(r"CVE-\\d{4}-\\d{4,7}", f"{description} {template_id}", re.IGNORECASE)
+                    matched = re.findall(
+                        r"CVE-\\d{4}-\\d{4,7}",
+                        f"{description} {template_id}",
+                        re.IGNORECASE,
+                    )
                     cves.update(matched)
                 cves = sorted(cves)
-                vuln_hit = bool(finding_payloads) or bool(cves) or re.search(r"vulnerab|exploit", scan_output, re.IGNORECASE)
+                vuln_hit = (
+                    bool(finding_payloads)
+                    or bool(cves)
+                    or re.search(r"vulnerab|exploit", scan_output, re.IGNORECASE)
+                )
                 if finding_payloads:
                     for finding in finding_payloads:
                         if isinstance(finding, dict):
@@ -234,8 +260,12 @@ class CMSScanStage(Stage):
 
         if artifacts:
             manifest_path = cms_dir / "cms_manifest.json"
-            manifest_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
-            stats["manifest"] = str(manifest_path.relative_to(context.record.paths.root))
+            manifest_path.write_text(
+                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            stats["manifest"] = str(
+                manifest_path.relative_to(context.record.paths.root)
+            )
 
         stats["scanned"] = scanned
         stats["findings"] = findings
@@ -265,7 +295,9 @@ class CMSScanStage(Stage):
                     info["tags"].add(tag)
             technologies = entry.get("technologies") or []
             if isinstance(technologies, list):
-                info["technologies"].update({str(item).lower() for item in technologies if item})
+                info["technologies"].update(
+                    {str(item).lower() for item in technologies if item}
+                )
             elif technologies:
                 info["technologies"].add(str(technologies).lower())
         return host_info
@@ -283,12 +315,19 @@ class CMSScanStage(Stage):
         if CommandExecutor.available("droopescan"):
             cmd = ["droopescan", "scan", cms, "-u", base_url]
             try:
-                result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+                result = executor.run(
+                    cmd, check=False, timeout=timeout, capture_output=True
+                )
             except CommandError as exc:
                 context.logger.warning("droopescan failed for %s: %s", host, exc)
                 return {}
             output = (result.stdout or "") + "\n" + (result.stderr or "")
-            return {"tool": "droopescan", "output": output.strip(), "findings": [], "artifact_path": None}
+            return {
+                "tool": "droopescan",
+                "output": output.strip(),
+                "findings": [],
+                "artifact_path": None,
+            }
 
         if scanner_integrations is not None and CommandExecutor.available("nuclei"):
             tags = [cms]

@@ -53,11 +53,15 @@ class HTMLFormMiningStage(Stage):
                         "method": (attrs_dict.get("method") or "get").lower(),
                         "inputs": [],
                     }
-                elif tag in {"input", "textarea", "select"} and self._current is not None:
+                elif (
+                    tag in {"input", "textarea", "select"} and self._current is not None
+                ):
                     name = attrs_dict.get("name") or attrs_dict.get("id") or ""
                     input_type = attrs_dict.get("type") or tag
                     if name:
-                        self._current["inputs"].append({"name": name, "type": input_type})
+                        self._current["inputs"].append(
+                            {"name": name, "type": input_type}
+                        )
 
             def handle_endtag(self, tag):
                 if tag == "form" and self._current is not None:
@@ -100,7 +104,10 @@ class HTMLFormMiningStage(Stage):
             if resp.status_code >= 400:
                 continue
             content_type = resp.headers.get("Content-Type", "")
-            if "text/html" not in content_type and "<form" not in (resp.text or "").lower():
+            if (
+                "text/html" not in content_type
+                and "<form" not in (resp.text or "").lower()
+            ):
                 continue
 
             parser = FormParser()
@@ -151,7 +158,9 @@ class HTMLFormMiningStage(Stage):
                     artifacts.append(payload)
 
         max_params = int(getattr(runtime, "html_form_max_params", 80))
-        for name, count in sorted(params.items(), key=lambda item: item[1], reverse=True)[:max_params]:
+        for name, count in sorted(
+            params.items(), key=lambda item: item[1], reverse=True
+        )[:max_params]:
             payload = {
                 "type": "parameter",
                 "source": "form-mining",
@@ -165,7 +174,9 @@ class HTMLFormMiningStage(Stage):
 
         if artifacts:
             artifact_path = context.record.paths.artifact("html_forms.json")
-            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            artifact_path.write_text(
+                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
         stats = context.record.metadata.stats.setdefault("html_form_mining", {})
         stats["forms"] = forms_saved

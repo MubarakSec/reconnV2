@@ -25,7 +25,9 @@ def normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return _normalize_json_schema(normalized, root=normalized)
 
 
-def _normalize_json_schema(json_schema: object, *, root: dict[str, object]) -> dict[str, Any]:
+def _normalize_json_schema(
+    json_schema: object, *, root: dict[str, object]
+) -> dict[str, Any]:
     if not isinstance(json_schema, dict):
         raise TypeError(f"Expected schema dictionary, got {type(json_schema).__name__}")
 
@@ -56,12 +58,17 @@ def _normalize_json_schema(json_schema: object, *, root: dict[str, object]) -> d
             key: _normalize_json_schema(value, root=root)
             for key, value in properties.items()
         }
-    elif json_schema.get("type") == "object" and "additionalProperties" not in json_schema:
+    elif (
+        json_schema.get("type") == "object"
+        and "additionalProperties" not in json_schema
+    ):
         json_schema["additionalProperties"] = False
 
     additional_properties = json_schema.get("additionalProperties")
     if isinstance(additional_properties, dict):
-        json_schema["additionalProperties"] = _normalize_json_schema(additional_properties, root=root)
+        json_schema["additionalProperties"] = _normalize_json_schema(
+            additional_properties, root=root
+        )
 
     items = json_schema.get("items")
     if isinstance(items, dict):
@@ -71,7 +78,9 @@ def _normalize_json_schema(json_schema: object, *, root: dict[str, object]) -> d
         value = json_schema.get(key)
         if isinstance(value, list):
             json_schema[key] = [
-                _normalize_json_schema(entry, root=root) if isinstance(entry, dict) else entry
+                _normalize_json_schema(entry, root=root)
+                if isinstance(entry, dict)
+                else entry
                 for entry in value
             ]
 

@@ -16,7 +16,9 @@ from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.jsonl import read_jsonl
 
 
-UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
 
@@ -45,9 +47,32 @@ class IDORStage(Stage):
         "tenant",
         "project",
     }
-    SENSITIVE_KEYS = {"email", "role", "roles", "balance", "owner_id", "user_id", "account_id"}
-    SUBJECT_KEYS = {"id", "user_id", "owner_id", "account_id", "uid", "tenant_id", "org_id", "project_id"}
-    AUTH_ERROR_HINTS = ("unauthorized", "forbidden", "access denied", "permission", "login required")
+    SENSITIVE_KEYS = {
+        "email",
+        "role",
+        "roles",
+        "balance",
+        "owner_id",
+        "user_id",
+        "account_id",
+    }
+    SUBJECT_KEYS = {
+        "id",
+        "user_id",
+        "owner_id",
+        "account_id",
+        "uid",
+        "tenant_id",
+        "org_id",
+        "project_id",
+    }
+    AUTH_ERROR_HINTS = (
+        "unauthorized",
+        "forbidden",
+        "access denied",
+        "permission",
+        "login required",
+    )
     MAX_TARGETS = 40
     MAX_PER_HOST = 6
     MAX_VARIANTS_PER_PARAM = 7
@@ -116,45 +141,76 @@ class IDORStage(Stage):
                 requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
             except Exception:
                 pass
-        stats = context.record.metadata.stats.setdefault("idor", {"tests": 0, "suspects": 0})
+        stats = context.record.metadata.stats.setdefault(
+            "idor", {"tests": 0, "suspects": 0}
+        )
         other_id = getattr(runtime, "idor_other_identifier", None)
         timeout = getattr(runtime, "idor_timeout", 10)
-        baseline_cache: Dict[Tuple[str, str], Dict[str, object]] = {}
         for candidate in candidates:
             variants = self._generate_variants(candidate, other_id)
             if not variants:
                 continue
-            
+
             # Triple check logic:
             # 1. Baseline (Token A) - Success
             # 2. Variant (Token A) - Success (Different ID)
             # 3. Variant (Token B) - Failure (Different User)
             # 4. Variant (Anon) - Failure
-            
+
             for variant_url, variant_meta in variants:
                 # 1. Test with Token A (legitimate user)
-                data_a = self._fetch(session, context, variant_url, "token-a", tokens[1][1] if len(tokens) > 1 else None, timeout, verify_tls, limiter)
+                data_a = self._fetch(
+                    session,
+                    context,
+                    variant_url,
+                    "token-a",
+                    tokens[1][1] if len(tokens) > 1 else None,
+                    timeout,
+                    verify_tls,
+                    limiter,
+                )
                 if not data_a or data_a["status"] >= 400:
                     continue
-                
+
                 # 2. Test with Token B (attacker/other user)
                 token_b = tokens[2][1] if len(tokens) > 2 else None
                 if not token_b:
-                    # If no Token B, we can't fully "confirm" IDOR honesty-style, 
+                    # If no Token B, we can't fully "confirm" IDOR honesty-style,
                     # but we can check vs Anon.
-                    data_b = self._fetch(session, context, variant_url, "anon", None, timeout, verify_tls, limiter)
+                    data_b = self._fetch(
+                        session,
+                        context,
+                        variant_url,
+                        "anon",
+                        None,
+                        timeout,
+                        verify_tls,
+                        limiter,
+                    )
                 else:
-                    data_b = self._fetch(session, context, variant_url, "token-b", token_b, timeout, verify_tls, limiter)
-                
+                    data_b = self._fetch(
+                        session,
+                        context,
+                        variant_url,
+                        "token-b",
+                        token_b,
+                        timeout,
+                        verify_tls,
+                        limiter,
+                    )
+
                 if not data_b:
                     continue
 
                 reasons = self._semantic_reasons(data_a, data_b)
                 # If Token B gets same data as Token A, it's a potential IDOR
                 is_confirmed = False
-                if data_b["status"] == data_a["status"] and data_b["body_md5"] == data_a["body_md5"]:
+                if (
+                    data_b["status"] == data_a["status"]
+                    and data_b["body_md5"] == data_a["body_md5"]
+                ):
                     is_confirmed = True
-                
+
                 if is_confirmed or reasons:
                     stats["tests"] += 1
                     finding = self._assemble_finding(
@@ -165,21 +221,31 @@ class IDORStage(Stage):
                         token_b,
                         data_a,
                         data_b,
-                        reasons if reasons else ["unauthorized_access_confirmed"]
+                        reasons if reasons else ["unauthorized_access_confirmed"],
                     )
                     if is_confirmed:
                         finding["type"] = "finding"
                         finding["finding_type"] = "idor"
                         finding["confidence"] = "high"
                         finding["tags"].append("confirmed")
-                    
+
                     if context.results.append(finding):
                         stats["suspects"] += 1
         context.manager.update_metadata(context.record)
 
-    def _collect_candidates(self, context: PipelineContext, items: Iterable[Dict[str, object]]) -> List[Candidate]:
-        max_targets = max(1, int(getattr(context.runtime_config, "idor_max_targets", self.MAX_TARGETS)))
-        max_per_host = max(1, int(getattr(context.runtime_config, "idor_max_per_host", self.MAX_PER_HOST)))
+    def _collect_candidates(
+        self, context: PipelineContext, items: Iterable[Dict[str, object]]
+    ) -> List[Candidate]:
+        max_targets = max(
+            1,
+            int(getattr(context.runtime_config, "idor_max_targets", self.MAX_TARGETS)),
+        )
+        max_per_host = max(
+            1,
+            int(
+                getattr(context.runtime_config, "idor_max_per_host", self.MAX_PER_HOST)
+            ),
+        )
         scored: List[Tuple[int, Candidate]] = []
         for entry in items:
             if entry.get("type") != "url":
@@ -201,10 +267,12 @@ class IDORStage(Stage):
                     continue
                 if self._looks_like_identifier(value):
                     matched_params.append(key)
-            path_parts = [part for part in parsed.path.split('/') if part]
+            path_parts = [part for part in parsed.path.split("/") if part]
             matched_path_indexes: List[int] = []
             for idx, part in enumerate(path_parts):
-                if self._looks_like_identifier(part) or any(keyword in part.lower() for keyword in self.PARAM_KEYWORDS):
+                if self._looks_like_identifier(part) or any(
+                    keyword in part.lower() for keyword in self.PARAM_KEYWORDS
+                ):
                     matched_path_indexes.append(idx)
             if not matched_params and not matched_path_indexes:
                 continue
@@ -278,7 +346,9 @@ class IDORStage(Stage):
             score -= 40
         return score
 
-    def _generate_variants(self, candidate: Candidate, other_id: Optional[str]) -> List[Tuple[str, Dict[str, object]]]:
+    def _generate_variants(
+        self, candidate: Candidate, other_id: Optional[str]
+    ) -> List[Tuple[str, Dict[str, object]]]:
         variants: List[Tuple[str, Dict[str, object]]] = []
         parsed = candidate.parsed
         if candidate.matched_params:
@@ -300,7 +370,16 @@ class IDORStage(Stage):
                             new_params.append((name, value))
                     new_query = urlencode(new_params, doseq=True)
                     new_url = urlunparse(parsed._replace(query=new_query))
-                    variants.append((new_url, {"parameter": key, "original": base_value, "variant": variant_value}))
+                    variants.append(
+                        (
+                            new_url,
+                            {
+                                "parameter": key,
+                                "original": base_value,
+                                "variant": variant_value,
+                            },
+                        )
+                    )
         if candidate.matched_path_indexes:
             for idx in candidate.matched_path_indexes:
                 base_value = candidate.path_parts[idx]
@@ -311,7 +390,16 @@ class IDORStage(Stage):
                     new_parts[idx] = variant_value
                     new_path = "/" + "/".join(new_parts)
                     new_url = urlunparse(parsed._replace(path=new_path))
-                    variants.append((new_url, {"path_index": idx, "original": base_value, "variant": variant_value}))
+                    variants.append(
+                        (
+                            new_url,
+                            {
+                                "path_index": idx,
+                                "original": base_value,
+                                "variant": variant_value,
+                            },
+                        )
+                    )
         seen = set()
         unique_variants: List[Tuple[str, Dict[str, object]]] = []
         for url, meta in variants:
@@ -361,9 +449,17 @@ class IDORStage(Stage):
         if limiter and not limiter.wait_for_slot(url, timeout=timeout):
             return None
         try:
-            resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                verify=verify_tls,
+                allow_redirects=True,
+            )
         except requests.exceptions.RequestException as exc:
-            context.logger.debug("IDOR request failed for %s (%s): %s", url, auth_label, exc)
+            context.logger.debug(
+                "IDOR request failed for %s (%s): %s", url, auth_label, exc
+            )
             if limiter:
                 limiter.on_error(url)
             return None
@@ -390,7 +486,9 @@ class IDORStage(Stage):
         }
         return data
 
-    def _extract_sensitive(self, data_json: Dict[str, object], text: str) -> Dict[str, object]:
+    def _extract_sensitive(
+        self, data_json: Dict[str, object], text: str
+    ) -> Dict[str, object]:
         payload: Dict[str, object] = {}
         if data_json:
             self._collect_sensitive(data_json, payload, prefix="", depth=0)
@@ -414,7 +512,9 @@ class IDORStage(Stage):
                     break
         return subjects
 
-    def _semantic_reasons(self, baseline: Dict[str, object], variant: Dict[str, object]) -> List[str]:
+    def _semantic_reasons(
+        self, baseline: Dict[str, object], variant: Dict[str, object]
+    ) -> List[str]:
         reasons: List[str] = []
         base_status = int(baseline.get("status") or 0)
         var_status = int(variant.get("status") or 0)
@@ -488,8 +588,12 @@ class IDORStage(Stage):
             "details": {
                 **meta,
                 "reasons": reasons,
-                "baseline_subject_ids": sorted(set(baseline.get("subject_ids") or []))[:20],
-                "variant_subject_ids": sorted(set(variant.get("subject_ids") or []))[:20],
+                "baseline_subject_ids": sorted(set(baseline.get("subject_ids") or []))[
+                    :20
+                ],
+                "variant_subject_ids": sorted(set(variant.get("subject_ids") or []))[
+                    :20
+                ],
             },
             "poc": poc_command,
             "score": score,
@@ -506,7 +610,9 @@ class IDORStage(Stage):
             return data
         return {}
 
-    def _collect_sensitive(self, node: object, out: Dict[str, object], *, prefix: str, depth: int) -> None:
+    def _collect_sensitive(
+        self, node: object, out: Dict[str, object], *, prefix: str, depth: int
+    ) -> None:
         if depth > 4:
             return
         if isinstance(node, dict):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import requests
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -28,7 +29,9 @@ class IDORValidatorStage(Stage):
             return
 
         runtime = context.runtime_config
-        max_candidates = max(1, int(getattr(runtime, "idor_validator_max_candidates", 40)))
+        max_candidates = max(
+            1, int(getattr(runtime, "idor_validator_max_candidates", 40))
+        )
         max_per_host = max(1, int(getattr(runtime, "idor_validator_max_per_host", 8)))
         min_score = int(getattr(runtime, "idor_validator_min_score", 60))
         timeout = max(1, int(getattr(runtime, "idor_validator_timeout", 10)))
@@ -80,18 +83,25 @@ class IDORValidatorStage(Stage):
 
             token_a = self._resolve_token("token-a", runtime)
             token_b = self._resolve_token("token-b", runtime)
-            
+
             if not token_a:
                 skipped += 1
                 continue
 
             # Step 1: Baseline for User A (The legitimate owner)
             profile_a, state_a = self._fetch_profile(
-                context, session, helper, baseline_url,
-                auth_label="token-a", token=token_a,
-                timeout=timeout, verify_tls=verify_tls,
-                retries=retry_count, backoff_base=retry_backoff_base,
-                backoff_factor=retry_backoff_factor, limiter=limiter
+                context,
+                session,
+                helper,
+                baseline_url,
+                auth_label="token-a",
+                token=token_a,
+                timeout=timeout,
+                verify_tls=verify_tls,
+                retries=retry_count,
+                backoff_base=retry_backoff_base,
+                backoff_factor=retry_backoff_factor,
+                limiter=limiter,
             )
             if not profile_a or profile_a["status"] >= 400:
                 skipped += 1
@@ -101,44 +111,66 @@ class IDORValidatorStage(Stage):
             profile_b = None
             if token_b:
                 profile_b, state_b = self._fetch_profile(
-                    context, session, helper, baseline_url,
-                    auth_label="token-b", token=token_b,
-                    timeout=timeout, verify_tls=verify_tls,
-                    retries=retry_count, backoff_base=retry_backoff_base,
-                    backoff_factor=retry_backoff_factor, limiter=limiter
+                    context,
+                    session,
+                    helper,
+                    baseline_url,
+                    auth_label="token-b",
+                    token=token_b,
+                    timeout=timeout,
+                    verify_tls=verify_tls,
+                    retries=retry_count,
+                    backoff_base=retry_backoff_base,
+                    backoff_factor=retry_backoff_factor,
+                    limiter=limiter,
                 )
-            
+
             # Step 3: check with Anon
             profile_anon, state_anon = self._fetch_profile(
-                context, session, helper, baseline_url,
-                auth_label="anon", token=None,
-                timeout=timeout, verify_tls=verify_tls,
-                retries=retry_count, backoff_base=retry_backoff_base,
-                backoff_factor=retry_backoff_factor, limiter=limiter
+                context,
+                session,
+                helper,
+                baseline_url,
+                auth_label="anon",
+                token=None,
+                timeout=timeout,
+                verify_tls=verify_tls,
+                retries=retry_count,
+                backoff_base=retry_backoff_base,
+                backoff_factor=retry_backoff_factor,
+                limiter=limiter,
             )
 
-            # HONESTY CHECK: 
+            # HONESTY CHECK:
             # If Token B or Anon gets the same data (MD5 + Status) as Token A, it's a confirmed IDOR.
             # If they get 401/403 or different data, it's NOT a confirmed IDOR.
-            
+
             is_confirmed = False
             reasons = []
             final_profile = None
             final_auth = "none"
 
-            if profile_b and profile_b["status"] == profile_a["status"] and profile_b["body_md5"] == profile_a["body_md5"]:
+            if (
+                profile_b
+                and profile_b["status"] == profile_a["status"]
+                and profile_b["body_md5"] == profile_a["body_md5"]
+            ):
                 is_confirmed = True
                 reasons.append("cross_user_access_confirmed")
                 final_profile = profile_b
                 final_auth = "token-b"
-            elif profile_anon and profile_anon["status"] == profile_a["status"] and profile_anon["body_md5"] == profile_a["body_md5"]:
+            elif (
+                profile_anon
+                and profile_anon["status"] == profile_a["status"]
+                and profile_anon["body_md5"] == profile_a["body_md5"]
+            ):
                 is_confirmed = True
                 reasons.append("unauthenticated_access_confirmed")
                 final_profile = profile_anon
                 final_auth = "anon"
-            
+
             if not is_confirmed:
-                # Still check semantic reasons if status changed from 403 to 200, 
+                # Still check semantic reasons if status changed from 403 to 200,
                 # but be more conservative.
                 if profile_b:
                     semantic = helper._semantic_reasons(profile_a, profile_b)
@@ -153,19 +185,20 @@ class IDORValidatorStage(Stage):
             confidence_label = "verified" if is_confirmed else "high"
             severity = "critical" if is_confirmed else "high"
             score_floor = 95 if is_confirmed else 85
-            
+
             signal_id = context.emit_signal(
                 "idor_confirmed",
                 "url",
                 baseline_url,
                 confidence=1.0 if is_confirmed else 0.8,
                 source="idor-validator",
-                tags=["idor", "confirmed"] + (["cross-user"] if final_auth == "token-b" else []),
+                tags=["idor", "confirmed"]
+                + (["cross-user"] if final_auth == "token-b" else []),
                 evidence={
                     "reasons": reasons,
                     "baseline_status": profile_a["status"],
                     "variant_status": final_profile["status"],
-                    "auth": final_auth
+                    "auth": final_auth,
                 },
             )
 
@@ -181,8 +214,12 @@ class IDORValidatorStage(Stage):
                     "auth": final_auth,
                     "baseline_status": profile_a["status"],
                     "variant_status": final_profile["status"],
-                    "baseline_subject_ids": sorted(set(profile_a.get("subject_ids") or []))[:20],
-                    "variant_subject_ids": sorted(set(final_profile.get("subject_ids") or []))[:20],
+                    "baseline_subject_ids": sorted(
+                        set(profile_a.get("subject_ids") or [])
+                    )[:20],
+                    "variant_subject_ids": sorted(
+                        set(final_profile.get("subject_ids") or [])
+                    )[:20],
                 },
                 "proof": self._safe_poc(baseline_url, final_auth),
                 "tags": ["idor", "confirmed", "validator:idor", *reasons],
@@ -378,7 +415,7 @@ class IDORValidatorStage(Stage):
             except requests.exceptions.RequestException:
                 if attempt >= retries:
                     return None
-                delay = backoff_base * (backoff_factor ** attempt)
+                delay = backoff_base * (backoff_factor**attempt)
                 time.sleep(max(0.1, delay))
                 attempt += 1
         return None

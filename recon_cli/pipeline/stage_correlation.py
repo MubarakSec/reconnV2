@@ -45,7 +45,9 @@ class CorrelationStage(Stage):
         provider_hosts: Dict[str, set] = defaultdict(set)
         api_endpoints: Dict[str, set] = defaultdict(set)
         tech_counter = Counter()
-        features_by_host: Dict[str, Dict[str, float]] = defaultdict(lambda: {key: 0.0 for key in FEATURE_KEYS})
+        features_by_host: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: {key: 0.0 for key in FEATURE_KEYS}
+        )
         tag_histogram: Dict[str, Counter] = defaultdict(Counter)
         host_urls: Dict[str, List[Dict[str, object]]] = defaultdict(list)
         finding_sinks: List[Dict[str, object]] = []
@@ -112,9 +114,18 @@ class CorrelationStage(Stage):
                     org=entry.get("org"),
                     country=entry.get("country"),
                 )
-                graph.add_edge("subdomain", subdomain, "resolves_to", "ip", ip, source=entry.get("source"))
+                graph.add_edge(
+                    "subdomain",
+                    subdomain,
+                    "resolves_to",
+                    "ip",
+                    ip,
+                    source=entry.get("source"),
+                )
                 ip_hosts[ip].add(subdomain)
-                features["asn_score"] = max(features.get("asn_score", 0.0), compute_asn_score(entry.get("asn")))
+                features["asn_score"] = max(
+                    features.get("asn_score", 0.0), compute_asn_score(entry.get("asn"))
+                )
                 asn = entry.get("asn")
                 if asn:
                     graph.add_node("asn", asn, org=entry.get("org"))
@@ -133,7 +144,9 @@ class CorrelationStage(Stage):
                     graph.add_edge("subdomain", subdomain, "resolves_to", "ip", ip)
                 if provider and subdomain:
                     graph.add_node("provider", provider)
-                    graph.add_edge("subdomain", subdomain, "served_by", "provider", provider)
+                    graph.add_edge(
+                        "subdomain", subdomain, "served_by", "provider", provider
+                    )
                     provider_hosts[provider].add(subdomain)
             elif etype == "url":
                 url = entry.get("url")
@@ -153,7 +166,14 @@ class CorrelationStage(Stage):
                 subdomain = None
                 if host:
                     root, subdomain = ensure_host(host)
-                    graph.add_edge("subdomain", subdomain, "serves", "url", url, status=entry.get("status_code"))
+                    graph.add_edge(
+                        "subdomain",
+                        subdomain,
+                        "serves",
+                        "url",
+                        url,
+                        status=entry.get("status_code"),
+                    )
                     features = features_by_host[subdomain]
                     features["url_count"] = features.get("url_count", 0.0) + 1.0
                 parsed = urlparse(url)
@@ -169,7 +189,13 @@ class CorrelationStage(Stage):
                         if path_value not in paths:
                             paths.add(path_value)
                             api_path_total += 1
-                        graph.add_edge("subdomain", endpoint_host, "exposes_api", "endpoint", path_value)
+                        graph.add_edge(
+                            "subdomain",
+                            endpoint_host,
+                            "exposes_api",
+                            "endpoint",
+                            path_value,
+                        )
                         features_by_host[endpoint_host]["has_api"] = 1.0
                     if "service:api" not in tags:
                         tags.append("service:api")
@@ -177,17 +203,31 @@ class CorrelationStage(Stage):
                 if tags:
                     if subdomain:
                         tag_histogram[subdomain].update(tags)
-                        if any(tag in {"surface:login", "service:sso", "surface:admin"} for tag in tags):
+                        if any(
+                            tag in {"surface:login", "service:sso", "surface:admin"}
+                            for tag in tags
+                        ):
                             features_by_host[subdomain]["has_login"] = 1.0
                     for tag in tags:
                         graph.add_node("tag", tag)
                         graph.add_edge("url", url, "tag", "tag", tag)
                         if subdomain:
-                            graph.add_edge("subdomain", subdomain, "has_tag", "tag", tag)
+                            graph.add_edge(
+                                "subdomain", subdomain, "has_tag", "tag", tag
+                            )
                 if parsed.query:
-                    params = {name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+                    params = {
+                        name
+                        for name, _ in parse_qsl(parsed.query, keep_blank_values=True)
+                    }
                     if params:
-                        graph.add_edge("url", url, "has_params", "param_group", ",".join(sorted(params)))
+                        graph.add_edge(
+                            "url",
+                            url,
+                            "has_params",
+                            "param_group",
+                            ",".join(sorted(params)),
+                        )
                 if host:
                     host_urls[host].append(
                         {
@@ -199,7 +239,14 @@ class CorrelationStage(Stage):
                     )
                 if self._is_actionable_surface(url, tags):
                     actionable_surface_urls.add(url)
-                    if source_name in {"probe", "httpx", "passive", "wayback", "gau", "katana"}:
+                    if source_name in {
+                        "probe",
+                        "httpx",
+                        "passive",
+                        "wayback",
+                        "gau",
+                        "katana",
+                    }:
                         passive_surface_urls.add(url)
                 server = entry.get("server")
                 if server:
@@ -207,7 +254,9 @@ class CorrelationStage(Stage):
                     graph.add_node("tech", tech_label)
                     graph.add_edge("url", url, "served_by", "tech", tech_label)
                     if subdomain:
-                        graph.add_edge("subdomain", subdomain, "uses", "tech", tech_label)
+                        graph.add_edge(
+                            "subdomain", subdomain, "uses", "tech", tech_label
+                        )
                     tech_counter[f"server:{tech_label}"] += 1
                 for tag in entry.get("tags", []):
                     if tag.startswith("service:") or tag.startswith("env:"):
@@ -215,10 +264,17 @@ class CorrelationStage(Stage):
                         graph.add_node("tag", tag)
                         graph.add_edge("url", url, "tag", "tag", tag)
                         if subdomain:
-                            graph.add_edge("subdomain", subdomain, "has_tag", "tag", tag)
+                            graph.add_edge(
+                                "subdomain", subdomain, "has_tag", "tag", tag
+                            )
             elif etype == "finding":
-                description = entry.get("description") or entry.get("url") or entry.get("hostname") or "finding"
-                finding_id = f"{entry.get('source','finding')}::{hash(description)}"
+                description = (
+                    entry.get("description")
+                    or entry.get("url")
+                    or entry.get("hostname")
+                    or "finding"
+                )
+                finding_id = f"{entry.get('source', 'finding')}::{hash(description)}"
                 graph.add_node(
                     "finding",
                     finding_id,
@@ -229,14 +285,22 @@ class CorrelationStage(Stage):
                 host = entry.get("hostname")
                 if host:
                     root, subdomain = ensure_host(host)
-                    graph.add_edge("finding", finding_id, "impacts", "subdomain", subdomain)
+                    graph.add_edge(
+                        "finding", finding_id, "impacts", "subdomain", subdomain
+                    )
                     features = features_by_host[subdomain]
                     features["finding_count"] = features.get("finding_count", 0.0) + 1.0
                     source = str(entry.get("source", ""))
-                    if source.startswith("active-js-secrets") or source.startswith("secrets"):
+                    if source.startswith("active-js-secrets") or source.startswith(
+                        "secrets"
+                    ):
                         hits = entry.get("details", {}).get("hits")
-                        increment = float(len(hits)) if isinstance(hits, list) and hits else 1.0
-                        features["js_secrets_count"] = features.get("js_secrets_count", 0.0) + increment
+                        increment = (
+                            float(len(hits)) if isinstance(hits, list) and hits else 1.0
+                        )
+                        features["js_secrets_count"] = (
+                            features.get("js_secrets_count", 0.0) + increment
+                        )
                 url = entry.get("details", {}).get("url") or entry.get("url")
                 if url:
                     graph.add_node("url", url)
@@ -247,7 +311,9 @@ class CorrelationStage(Stage):
                         "url": url,
                         "hostname": host,
                         "finding_type": entry.get("finding_type") or entry.get("type"),
-                        "severity": entry.get("severity") or entry.get("priority") or "medium",
+                        "severity": entry.get("severity")
+                        or entry.get("priority")
+                        or "medium",
                         "score": int(entry.get("score", 0) or 0),
                         "confidence": entry.get("confidence_label") or "low",
                     }
@@ -305,7 +371,9 @@ class CorrelationStage(Stage):
                 if len(hosts) > 1
             ],
         }
-        (artifacts_dir / "clusters.json").write_text(json.dumps(clusters, indent=2, sort_keys=True), encoding="utf-8")
+        (artifacts_dir / "clusters.json").write_text(
+            json.dumps(clusters, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
         if tech_counter:
             (artifacts_dir / "tech_summary.json").write_text(
@@ -313,7 +381,9 @@ class CorrelationStage(Stage):
                 encoding="utf-8",
             )
 
-        api_report = {host: sorted(paths) for host, paths in api_endpoints.items() if paths}
+        api_report = {
+            host: sorted(paths) for host, paths in api_endpoints.items() if paths
+        }
         if api_report:
             (artifacts_dir / "api_endpoints.json").write_text(
                 json.dumps(api_report, indent=2, sort_keys=True), encoding="utf-8"
@@ -343,7 +413,11 @@ class CorrelationStage(Stage):
                         "severity": attack_path["severity"],
                         "score": attack_path["score"],
                         "description": attack_path["description"],
-                        "tags": ["attack-path", "correlated", f"finding:{attack_path['finding_type']}"],
+                        "tags": [
+                            "attack-path",
+                            "correlated",
+                            f"finding:{attack_path['finding_type']}",
+                        ],
                     }
                 )
             (artifacts_dir / "attack_paths.json").write_text(
@@ -357,7 +431,9 @@ class CorrelationStage(Stage):
             "baseline_unique_surfaces": baseline_count,
             "final_unique_surfaces": final_count,
             "delta_unique_surfaces": max(0, final_count - baseline_count),
-            "growth_ratio": round((final_count / baseline_count), 2) if baseline_count else (1.0 if final_count else 0.0),
+            "growth_ratio": round((final_count / baseline_count), 2)
+            if baseline_count
+            else (1.0 if final_count else 0.0),
         }
         (artifacts_dir / "surface_benchmark.json").write_text(
             json.dumps(benchmark, indent=2, sort_keys=True),
@@ -412,9 +488,12 @@ class CorrelationStage(Stage):
                 features_by_host[host]["tag_entropy"] = entropy
 
         features_payload = {
-            host: {key: float(value) for key, value in features.items()} for host, features in features_by_host.items()
+            host: {key: float(value) for key, value in features.items()}
+            for host, features in features_by_host.items()
         }
-        (artifacts_dir / "features.json").write_text(json.dumps(features_payload, indent=2, sort_keys=True), encoding="utf-8")
+        (artifacts_dir / "features.json").write_text(
+            json.dumps(features_payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
         stats = context.record.metadata.stats.setdefault("correlation", {})
         stats.update(correlation_summary)
@@ -430,7 +509,18 @@ class CorrelationStage(Stage):
     def _is_actionable_surface(self, url: str, tags: List[str]) -> bool:
         lowered = (url or "").lower()
         tag_set = {str(tag).lower() for tag in (tags or [])}
-        if any(marker in lowered for marker in ("/api", "/graphql", "admin", "login", "account", "billing", "upload")):
+        if any(
+            marker in lowered
+            for marker in (
+                "/api",
+                "/graphql",
+                "admin",
+                "login",
+                "account",
+                "billing",
+                "upload",
+            )
+        ):
             return True
         if any(
             marker in tag_set
@@ -465,7 +555,11 @@ class CorrelationStage(Stage):
             candidates = host_urls.get(host, [])
             if not candidates:
                 continue
-            ranked = sorted(candidates, key=lambda item: int(item.get("score", 0) or 0), reverse=True)
+            ranked = sorted(
+                candidates,
+                key=lambda item: int(item.get("score", 0) or 0),
+                reverse=True,
+            )
             for candidate in ranked[:5]:
                 entry_url = str(candidate.get("url") or "")
                 if not entry_url or entry_url == sink_url:
@@ -484,7 +578,10 @@ class CorrelationStage(Stage):
                         "sink_url": sink_url,
                         "finding_type": str(sink.get("finding_type") or "finding"),
                         "severity": str(sink.get("severity") or "medium"),
-                        "score": max(int(sink.get("score", 0) or 0), int(candidate.get("score", 0) or 0)),
+                        "score": max(
+                            int(sink.get("score", 0) or 0),
+                            int(candidate.get("score", 0) or 0),
+                        ),
                         "description": description,
                     }
                 )

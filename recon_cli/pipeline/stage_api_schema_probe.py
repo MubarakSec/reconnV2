@@ -19,8 +19,28 @@ class ApiSchemaProbeStage(Stage):
     LOGIN_HINTS = ("login", "sign in", "signin", "auth", "password", "sso", "oauth")
     READ_METHODS = {"get", "head", "options"}
     SAFE_WRITE_METHODS = {"post", "put", "patch"}
-    PATH_HINTS = ("api", "user", "users", "account", "profile", "admin", "tenant", "org", "project")
-    LOW_VALUE_HINTS = ("health", "status", "metrics", "ready", "live", "ping", "openapi", "swagger", "docs")
+    PATH_HINTS = (
+        "api",
+        "user",
+        "users",
+        "account",
+        "profile",
+        "admin",
+        "tenant",
+        "org",
+        "project",
+    )
+    LOW_VALUE_HINTS = (
+        "health",
+        "status",
+        "metrics",
+        "ready",
+        "live",
+        "ping",
+        "openapi",
+        "swagger",
+        "docs",
+    )
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_api_schema_probe", False))
@@ -104,7 +124,9 @@ class ApiSchemaProbeStage(Stage):
             if resp.status_code >= 400:
                 continue
 
-            spec_data = self._parse_spec(resp.text or "", resp.headers.get("Content-Type", ""))
+            spec_data = self._parse_spec(
+                resp.text or "", resp.headers.get("Content-Type", "")
+            )
             if not spec_data:
                 continue
             base_url = self._resolve_base_url(spec_data, spec_url)
@@ -123,7 +145,11 @@ class ApiSchemaProbeStage(Stage):
                 if not url or not context.url_allowed(url):
                     continue
                 host = (urlparse(url).hostname or "").lower()
-                if max_per_host > 0 and host and host_counts.get(host, 0) >= max_per_host:
+                if (
+                    max_per_host > 0
+                    and host
+                    and host_counts.get(host, 0) >= max_per_host
+                ):
                     host_cap_skipped += 1
                     continue
                 method = str(endpoint.get("method") or "get").lower()
@@ -181,7 +207,9 @@ class ApiSchemaProbeStage(Stage):
                     if len(param_examples[field_name]) < 3:
                         param_examples[field_name].append(url)
 
-                should_probe = method in self.READ_METHODS or (safe_writes and method in self.SAFE_WRITE_METHODS)
+                should_probe = method in self.READ_METHODS or (
+                    safe_writes and method in self.SAFE_WRITE_METHODS
+                )
                 if not should_probe:
                     continue
                 if requires_auth and not context.auth_enabled():
@@ -199,7 +227,9 @@ class ApiSchemaProbeStage(Stage):
                     continue
                 probed += 1
                 session = context.auth_session(url)
-                headers = context.auth_headers({"User-Agent": "recon-cli api-schema-probe"})
+                headers = context.auth_headers(
+                    {"User-Agent": "recon-cli api-schema-probe"}
+                )
                 if method in self.SAFE_WRITE_METHODS:
                     headers["X-Recon-Safe-Probe"] = "1"
                 if request_json is not None:
@@ -309,7 +339,9 @@ class ApiSchemaProbeStage(Stage):
 
         if artifacts:
             artifact_path = context.record.paths.artifact("api_schema_probe.json")
-            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            artifact_path.write_text(
+                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
         stats = context.record.metadata.stats.setdefault("api_schema_probe", {})
         stats.update(
@@ -357,7 +389,12 @@ class ApiSchemaProbeStage(Stage):
                 data = {}
             if isinstance(data, dict) and ("openapi" in data or "swagger" in data):
                 return data
-        if "yaml" in lowered or "yml" in lowered or "openapi:" in text or "swagger:" in text:
+        if (
+            "yaml" in lowered
+            or "yml" in lowered
+            or "openapi:" in text
+            or "swagger:" in text
+        ):
             try:
                 import yaml  # type: ignore
             except Exception:
@@ -373,7 +410,9 @@ class ApiSchemaProbeStage(Stage):
     @staticmethod
     def _resolve_base_url(spec: Dict[str, object], spec_url: str) -> str:
         parsed = urlparse(spec_url)
-        fallback = f"{parsed.scheme or 'https'}://{parsed.hostname}" if parsed.hostname else ""
+        fallback = (
+            f"{parsed.scheme or 'https'}://{parsed.hostname}" if parsed.hostname else ""
+        )
         servers = spec.get("servers")
         if isinstance(servers, list) and servers:
             server = servers[0] or {}
@@ -395,7 +434,9 @@ class ApiSchemaProbeStage(Stage):
     def _extract_endpoints(self, spec: Dict[str, object]) -> List[Dict[str, object]]:
         endpoints: List[Dict[str, object]] = []
         paths = spec.get("paths") if isinstance(spec.get("paths"), dict) else {}
-        global_security = spec.get("security") if isinstance(spec.get("security"), list) else None
+        global_security = (
+            spec.get("security") if isinstance(spec.get("security"), list) else None
+        )
 
         for path, methods in paths.items():
             if not isinstance(path, str) or not isinstance(methods, dict):
@@ -403,14 +444,24 @@ class ApiSchemaProbeStage(Stage):
             path_parameters = self._parameters_from(methods.get("parameters"))
             for method, operation in methods.items():
                 method_name = str(method).lower()
-                if method_name not in {"get", "post", "put", "patch", "delete", "head", "options"}:
+                if method_name not in {
+                    "get",
+                    "post",
+                    "put",
+                    "patch",
+                    "delete",
+                    "head",
+                    "options",
+                }:
                     continue
                 if not isinstance(operation, dict):
                     continue
                 op_parameters = self._parameters_from(operation.get("parameters"))
                 params = path_parameters + op_parameters
                 body_fields = self._extract_request_body_fields(operation, params)
-                requires_auth = self._requires_auth(operation.get("security"), global_security)
+                requires_auth = self._requires_auth(
+                    operation.get("security"), global_security
+                )
                 endpoints.append(
                     {
                         "path": path,
@@ -422,12 +473,22 @@ class ApiSchemaProbeStage(Stage):
                 )
         return endpoints
 
-    def _prioritize_endpoints(self, endpoints: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    def _prioritize_endpoints(
+        self, endpoints: List[Dict[str, object]]
+    ) -> List[Dict[str, object]]:
         def _score(endpoint: Dict[str, object]) -> int:
             method = str(endpoint.get("method") or "").lower()
             path = str(endpoint.get("path") or "").lower()
-            params = endpoint.get("params") if isinstance(endpoint.get("params"), list) else []
-            body_fields = endpoint.get("body_fields") if isinstance(endpoint.get("body_fields"), list) else []
+            params = (
+                endpoint.get("params")
+                if isinstance(endpoint.get("params"), list)
+                else []
+            )
+            body_fields = (
+                endpoint.get("body_fields")
+                if isinstance(endpoint.get("body_fields"), list)
+                else []
+            )
             requires_auth = bool(endpoint.get("requires_auth"))
             score = 0
             if requires_auth:
@@ -474,7 +535,9 @@ class ApiSchemaProbeStage(Stage):
             content = request_body.get("content")
             if isinstance(content, dict):
                 schema = None
-                if "application/json" in content and isinstance(content["application/json"], dict):
+                if "application/json" in content and isinstance(
+                    content["application/json"], dict
+                ):
                     schema = content["application/json"].get("schema")
                 if schema is None:
                     for payload in content.values():
@@ -514,7 +577,9 @@ class ApiSchemaProbeStage(Stage):
                 break
         return deduped
 
-    def _schema_field_names(self, schema: Dict[str, object], *, depth: int) -> List[str]:
+    def _schema_field_names(
+        self, schema: Dict[str, object], *, depth: int
+    ) -> List[str]:
         if depth > 3:
             return []
         fields: List[str] = []
@@ -553,7 +618,9 @@ class ApiSchemaProbeStage(Stage):
             return ""
         url = urljoin(base_url + "/", path.lstrip("/"))
         if "{" in url:
-            url = self.PATH_PARAM_RE.sub(lambda m: self._placeholder_value(m.group(1)), url)
+            url = self.PATH_PARAM_RE.sub(
+                lambda m: self._placeholder_value(m.group(1)), url
+            )
         params = {}
         for param in endpoint.get("params") or []:
             if not isinstance(param, dict):
@@ -573,7 +640,13 @@ class ApiSchemaProbeStage(Stage):
         lower = (name or "").lower()
         if "uuid" in lower:
             return "00000000-0000-0000-0000-000000000000"
-        if lower.endswith("id") or lower in {"id", "uid", "user", "user_id", "account_id"}:
+        if lower.endswith("id") or lower in {
+            "id",
+            "uid",
+            "user",
+            "user_id",
+            "account_id",
+        }:
             return "1"
         if "slug" in lower or "name" in lower:
             return "test"
@@ -581,7 +654,9 @@ class ApiSchemaProbeStage(Stage):
             return "recon@example.com"
         return "1"
 
-    def _build_safe_body(self, endpoint: Dict[str, object]) -> Tuple[Optional[Dict[str, object]], Optional[Dict[str, object]]]:
+    def _build_safe_body(
+        self, endpoint: Dict[str, object]
+    ) -> Tuple[Optional[Dict[str, object]], Optional[Dict[str, object]]]:
         params = endpoint.get("params") or []
         form_fields: List[str] = []
         for item in params:
@@ -592,7 +667,9 @@ class ApiSchemaProbeStage(Stage):
                 if name:
                     form_fields.append(name)
         if form_fields:
-            form_payload = {name: self._placeholder_value(name) for name in form_fields[:8]}
+            form_payload = {
+                name: self._placeholder_value(name) for name in form_fields[:8]
+            }
             form_payload.setdefault("recon_probe", "1")
             return None, form_payload
 

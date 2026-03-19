@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import time
 import threading
+import asyncio
 from abc import ABC
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, List, Union, Literal
+from typing import Any, Dict, Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
 from recon_cli.pipeline.context import PipelineContext
@@ -21,8 +21,9 @@ class StageStopRequested(RuntimeError):
 
 class StageResult(BaseModel):
     """Result of a pipeline stage execution."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -31,6 +32,7 @@ class StageResult(BaseModel):
 
 try:  # pragma: no cover - test helper
     import builtins
+
     builtins.StageResult = StageResult
 except Exception:
     pass
@@ -46,7 +48,7 @@ def note_missing_tool(context: PipelineContext, tool: str) -> None:
 class Stage(ABC):
     name: str = "stage"
     optional: bool = False
-    
+
     # Dynamic Dependency attributes
     # What data types (e.g. 'hostname', 'url') this stage provides
     provides: List[str] = []
@@ -85,7 +87,9 @@ class Stage(ABC):
             raise StageStopRequested(f"Stop requested while running stage {self.name}")
 
     def _run_with_heartbeat(self, context: PipelineContext) -> None:
-        heartbeat_seconds = int(getattr(context.runtime_config, "stage_heartbeat_seconds", 0) or 0)
+        heartbeat_seconds = int(
+            getattr(context.runtime_config, "stage_heartbeat_seconds", 0) or 0
+        )
         sla_seconds = int(getattr(context.runtime_config, "stage_sla_seconds", 0) or 0)
         if heartbeat_seconds <= 0:
             self._ensure_not_stopped(context)
@@ -101,7 +105,9 @@ class Stage(ABC):
         sla_alerted = threading.Event()
         stop_alerted = threading.Event()
         sla_alert_elapsed = {"seconds": 0}
-        heartbeat_stats = context.record.metadata.stats.setdefault("stage_heartbeats", {})
+        heartbeat_stats = context.record.metadata.stats.setdefault(
+            "stage_heartbeats", {}
+        )
         stage_heartbeat = heartbeat_stats.setdefault(self.name, {})
         stage_heartbeat["last_started_at"] = time_utils.iso_now()
         stage_heartbeat["sla_seconds"] = sla_seconds
@@ -114,12 +120,19 @@ class Stage(ABC):
             while not done.wait(timeout=check_interval):
                 if self._stop_requested(context) and not stop_alerted.is_set():
                     stop_alerted.set()
-                    logger.warning("Stage %s received stop request; waiting for current operation to finish", self.name)
+                    logger.warning(
+                        "Stage %s received stop request; waiting for current operation to finish",
+                        self.name,
+                    )
                 now = time.monotonic()
                 if now < next_heartbeat:
                     continue
                 elapsed = int(time.monotonic() - started)
-                if sla_seconds > 0 and elapsed >= sla_seconds and not sla_alerted.is_set():
+                if (
+                    sla_seconds > 0
+                    and elapsed >= sla_seconds
+                    and not sla_alerted.is_set()
+                ):
                     sla_alert_elapsed["seconds"] = elapsed
                     sla_alerted.set()
                     logger.warning(
@@ -128,15 +141,23 @@ class Stage(ABC):
                         sla_seconds,
                         elapsed,
                     )
-                logger.info("Stage %s heartbeat: still running (%ss elapsed)", self.name, elapsed)
-                heartbeat_entry = context.record.metadata.stats.setdefault("stage_heartbeats", {}).setdefault(self.name, {})
+                logger.info(
+                    "Stage %s heartbeat: still running (%ss elapsed)",
+                    self.name,
+                    elapsed,
+                )
+                heartbeat_entry = context.record.metadata.stats.setdefault(
+                    "stage_heartbeats", {}
+                ).setdefault(self.name, {})
                 heartbeat_entry["count"] = int(heartbeat_entry.get("count", 0)) + 1
                 heartbeat_entry["last_heartbeat_at"] = time_utils.iso_now()
                 heartbeat_entry["last_elapsed_seconds"] = elapsed
                 context.manager.update_metadata(context.record)
                 next_heartbeat = now + heartbeat_seconds
 
-        thread = threading.Thread(target=_heartbeat, daemon=True, name=f"heartbeat-{self.name}")
+        thread = threading.Thread(
+            target=_heartbeat, daemon=True, name=f"heartbeat-{self.name}"
+        )
         thread.start()
         stage_error: Optional[Exception] = None
         try:
@@ -152,18 +173,30 @@ class Stage(ABC):
             done.set()
             thread.join()
             final_elapsed = int(time.monotonic() - started)
-            heartbeat_entry = context.record.metadata.stats.setdefault("stage_heartbeats", {}).setdefault(self.name, {})
+            heartbeat_entry = context.record.metadata.stats.setdefault(
+                "stage_heartbeats", {}
+            ).setdefault(self.name, {})
             heartbeat_entry["last_finished_at"] = time_utils.iso_now()
             heartbeat_entry["last_elapsed_seconds"] = final_elapsed
-            if sla_alerted.is_set() and getattr(context, "record", None) and getattr(context, "manager", None):
-                stats = context.record.metadata.stats.setdefault("stage_runtime_alerts", {})
+            if (
+                sla_alerted.is_set()
+                and getattr(context, "record", None)
+                and getattr(context, "manager", None)
+            ):
+                stats = context.record.metadata.stats.setdefault(
+                    "stage_runtime_alerts", {}
+                )
                 stats[self.name] = {
                     "sla_seconds": sla_seconds,
                     "alert_elapsed_seconds": int(sla_alert_elapsed["seconds"] or 0),
                 }
             context.manager.update_metadata(context.record)
-            if stage_error is None and (stop_alerted.is_set() or self._stop_requested(context)):
-                raise StageStopRequested(f"Stop requested while running stage {self.name}")
+            if stage_error is None and (
+                stop_alerted.is_set() or self._stop_requested(context)
+            ):
+                raise StageStopRequested(
+                    f"Stop requested while running stage {self.name}"
+                )
 
     def _note_skip(self, context: PipelineContext, reason: str) -> None:
         stats = context.record.metadata.stats.setdefault("stage_skips", {})
@@ -174,10 +207,10 @@ class Stage(ABC):
         context.manager.update_metadata(context.record)
 
     async def iter_events(
-        self, 
-        context: PipelineContext, 
+        self,
+        context: PipelineContext,
         event_types: Optional[List[str]] = None,
-        dependencies: Optional[List[str]] = None
+        dependencies: Optional[List[str]] = None,
     ):
         """
         Consumes events from the event bus in real-time.
@@ -187,13 +220,13 @@ class Stage(ABC):
         # If no dependencies provided, we might never know when to stop
         # unless the whole pipeline is finishing.
         upstream = set(dependencies) if dependencies else set()
-        
+
         try:
             while True:
                 # Check for stop request
                 if self._stop_requested(context):
                     break
-                
+
                 try:
                     # Wait for an event with a short timeout
                     event = await asyncio.wait_for(queue.get(), timeout=0.5)
@@ -205,7 +238,7 @@ class Stage(ABC):
                         # All upstream done, and queue is empty? then we are done.
                         if queue.empty():
                             break
-                    
+
                     # If the whole pipeline runner signaled finish (fallback)
                     if getattr(context, "_all_upstream_done", False) and queue.empty():
                         break
@@ -247,7 +280,9 @@ class Stage(ABC):
             except Exception as exc:  # pragma: no cover - runtime path
                 logger.exception("Stage %s failed: %s", self.name, exc)
                 if attempt >= attempts:
-                    raise StageError(f"Stage {self.name} failed after {attempts} attempts") from exc
+                    raise StageError(
+                        f"Stage {self.name} failed after {attempts} attempts"
+                    ) from exc
                 delay = backoff_base * (backoff_factor ** (attempt - 1))
                 logger.info("Retrying stage %s after %ss", self.name, delay)
                 time.sleep(delay)

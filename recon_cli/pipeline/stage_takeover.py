@@ -33,8 +33,12 @@ class TakeoverStage(Stage):
             return
 
         timeout = int(getattr(context.runtime_config, "takeover_timeout", 6))
-        require_cname = bool(getattr(context.runtime_config, "takeover_require_cname", False))
-        dns_timeout = max(1, int(getattr(context.runtime_config, "takeover_dns_timeout", timeout)))
+        require_cname = bool(
+            getattr(context.runtime_config, "takeover_require_cname", False)
+        )
+        dns_timeout = max(
+            1, int(getattr(context.runtime_config, "takeover_dns_timeout", timeout))
+        )
         verify_tls = bool(getattr(context.runtime_config, "verify_tls", True))
         detector = TakeoverDetector(timeout=timeout, verify_tls=verify_tls)
 
@@ -69,7 +73,9 @@ class TakeoverStage(Stage):
         cname_matches = 0
         suppressed_low_confidence = 0
         if require_cname and dns is None:
-            context.logger.warning("dnspython not available; skipping takeover checks (require_cname enabled)")
+            context.logger.warning(
+                "dnspython not available; skipping takeover checks (require_cname enabled)"
+            )
             note_missing_tool(context, "dnspython")
             stats = context.record.metadata.stats.setdefault("takeover", {})
             stats["checked"] = 0
@@ -81,7 +87,9 @@ class TakeoverStage(Stage):
 
         for host in hosts[:max_hosts]:
             checked += 1
-            cname_chain = self._resolve_cname_chain(host, dns_timeout) if dns is not None else []
+            cname_chain = (
+                self._resolve_cname_chain(host, dns_timeout) if dns is not None else []
+            )
             if require_cname and not cname_chain:
                 skipped_no_cname += 1
                 continue
@@ -89,10 +97,14 @@ class TakeoverStage(Stage):
             providers = self._match_providers(cname_chain)
             if providers:
                 cname_matches += 1
-            finding = detector.check_host(host, providers=providers if providers else None)
+            finding = detector.check_host(
+                host, providers=providers if providers else None
+            )
             if not finding:
                 continue
-            claimability = self._assess_claimability(finding.provider, providers, dns_state)
+            claimability = self._assess_claimability(
+                finding.provider, providers, dns_state
+            )
             if claimability["level"] == "low":
                 suppressed_low_confidence += 1
                 continue
@@ -166,7 +178,9 @@ class TakeoverStage(Stage):
             current = next_name
         return chain
 
-    def _evaluate_dns_state(self, hostname: str, cname_chain: List[str], timeout: int) -> Dict[str, object]:
+    def _evaluate_dns_state(
+        self, hostname: str, cname_chain: List[str], timeout: int
+    ) -> Dict[str, object]:
         if dns is None:
             return {"state": "unknown", "dangling": False, "target": hostname}
         target = cname_chain[-1] if cname_chain else hostname
@@ -199,7 +213,9 @@ class TakeoverStage(Stage):
                 return True
         return False
 
-    def _assess_claimability(self, provider: str, providers: Set[str], dns_state: Dict[str, object]) -> Dict[str, object]:
+    def _assess_claimability(
+        self, provider: str, providers: Set[str], dns_state: Dict[str, object]
+    ) -> Dict[str, object]:
         dns_provider_match = bool(providers and provider in providers)
         dns_dangling = bool(dns_state.get("dangling"))
         if dns_provider_match and dns_dangling:

@@ -62,9 +62,13 @@ class PassiveEnumerationStage(Stage):
                     check=False,
                     timeout=tool_timeout,
                 )
-                output = (completed.stdout or "") if hasattr(completed, "stdout") else ""
+                output = (
+                    (completed.stdout or "") if hasattr(completed, "stdout") else ""
+                )
                 if output:
-                    lines = [line.strip() for line in output.splitlines() if line.strip()]
+                    lines = [
+                        line.strip() for line in output.splitlines() if line.strip()
+                    ]
                     subfinder_hosts.update(lines)
                     subfinder_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
                     logger.info("subfinder found %d subdomains", len(lines))
@@ -129,11 +133,16 @@ class PassiveEnumerationStage(Stage):
                 seen_targets.add(target)
                 wayback_targets.append(target)
 
-            max_wayback_urls = max(0, int(getattr(context.runtime_config, "wayback_max_urls", 0) or 0))
-            max_wayback_per_target = max(
-                0, int(getattr(context.runtime_config, "wayback_max_per_target", 0) or 0)
+            max_wayback_urls = max(
+                0, int(getattr(context.runtime_config, "wayback_max_urls", 0) or 0)
             )
-            fair_share = bool(getattr(context.runtime_config, "wayback_fair_share", True))
+            max_wayback_per_target = max(
+                0,
+                int(getattr(context.runtime_config, "wayback_max_per_target", 0) or 0),
+            )
+            fair_share = bool(
+                getattr(context.runtime_config, "wayback_fair_share", True)
+            )
             wayback_total = 0
             wrote_any = False
             wayback_targets_processed = 0
@@ -158,7 +167,11 @@ class PassiveEnumerationStage(Stage):
                             remaining_targets = len(wayback_targets) - idx + 1
                             remaining_budget = max(0, max_wayback_urls - wayback_total)
                             if remaining_targets > 0 and remaining_budget > 0:
-                                fair_budget = max(1, (remaining_budget + remaining_targets - 1) // remaining_targets)
+                                fair_budget = max(
+                                    1,
+                                    (remaining_budget + remaining_targets - 1)
+                                    // remaining_targets,
+                                )
                                 if target_budget <= 0:
                                     target_budget = fair_budget
                                 else:
@@ -173,7 +186,13 @@ class PassiveEnumerationStage(Stage):
                                 target_budget,
                             )
                         else:
-                            logger.info("Running %s (%s/%s): %s", wayback_cmd, idx, len(wayback_targets), target)
+                            logger.info(
+                                "Running %s (%s/%s): %s",
+                                wayback_cmd,
+                                idx,
+                                len(wayback_targets),
+                                target,
+                            )
                         start = time.monotonic()
                         wayback_tmp.unlink(missing_ok=True)
                         try:
@@ -184,18 +203,29 @@ class PassiveEnumerationStage(Stage):
                                 redact=False,
                             )
                         except CommandError:
-                            context.logger.warning("%s failed for %s", wayback_cmd, target)
+                            context.logger.warning(
+                                "%s failed for %s", wayback_cmd, target
+                            )
                             continue
                         elapsed = time.monotonic() - start
 
                         if not wayback_tmp.exists():
-                            logger.debug("%s returned no output for %s", wayback_cmd, target)
-                            logger.info("%s finished for %s in %.1fs", wayback_cmd, target, elapsed)
+                            logger.debug(
+                                "%s returned no output for %s", wayback_cmd, target
+                            )
+                            logger.info(
+                                "%s finished for %s in %.1fs",
+                                wayback_cmd,
+                                target,
+                                elapsed,
+                            )
                             continue
 
                         url_added = 0
                         budget_reached = False
-                        with wayback_tmp.open("r", encoding="utf-8", errors="ignore") as handle:
+                        with wayback_tmp.open(
+                            "r", encoding="utf-8", errors="ignore"
+                        ) as handle:
                             for line in handle:
                                 url = line.strip()
                                 if not url:
@@ -232,7 +262,10 @@ class PassiveEnumerationStage(Stage):
                                     )
                                     budget_reached = True
                                     break
-                                if max_wayback_urls and wayback_total >= max_wayback_urls:
+                                if (
+                                    max_wayback_urls
+                                    and wayback_total >= max_wayback_urls
+                                ):
                                     logger.warning(
                                         "%s URL limit reached (%s); stopping ingestion",
                                         wayback_cmd,
@@ -264,7 +297,10 @@ class PassiveEnumerationStage(Stage):
                         "max_urls": max_wayback_urls,
                         "max_per_target": max_wayback_per_target,
                         "fair_share": fair_share,
-                        "global_cap_hit": bool(global_cap_hit or (max_wayback_urls and wayback_total >= max_wayback_urls)),
+                        "global_cap_hit": bool(
+                            global_cap_hit
+                            or (max_wayback_urls and wayback_total >= max_wayback_urls)
+                        ),
                     }
                 )
                 context.manager.update_metadata(context.record)
@@ -279,7 +315,9 @@ class PassiveEnumerationStage(Stage):
             if not wrote_any and wayback_out.exists():
                 wayback_out.unlink(missing_ok=True)
         else:
-            context.logger.warning("waybackurls/gau not available; skipping URL discovery")
+            context.logger.warning(
+                "waybackurls/gau not available; skipping URL discovery"
+            )
             note_missing_tool(context, "waybackurls/gau")
 
         for hostname in sorted(subfinder_hosts):
@@ -314,7 +352,7 @@ class PassiveEnumerationStage(Stage):
             )
 
         passive_hosts_set: set[str] = set()
-        for host in (subfinder_hosts | amass_hosts | seed_hosts):
+        for host in subfinder_hosts | amass_hosts | seed_hosts:
             if not host:
                 continue
             if allow_ip and validation.is_ip(host):
@@ -326,6 +364,8 @@ class PassiveEnumerationStage(Stage):
                 continue
         passive_hosts = sorted(passive_hosts_set)
         if passive_hosts:
-            passive_hosts_out.write_text("\n".join(passive_hosts) + "\n", encoding="utf-8")
+            passive_hosts_out.write_text(
+                "\n".join(passive_hosts) + "\n", encoding="utf-8"
+            )
         context.record.metadata.stats["passive_hostnames"] = len(passive_hosts)
         context.manager.update_metadata(context.record)

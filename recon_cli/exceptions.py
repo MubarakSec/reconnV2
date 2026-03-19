@@ -59,21 +59,22 @@ from typing import Any, Dict, List, Optional
 #                     Base Exception
 # ═══════════════════════════════════════════════════════════
 
+
 class ReconError(Exception):
     """
     الاستثناء الأساسي لجميع أخطاء ReconnV2.
-    
+
     Attributes:
         message: رسالة الخطأ
         code: رمز الخطأ (للـ API)
         details: تفاصيل إضافية
         recoverable: هل يمكن التعافي
     """
-    
+
     code: str = "RECON_ERROR"
     http_status: int = 500
     recoverable: bool = False
-    
+
     def __init__(
         self,
         message: str,
@@ -86,9 +87,9 @@ class ReconError(Exception):
             self.code = code
         self.details = details or {}
         self.cause = cause
-        
+
         super().__init__(message)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """تحويل لـ dictionary للـ API"""
         return {
@@ -97,7 +98,7 @@ class ReconError(Exception):
             "details": self.details,
             "recoverable": self.recoverable,
         }
-    
+
     def __str__(self) -> str:
         if self.details:
             return f"{self.message} ({self.details})"
@@ -108,16 +109,19 @@ class ReconError(Exception):
 #                     Config Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class ConfigError(ReconError):
     """خطأ في الإعدادات"""
+
     code = "CONFIG_ERROR"
     http_status = 400
 
 
 class ConfigNotFoundError(ConfigError):
     """ملف الإعدادات غير موجود"""
+
     code = "CONFIG_NOT_FOUND"
-    
+
     def __init__(self, path: str):
         super().__init__(
             f"Configuration file not found: {path}",
@@ -127,8 +131,9 @@ class ConfigNotFoundError(ConfigError):
 
 class ConfigValidationError(ConfigError):
     """خطأ في التحقق من الإعدادات"""
+
     code = "CONFIG_VALIDATION_ERROR"
-    
+
     def __init__(self, errors: List[str], path: Optional[str] = None):
         super().__init__(
             f"Configuration validation failed: {len(errors)} error(s)",
@@ -139,8 +144,9 @@ class ConfigValidationError(ConfigError):
 
 class ConfigMigrationError(ConfigError):
     """خطأ في ترحيل الإعدادات"""
+
     code = "CONFIG_MIGRATION_ERROR"
-    
+
     def __init__(self, from_version: str, to_version: str, reason: str):
         super().__init__(
             f"Failed to migrate config from {from_version} to {to_version}: {reason}",
@@ -156,16 +162,19 @@ class ConfigMigrationError(ConfigError):
 #                     Job Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class JobError(ReconError):
     """خطأ في الـ Job"""
+
     code = "JOB_ERROR"
 
 
 class JobNotFoundError(JobError):
     """الـ Job غير موجود"""
+
     code = "JOB_NOT_FOUND"
     http_status = 404
-    
+
     def __init__(self, job_id: str):
         super().__init__(
             f"Job not found: {job_id}",
@@ -175,9 +184,10 @@ class JobNotFoundError(JobError):
 
 class JobAlreadyExistsError(JobError):
     """الـ Job موجود مسبقاً"""
+
     code = "JOB_EXISTS"
     http_status = 409
-    
+
     def __init__(self, job_id: str):
         super().__init__(
             f"Job already exists: {job_id}",
@@ -187,9 +197,10 @@ class JobAlreadyExistsError(JobError):
 
 class JobValidationError(JobError):
     """خطأ في التحقق من الـ Job"""
+
     code = "JOB_VALIDATION_ERROR"
     http_status = 400
-    
+
     def __init__(self, errors: List[str], job_id: Optional[str] = None):
         super().__init__(
             f"Job validation failed: {len(errors)} error(s)",
@@ -200,9 +211,10 @@ class JobValidationError(JobError):
 
 class JobStateError(JobError):
     """خطأ في حالة الـ Job"""
+
     code = "JOB_STATE_ERROR"
     http_status = 409
-    
+
     def __init__(self, job_id: str, current_state: str, expected_state: str):
         super().__init__(
             f"Job {job_id} is in state '{current_state}', expected '{expected_state}'",
@@ -218,16 +230,19 @@ class JobStateError(JobError):
 #                     Pipeline Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class PipelineError(ReconError):
     """خطأ في الـ Pipeline"""
+
     code = "PIPELINE_ERROR"
 
 
 class StageError(PipelineError):
     """خطأ في مرحلة"""
+
     code = "STAGE_ERROR"
     recoverable = True
-    
+
     def __init__(
         self,
         stage_name: str,
@@ -250,8 +265,9 @@ class StageError(PipelineError):
 
 class StageTimeoutError(StageError):
     """انتهاء مهلة المرحلة"""
+
     code = "STAGE_TIMEOUT"
-    
+
     def __init__(
         self,
         stage_name: str,
@@ -269,8 +285,9 @@ class StageTimeoutError(StageError):
 
 class StageDependencyError(PipelineError):
     """خطأ في تبعيات المرحلة"""
+
     code = "STAGE_DEPENDENCY_ERROR"
-    
+
     def __init__(self, stage_name: str, missing_deps: List[str]):
         super().__init__(
             f"Stage '{stage_name}' has unmet dependencies: {missing_deps}",
@@ -283,8 +300,9 @@ class StageDependencyError(PipelineError):
 
 class PipelineAbortedError(PipelineError):
     """تم إلغاء الـ Pipeline"""
+
     code = "PIPELINE_ABORTED"
-    
+
     def __init__(self, reason: str, completed_stages: List[str] = None):
         super().__init__(
             f"Pipeline aborted: {reason}",
@@ -299,15 +317,18 @@ class PipelineAbortedError(PipelineError):
 #                     Tool Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class ToolError(ReconError):
     """خطأ في أداة خارجية"""
+
     code = "TOOL_ERROR"
 
 
 class ToolNotFoundError(ToolError):
     """الأداة غير موجودة"""
+
     code = "TOOL_NOT_FOUND"
-    
+
     def __init__(self, tool_name: str, searched_paths: List[str] = None):
         super().__init__(
             f"Tool not found: {tool_name}",
@@ -321,9 +342,10 @@ class ToolNotFoundError(ToolError):
 
 class ToolExecutionError(ToolError):
     """خطأ في تنفيذ الأداة"""
+
     code = "TOOL_EXECUTION_ERROR"
     recoverable = True
-    
+
     def __init__(
         self,
         tool_name: str,
@@ -347,9 +369,10 @@ class ToolExecutionError(ToolError):
 
 class ToolTimeoutError(ToolError):
     """انتهاء مهلة الأداة"""
+
     code = "TOOL_TIMEOUT"
     recoverable = True
-    
+
     def __init__(self, tool_name: str, timeout: float, command: str = ""):
         super().__init__(
             f"Tool '{tool_name}' timed out after {timeout}s",
@@ -367,19 +390,24 @@ class ToolTimeoutError(ToolError):
 #                     Network Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class NetworkError(ReconError):
     """خطأ في الشبكة"""
+
     code = "NETWORK_ERROR"
     recoverable = True
 
 
 class ConnectionError(NetworkError):
     """خطأ في الاتصال"""
+
     code = "CONNECTION_ERROR"
-    
+
     def __init__(self, host: str, port: int = 0, reason: str = ""):
         super().__init__(
-            f"Connection failed to {host}:{port}" if port else f"Connection failed to {host}",
+            f"Connection failed to {host}:{port}"
+            if port
+            else f"Connection failed to {host}",
             details={
                 "host": host,
                 "port": port,
@@ -390,8 +418,9 @@ class ConnectionError(NetworkError):
 
 class TimeoutError(NetworkError):
     """انتهاء مهلة الاتصال"""
+
     code = "TIMEOUT_ERROR"
-    
+
     def __init__(self, url: str, timeout: float):
         super().__init__(
             f"Request to {url} timed out after {timeout}s",
@@ -404,8 +433,9 @@ class TimeoutError(NetworkError):
 
 class SSLError(NetworkError):
     """خطأ SSL"""
+
     code = "SSL_ERROR"
-    
+
     def __init__(self, host: str, reason: str):
         super().__init__(
             f"SSL error for {host}: {reason}",
@@ -418,8 +448,9 @@ class SSLError(NetworkError):
 
 class DNSError(NetworkError):
     """خطأ DNS"""
+
     code = "DNS_ERROR"
-    
+
     def __init__(self, domain: str, reason: str = ""):
         super().__init__(
             f"DNS resolution failed for {domain}",
@@ -434,15 +465,18 @@ class DNSError(NetworkError):
 #                     Database Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class DatabaseError(ReconError):
     """خطأ في قاعدة البيانات"""
+
     code = "DATABASE_ERROR"
 
 
 class DatabaseConnectionError(DatabaseError):
     """خطأ في الاتصال بقاعدة البيانات"""
+
     code = "DB_CONNECTION_ERROR"
-    
+
     def __init__(self, path: str, reason: str = ""):
         super().__init__(
             f"Failed to connect to database: {path}",
@@ -455,8 +489,9 @@ class DatabaseConnectionError(DatabaseError):
 
 class QueryError(DatabaseError):
     """خطأ في الاستعلام"""
+
     code = "QUERY_ERROR"
-    
+
     def __init__(self, query: str, reason: str):
         super().__init__(
             f"Query failed: {reason}",
@@ -469,8 +504,9 @@ class QueryError(DatabaseError):
 
 class IntegrityError(DatabaseError):
     """خطأ في سلامة البيانات"""
+
     code = "INTEGRITY_ERROR"
-    
+
     def __init__(self, table: str, reason: str):
         super().__init__(
             f"Integrity error in table '{table}': {reason}",
@@ -485,16 +521,19 @@ class IntegrityError(DatabaseError):
 #                     Scan Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class ScanError(ReconError):
     """خطأ في الفحص"""
+
     code = "SCAN_ERROR"
 
 
 class TargetError(ScanError):
     """خطأ في الهدف"""
+
     code = "TARGET_ERROR"
     http_status = 400
-    
+
     def __init__(self, target: str, reason: str):
         super().__init__(
             f"Invalid target '{target}': {reason}",
@@ -507,9 +546,10 @@ class TargetError(ScanError):
 
 class ScanTimeoutError(ScanError):
     """انتهاء مهلة الفحص"""
+
     code = "SCAN_TIMEOUT"
     recoverable = True
-    
+
     def __init__(self, target: str, timeout: float):
         super().__init__(
             f"Scan of {target} timed out after {timeout}s",
@@ -522,8 +562,9 @@ class ScanTimeoutError(ScanError):
 
 class ScanAbortedError(ScanError):
     """تم إلغاء الفحص"""
+
     code = "SCAN_ABORTED"
-    
+
     def __init__(self, target: str, reason: str, partial_results: int = 0):
         super().__init__(
             f"Scan of {target} aborted: {reason}",
@@ -539,15 +580,18 @@ class ScanAbortedError(ScanError):
 #                     Plugin Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class PluginError(ReconError):
     """خطأ في الـ Plugin"""
+
     code = "PLUGIN_ERROR"
 
 
 class PluginLoadError(PluginError):
     """خطأ في تحميل الـ Plugin"""
+
     code = "PLUGIN_LOAD_ERROR"
-    
+
     def __init__(self, plugin_name: str, reason: str):
         super().__init__(
             f"Failed to load plugin '{plugin_name}': {reason}",
@@ -560,9 +604,10 @@ class PluginLoadError(PluginError):
 
 class PluginValidationError(PluginError):
     """خطأ في التحقق من الـ Plugin"""
+
     code = "PLUGIN_VALIDATION_ERROR"
     http_status = 400
-    
+
     def __init__(self, plugin_name: str, errors: List[str]):
         super().__init__(
             f"Plugin '{plugin_name}' validation failed",
@@ -575,9 +620,10 @@ class PluginValidationError(PluginError):
 
 class PluginExecutionError(PluginError):
     """خطأ في تنفيذ الـ Plugin"""
+
     code = "PLUGIN_EXECUTION_ERROR"
     recoverable = True
-    
+
     def __init__(self, plugin_name: str, method: str, reason: str):
         super().__init__(
             f"Plugin '{plugin_name}.{method}()' failed: {reason}",
@@ -593,12 +639,14 @@ class PluginExecutionError(PluginError):
 #                     Rate Limit Errors
 # ═══════════════════════════════════════════════════════════
 
+
 class RateLimitError(ReconError):
     """خطأ في الحد الأقصى"""
+
     code = "RATE_LIMIT_ERROR"
     http_status = 429
     recoverable = True
-    
+
     def __init__(self, limit: int, window: str, retry_after: int = 0):
         super().__init__(
             f"Rate limit exceeded: {limit} requests per {window}",
@@ -614,6 +662,7 @@ class RateLimitError(ReconError):
 # ═══════════════════════════════════════════════════════════
 #                     Helper Functions
 # ═══════════════════════════════════════════════════════════
+
 
 def is_recoverable(error: Exception) -> bool:
     """هل يمكن التعافي من الخطأ"""
@@ -633,11 +682,11 @@ def wrap_exception(error: Exception, context: str = "") -> ReconError:
     """تغليف استثناء عادي في ReconError"""
     if isinstance(error, ReconError):
         return error
-    
+
     message = str(error)
     if context:
         message = f"{context}: {message}"
-    
+
     return ReconError(
         message=message,
         details={"original_type": type(error).__name__},

@@ -68,7 +68,9 @@ class SpanContext:
     def from_headers(cls, headers: Dict[str, str]) -> "SpanContext":
         lowered = {str(k).lower(): str(v) for k, v in headers.items()}
         return cls(
-            trace_id=lowered.get("x-trace-id", lowered.get("traceparent", uuid.uuid4().hex)),
+            trace_id=lowered.get(
+                "x-trace-id", lowered.get("traceparent", uuid.uuid4().hex)
+            ),
             span_id=lowered.get("x-span-id", uuid.uuid4().hex[:16]),
         )
 
@@ -162,7 +164,9 @@ class Span:
         )
         return self
 
-    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> "Span":
+    def add_event(
+        self, name: str, attributes: Optional[Dict[str, Any]] = None
+    ) -> "Span":
         return self.log(name, attributes)
 
     def set_status(self, status: SpanStatus, message: str = "") -> "Span":
@@ -251,7 +255,9 @@ class Trace:
         resolved_parent = parent_id
         if resolved_parent is None and self._stack:
             resolved_parent = self._stack[-1].span_id
-        span = Span(name=name, trace_id=self.trace_id, parent_id=resolved_parent, kind=kind)
+        span = Span(
+            name=name, trace_id=self.trace_id, parent_id=resolved_parent, kind=kind
+        )
         self.spans.append(span)
         return span
 
@@ -360,7 +366,7 @@ class TraceContext:
         prefix = cls.BAGGAGE_PREFIX.lower()
         for key, value in lowered.items():
             if key.startswith(prefix):
-                baggage[key[len(prefix):]] = value
+                baggage[key[len(prefix) :]] = value
         return {
             "trace_id": trace_id,
             "parent_span_id": lowered.get(cls.SPAN_HEADER.lower()),
@@ -455,7 +461,9 @@ class JaegerExporter(TraceExporter):
                 ],
             }
             if span.parent_id:
-                item["references"] = [{"refType": "CHILD_OF", "spanId": int(span.parent_id, 16)}]
+                item["references"] = [
+                    {"refType": "CHILD_OF", "spanId": int(span.parent_id, 16)}
+                ]
             spans.append(item)
         return {
             "batch": {
@@ -503,7 +511,9 @@ class Tracer:
         return scope
 
     def _set_scope(self, trace: Trace, span_stack: Sequence[Span]) -> None:
-        _TRACE_SCOPE.set(_TraceScope(owner_id=id(self), trace=trace, span_stack=tuple(span_stack)))
+        _TRACE_SCOPE.set(
+            _TraceScope(owner_id=id(self), trace=trace, span_stack=tuple(span_stack))
+        )
 
     def _clear_scope(self) -> None:
         scope = self._scope()
@@ -516,7 +526,9 @@ class Tracer:
         should_flush = False
         with self._lock:
             self._pending_traces.append(trace)
-            should_flush = self.auto_flush and len(self._pending_traces) >= self.max_traces
+            should_flush = (
+                self.auto_flush and len(self._pending_traces) >= self.max_traces
+            )
         if not should_flush:
             return
         try:
@@ -526,13 +538,17 @@ class Tracer:
             return
         loop.create_task(self.flush())
 
-    def start_trace(self, name: str, parent_context: Optional[Dict[str, Any]] = None) -> Trace:
+    def start_trace(
+        self, name: str, parent_context: Optional[Dict[str, Any]] = None
+    ) -> Trace:
         trace_id = None
         parent_id = None
         baggage: Dict[str, str] = {}
         if parent_context:
             trace_id = parent_context.get("trace_id")
-            parent_id = parent_context.get("span_id") or parent_context.get("parent_span_id")
+            parent_id = parent_context.get("span_id") or parent_context.get(
+                "parent_span_id"
+            )
             baggage = dict(parent_context.get("baggage") or {})
         trace = Trace(
             name=name,
@@ -590,7 +606,11 @@ class Tracer:
         kind: SpanKind = SpanKind.INTERNAL,
     ) -> Generator[Span, None, None]:
         current = self.get_current_trace()
-        if current is not None and not current.finished and self.active_span is not None:
+        if (
+            current is not None
+            and not current.finished
+            and self.active_span is not None
+        ):
             span = self.start_span(name, kind=kind)
             try:
                 yield span
@@ -646,7 +666,9 @@ class Tracer:
         async with aiohttp.ClientSession() as session:
             for trace in traces:
                 try:
-                    async with session.post(self.config.export_endpoint, json=trace.to_dict()) as _resp:
+                    async with session.post(
+                        self.config.export_endpoint, json=trace.to_dict()
+                    ) as _resp:
                         pass
                 except Exception:  # pragma: no cover - export failures are non-fatal
                     continue
@@ -655,7 +677,9 @@ class Tracer:
         with self._lock:
             return {
                 "pending_traces": len(self._pending_traces),
-                "pending_spans": sum(len(trace.spans) for trace in self._pending_traces),
+                "pending_spans": sum(
+                    len(trace.spans) for trace in self._pending_traces
+                ),
                 "exporters": [type(exporter).__name__ for exporter in self.exporters],
             }
 
@@ -669,6 +693,7 @@ def traced(
         op_name = name or func.__name__
 
         if asyncio.iscoroutinefunction(func):
+
             async def async_wrapper(*args, **kwargs) -> T:
                 tracer_obj = get_tracer()
                 with tracer_obj.trace(op_name, kind=kind) as span:

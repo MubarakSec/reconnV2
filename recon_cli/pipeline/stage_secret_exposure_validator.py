@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import requests
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
@@ -17,27 +18,43 @@ class SecretExposureValidatorStage(Stage):
     name = "secret_exposure_validator"
 
     HIGH_CONF_PATTERNS = {"aws_access_key", "aws_secret_key", "rsa_private"}
-    PLACEHOLDER_HINTS = ("example", "dummy", "sample", "test", "changeme", "placeholder", "xxxxx")
+    PLACEHOLDER_HINTS = (
+        "example",
+        "dummy",
+        "sample",
+        "test",
+        "changeme",
+        "placeholder",
+        "xxxxx",
+    )
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(getattr(context.runtime_config, "enable_secret_exposure_validator", True))
+        return bool(
+            getattr(context.runtime_config, "enable_secret_exposure_validator", True)
+        )
 
     def execute(self, context: PipelineContext) -> None:
         try:
             import requests
         except Exception:
-            context.logger.warning("secret exposure validator requires requests; skipping")
+            context.logger.warning(
+                "secret exposure validator requires requests; skipping"
+            )
             return
 
         runtime = context.runtime_config
-        max_findings = max(1, int(getattr(runtime, "secret_exposure_validator_max_findings", 40)))
+        max_findings = max(
+            1, int(getattr(runtime, "secret_exposure_validator_max_findings", 40))
+        )
         min_score = int(getattr(runtime, "secret_exposure_validator_min_score", 40))
         timeout = max(1, int(getattr(runtime, "secret_exposure_validator_timeout", 10)))
         verify_tls = bool(getattr(runtime, "verify_tls", True))
         limiter = context.get_rate_limiter(
             "secret_exposure_validator",
             rps=float(getattr(runtime, "secret_exposure_validator_rps", 0)),
-            per_host=float(getattr(runtime, "secret_exposure_validator_per_host_rps", 0)),
+            per_host=float(
+                getattr(runtime, "secret_exposure_validator_per_host_rps", 0)
+            ),
         )
         pattern_map = {name: regex for name, regex in SECRETS_PATTERNS}
 
@@ -46,9 +63,20 @@ class SecretExposureValidatorStage(Stage):
             min_score=min_score,
             max_findings=max_findings,
         )
-        stats = context.record.metadata.stats.setdefault("secret_exposure_validator", {})
+        stats = context.record.metadata.stats.setdefault(
+            "secret_exposure_validator", {}
+        )
         if not candidates:
-            stats.update({"attempted": 0, "confirmed": 0, "stale": 0, "filtered_sanity": 0, "failed": 0, "skipped": 0})
+            stats.update(
+                {
+                    "attempted": 0,
+                    "confirmed": 0,
+                    "stale": 0,
+                    "filtered_sanity": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                }
+            )
             context.manager.update_metadata(context.record)
             context.logger.info("No secret exposure validator candidates")
             return
@@ -275,9 +303,21 @@ class SecretExposureValidatorStage(Stage):
         session = context.auth_session(url)
         try:
             if session:
-                resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=verify_tls)
+                resp = session.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=verify_tls,
+                )
             else:
-                resp = requests_mod.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=verify_tls)
+                resp = requests_mod.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=verify_tls,
+                )
         except requests.exceptions.RequestException:
             if limiter:
                 limiter.on_error(url)
@@ -325,30 +365,78 @@ class SecretExposureValidatorStage(Stage):
         entropy = shannon_entropy(value)
         if pattern == "aws_access_key":
             if value.startswith("AKIA") and len(value) == 20:
-                return {"valid": True, "reason": "aws_access_key_format", "confidence": "verified"}
-            return {"valid": False, "reason": "invalid_aws_access_key_format", "confidence": "high"}
+                return {
+                    "valid": True,
+                    "reason": "aws_access_key_format",
+                    "confidence": "verified",
+                }
+            return {
+                "valid": False,
+                "reason": "invalid_aws_access_key_format",
+                "confidence": "high",
+            }
         if pattern == "aws_secret_key":
             if len(value) >= 40 and entropy >= 3.5:
-                return {"valid": True, "reason": "aws_secret_key_entropy", "confidence": "verified"}
-            return {"valid": False, "reason": "invalid_aws_secret_key", "confidence": "high"}
+                return {
+                    "valid": True,
+                    "reason": "aws_secret_key_entropy",
+                    "confidence": "verified",
+                }
+            return {
+                "valid": False,
+                "reason": "invalid_aws_secret_key",
+                "confidence": "high",
+            }
         if pattern == "google_api_key":
             if value.startswith("AIza") and len(value) >= 39:
-                return {"valid": True, "reason": "google_api_key_format", "confidence": "high"}
-            return {"valid": False, "reason": "invalid_google_api_key", "confidence": "high"}
+                return {
+                    "valid": True,
+                    "reason": "google_api_key_format",
+                    "confidence": "high",
+                }
+            return {
+                "valid": False,
+                "reason": "invalid_google_api_key",
+                "confidence": "high",
+            }
         if pattern == "slack_token":
             if value.startswith("xox") and len(value) >= 20:
-                return {"valid": True, "reason": "slack_token_format", "confidence": "high"}
-            return {"valid": False, "reason": "invalid_slack_token", "confidence": "high"}
+                return {
+                    "valid": True,
+                    "reason": "slack_token_format",
+                    "confidence": "high",
+                }
+            return {
+                "valid": False,
+                "reason": "invalid_slack_token",
+                "confidence": "high",
+            }
         if pattern == "jwt":
             if value.count(".") == 2 and len(value) >= 40:
                 return {"valid": True, "reason": "jwt_structure", "confidence": "high"}
-            return {"valid": False, "reason": "invalid_jwt_structure", "confidence": "high"}
+            return {
+                "valid": False,
+                "reason": "invalid_jwt_structure",
+                "confidence": "high",
+            }
         if pattern == "rsa_private":
             if "BEGIN RSA PRIVATE KEY" in value:
-                return {"valid": True, "reason": "rsa_private_key_header", "confidence": "verified"}
-            return {"valid": False, "reason": "invalid_rsa_private_key", "confidence": "high"}
+                return {
+                    "valid": True,
+                    "reason": "rsa_private_key_header",
+                    "confidence": "verified",
+                }
+            return {
+                "valid": False,
+                "reason": "invalid_rsa_private_key",
+                "confidence": "high",
+            }
         if len(value) >= 20 and entropy >= 4.0:
-            return {"valid": True, "reason": "generic_secret_entropy", "confidence": "high"}
+            return {
+                "valid": True,
+                "reason": "generic_secret_entropy",
+                "confidence": "high",
+            }
         return {"valid": False, "reason": "low_entropy_or_length", "confidence": "high"}
 
     @staticmethod

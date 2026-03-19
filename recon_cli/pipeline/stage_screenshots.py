@@ -12,8 +12,25 @@ from recon_cli.utils.jsonl import read_jsonl
 
 class ScreenshotStage(Stage):
     name = "screenshots"
-    LOGIN_HINTS = ("login", "sign in", "signin", "log in", "auth", "password", "otp", "verify")
-    ADMIN_HINTS = ("admin", "dashboard", "console", "portal", "manage", "backend", "staff")
+    LOGIN_HINTS = (
+        "login",
+        "sign in",
+        "signin",
+        "log in",
+        "auth",
+        "password",
+        "otp",
+        "verify",
+    )
+    ADMIN_HINTS = (
+        "admin",
+        "dashboard",
+        "console",
+        "portal",
+        "manage",
+        "backend",
+        "staff",
+    )
     TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
     def is_enabled(self, context: PipelineContext) -> bool:
@@ -43,7 +60,10 @@ class ScreenshotStage(Stage):
                 context.logger.warning("pytesseract/PIL not available; skipping OCR")
                 note_missing_tool(context, "pytesseract")
                 ocr_ready = False
-        max_shots = context.record.spec.max_screenshots or context.runtime_config.max_screenshots
+        max_shots = (
+            context.record.spec.max_screenshots
+            or context.runtime_config.max_screenshots
+        )
         candidates = self._select_urls(context, max_shots)
         if not candidates:
             context.logger.info("No URLs eligible for screenshots")
@@ -74,7 +94,9 @@ class ScreenshotStage(Stage):
                     html_path.write_text(html_content, encoding="utf-8")
                     page_title = page.title() or self._extract_title(html_content)
                     hostname = urlparse(page.url).hostname or ""
-                    portal_tags = self._classify_portal(page.url, page_title, html_content, "")
+                    portal_tags = self._classify_portal(
+                        page.url, page_title, html_content, ""
+                    )
                     ocr_snippet = ""
                     if ocr_ready and ocr_count < ocr_max and screenshot_path.exists():
                         ocr_text = self._run_ocr(str(screenshot_path), ocr_lang)
@@ -83,7 +105,9 @@ class ScreenshotStage(Stage):
                             ocr_path.write_text(ocr_text, encoding="utf-8")
                             ocr_snippet = ocr_text[:500]
                             portal_tags.update(
-                                self._classify_portal(page.url, page_title, html_content, ocr_text)
+                                self._classify_portal(
+                                    page.url, page_title, html_content, ocr_text
+                                )
                             )
                     portal_tags_list = sorted(portal_tags) if portal_tags else []
                     payload = {
@@ -96,17 +120,23 @@ class ScreenshotStage(Stage):
                         "selection_source": entry.get("source"),
                         "selection_tags": entry.get("tags"),
                         "selection_reason": entry.get("reason"),
-                        "screenshot_path": str(screenshot_path.relative_to(context.record.paths.root)),
+                        "screenshot_path": str(
+                            screenshot_path.relative_to(context.record.paths.root)
+                        ),
                         "title": page_title,
                     }
                     if portal_tags_list:
                         payload["tags"] = portal_tags_list
-                        self._emit_portal_signals(context, page.url, portal_tags_list, page_title)
+                        self._emit_portal_signals(
+                            context, page.url, portal_tags_list, page_title
+                        )
                     if ocr_snippet:
                         payload["ocr_snippet"] = ocr_snippet
                 except Exception as exc:
                     if browser_context is None:
-                        context.logger.warning("Failed to initialize browser context for %s: %s", url, exc)
+                        context.logger.warning(
+                            "Failed to initialize browser context for %s: %s", url, exc
+                        )
                     else:
                         context.logger.warning("Failed to screenshot %s: %s", url, exc)
                 finally:
@@ -122,23 +152,35 @@ class ScreenshotStage(Stage):
                             pass
                 if payload:
                     if har_path.exists():
-                        payload["har_path"] = str(har_path.relative_to(context.record.paths.root))
+                        payload["har_path"] = str(
+                            har_path.relative_to(context.record.paths.root)
+                        )
                     if html_path.exists():
-                        payload["html_path"] = str(html_path.relative_to(context.record.paths.root))
+                        payload["html_path"] = str(
+                            html_path.relative_to(context.record.paths.root)
+                        )
                     if ocr_path.exists():
-                        payload["ocr_path"] = str(ocr_path.relative_to(context.record.paths.root))
+                        payload["ocr_path"] = str(
+                            ocr_path.relative_to(context.record.paths.root)
+                        )
                     context.results.append(payload)
                     manifest.append(payload)
             browser.close()
         if manifest:
             manifest_path = screenshots_dir / "manifest.json"
-            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+            )
             stats = context.record.metadata.stats.setdefault("screenshots", {})
             stats["count"] = len(manifest)
-            stats["manifest"] = str(manifest_path.relative_to(context.record.paths.root))
+            stats["manifest"] = str(
+                manifest_path.relative_to(context.record.paths.root)
+            )
             context.manager.update_metadata(context.record)
 
-    def _select_urls(self, context: PipelineContext, limit: int) -> List[Dict[str, object]]:
+    def _select_urls(
+        self, context: PipelineContext, limit: int
+    ) -> List[Dict[str, object]]:
         urls: List[Dict[str, object]] = []
         for entry in read_jsonl(context.record.paths.results_jsonl):
             if entry.get("type") != "url":
@@ -162,14 +204,18 @@ class ScreenshotStage(Stage):
         urls.sort(key=lambda item: item.get("score", 0), reverse=True)
         return urls[:limit]
 
-    def _classify_portal(self, url: str, title: str, html: str, ocr_text: str) -> Set[str]:
+    def _classify_portal(
+        self, url: str, title: str, html: str, ocr_text: str
+    ) -> Set[str]:
         tags: Set[str] = set()
         title_lower = (title or "").lower()
         url_lower = (url or "").lower()
         html_lower = (html or "").lower()
         ocr_lower = (ocr_text or "").lower()
-        combined = " ".join([title_lower, url_lower, html_lower[:2000], ocr_lower[:2000]])
-        if "type=\"password\"" in html_lower or "type='password'" in html_lower:
+        combined = " ".join(
+            [title_lower, url_lower, html_lower[:2000], ocr_lower[:2000]]
+        )
+        if 'type="password"' in html_lower or "type='password'" in html_lower:
             tags.add("portal:login")
         if any(hint in combined for hint in self.LOGIN_HINTS):
             tags.add("portal:login")
@@ -179,7 +225,9 @@ class ScreenshotStage(Stage):
             tags.add("portal:dashboard")
         return tags
 
-    def _emit_portal_signals(self, context: PipelineContext, url: str, tags: List[str], title: str) -> None:
+    def _emit_portal_signals(
+        self, context: PipelineContext, url: str, tags: List[str], title: str
+    ) -> None:
         if "portal:login" in tags:
             context.emit_signal(
                 "portal_login",

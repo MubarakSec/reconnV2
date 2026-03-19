@@ -24,7 +24,9 @@ def validate_job(record: JobRecord) -> List[str]:
         if metadata is None:
             issues.append("metadata.json unreadable or invalid JSON")
         else:
-            schema = metadata.get("schema_version") if isinstance(metadata, dict) else None  # type: ignore
+            schema = (
+                metadata.get("schema_version") if isinstance(metadata, dict) else None
+            )  # type: ignore
             if not schema:
                 issues.append("metadata schema_version missing")
     # Results validation

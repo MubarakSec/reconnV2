@@ -147,7 +147,9 @@ class LoginConfig:
             content_type=payload.get("content_type") or payload.get("contentType"),
             success_regex=payload.get("success_regex") or payload.get("successRegex"),
             fail_regex=payload.get("fail_regex") or payload.get("failRegex"),
-            cookie_names=parse_cookie_names(payload.get("cookie_names") or payload.get("cookieNames")),
+            cookie_names=parse_cookie_names(
+                payload.get("cookie_names") or payload.get("cookieNames")
+            ),
             timeout=int(payload.get("timeout") or 15),
         )
 
@@ -206,7 +208,9 @@ def build_profiles(runtime_config) -> List[AuthProfile]:
             content_type=getattr(runtime_config, "auth_login_content_type", None),
             success_regex=getattr(runtime_config, "auth_login_success_regex", None),
             fail_regex=getattr(runtime_config, "auth_login_fail_regex", None),
-            cookie_names=parse_cookie_names(getattr(runtime_config, "auth_login_cookie_names", None)),
+            cookie_names=parse_cookie_names(
+                getattr(runtime_config, "auth_login_cookie_names", None)
+            ),
             timeout=int(getattr(runtime_config, "auth_login_timeout", 15)),
         )
     if headers or cookies or bearer or basic_user or basic_pass or login_config:
@@ -224,7 +228,9 @@ def build_profiles(runtime_config) -> List[AuthProfile]:
     return profiles
 
 
-def select_profile(profiles: List[AuthProfile], name: Optional[str]) -> Optional[AuthProfile]:
+def select_profile(
+    profiles: List[AuthProfile], name: Optional[str]
+) -> Optional[AuthProfile]:
     if not profiles:
         return None
     if name:
@@ -277,12 +283,20 @@ class AuthSessionManager:
                 manager.update_metadata(record)
 
     def _apply_auth_headers(self) -> None:
-        headers_lower = {key.lower(): value for key, value in self.session.headers.items()}
+        headers_lower = {
+            key.lower(): value for key, value in self.session.headers.items()
+        }
         if self.profile.bearer and "authorization" not in headers_lower:
             self.session.headers["Authorization"] = f"Bearer {self.profile.bearer}"
             headers_lower["authorization"] = "Bearer"
-        if self.profile.basic_user and self.profile.basic_pass and "authorization" not in headers_lower:
-            token = f"{self.profile.basic_user}:{self.profile.basic_pass}".encode("utf-8")
+        if (
+            self.profile.basic_user
+            and self.profile.basic_pass
+            and "authorization" not in headers_lower
+        ):
+            token = f"{self.profile.basic_user}:{self.profile.basic_pass}".encode(
+                "utf-8"
+            )
             basic = base64.b64encode(token).decode("ascii")
             self.session.headers["Authorization"] = f"Basic {basic}"
 
@@ -292,9 +306,17 @@ class AuthSessionManager:
             headers.update(base)
         if self.profile.bearer and "authorization" not in {k.lower() for k in headers}:
             headers["Authorization"] = f"Bearer {self.profile.bearer}"
-        if self.profile.basic_user and self.profile.basic_pass and "authorization" not in {k.lower() for k in headers}:
-            token = f"{self.profile.basic_user}:{self.profile.basic_pass}".encode("utf-8")
-            headers["Authorization"] = f"Basic {base64.b64encode(token).decode('ascii')}"
+        if (
+            self.profile.basic_user
+            and self.profile.basic_pass
+            and "authorization" not in {k.lower() for k in headers}
+        ):
+            token = f"{self.profile.basic_user}:{self.profile.basic_pass}".encode(
+                "utf-8"
+            )
+            headers["Authorization"] = (
+                f"Basic {base64.b64encode(token).decode('ascii')}"
+            )
         return headers
 
     def _resolve_login_url(self, host: Optional[str]) -> Optional[str]:
@@ -334,7 +356,9 @@ class AuthSessionManager:
             return False
         headers = self.prepare_headers(self.profile.login.headers)
         payload = self.profile.login.payload
-        content_type = (self.profile.login.content_type or headers.get("Content-Type", "")).lower()
+        content_type = (
+            self.profile.login.content_type or headers.get("Content-Type", "")
+        ).lower()
         request_kwargs: Dict[str, object] = {
             "timeout": self.profile.login.timeout,
             "allow_redirects": True,
@@ -350,15 +374,22 @@ class AuthSessionManager:
                 request_kwargs["data"] = payload
         success = False
         try:
-            response = self.session.request(self.profile.login.method, login_url, **request_kwargs)
+            response = self.session.request(
+                self.profile.login.method, login_url, **request_kwargs
+            )
             body = response.text or ""
-            if self.profile.login.fail_regex and re.search(self.profile.login.fail_regex, body, re.IGNORECASE):
+            if self.profile.login.fail_regex and re.search(
+                self.profile.login.fail_regex, body, re.IGNORECASE
+            ):
                 success = False
-            elif self.profile.login.success_regex and not re.search(self.profile.login.success_regex, body, re.IGNORECASE):
+            elif self.profile.login.success_regex and not re.search(
+                self.profile.login.success_regex, body, re.IGNORECASE
+            ):
                 success = False
             elif self.profile.login.cookie_names:
                 success = all(
-                    name in self.session.cookies.get_dict() for name in self.profile.login.cookie_names
+                    name in self.session.cookies.get_dict()
+                    for name in self.profile.login.cookie_names
                 )
             else:
                 success = response.status_code < 400
@@ -381,7 +412,9 @@ class AuthSessionManager:
             self.ensure_login(url)
         return self.session
 
-    def export_cookies(self, default_domain: Optional[str] = None) -> List[Dict[str, object]]:
+    def export_cookies(
+        self, default_domain: Optional[str] = None
+    ) -> List[Dict[str, object]]:
         cookies: List[Dict[str, object]] = []
         for cookie in self.session.cookies:
             domain = cookie.domain or default_domain
@@ -394,7 +427,9 @@ class AuthSessionManager:
                     "domain": domain,
                     "path": cookie.path or "/",
                     "secure": bool(cookie.secure),
-                    "httpOnly": bool(getattr(cookie, "rest", {}).get("HttpOnly", False)),
+                    "httpOnly": bool(
+                        getattr(cookie, "rest", {}).get("HttpOnly", False)
+                    ),
                 }
             )
         return cookies
@@ -412,14 +447,23 @@ class AuthSessionManager:
             pass
 
 
-def build_auth_manager(runtime_config, *, logger=None, record=None, manager=None, default_host: Optional[str] = None) -> Optional[AuthSessionManager]:
+def build_auth_manager(
+    runtime_config,
+    *,
+    logger=None,
+    record=None,
+    manager=None,
+    default_host: Optional[str] = None,
+) -> Optional[AuthSessionManager]:
     enabled = bool(getattr(runtime_config, "enable_authenticated_scan", False))
     profiles = build_profiles(runtime_config)
     if profiles and not enabled:
         enabled = True
     if not enabled or not profiles:
         return None
-    selected = select_profile(profiles, getattr(runtime_config, "auth_profile_name", None))
+    selected = select_profile(
+        profiles, getattr(runtime_config, "auth_profile_name", None)
+    )
     if not selected:
         return None
     return AuthSessionManager(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import requests
 from typing import Dict, List, Tuple
 from urllib.parse import urlparse, urlsplit, urlunsplit, quote_plus
 
@@ -111,7 +112,9 @@ class WafProbeStage(Stage):
             status = entry.get("status_code") or 0
             tags = entry.get("tags", [])
             score = int(entry.get("score", 0))
-            waf_tags = enrich_utils.detect_waf_tags(entry.get("server"), entry.get("cdn"))
+            waf_tags = enrich_utils.detect_waf_tags(
+                entry.get("server"), entry.get("cdn")
+            )
             indicated = status in self.BLOCK_STATUSES or any(
                 tag.startswith("waf:") or tag == "service:waf" for tag in tags
             )
@@ -229,14 +232,35 @@ class WafProbeStage(Stage):
 
             waf_tags = set()
             waf_tags.update(self._header_tags(baseline_resp))
-            waf_tags.update(enrich_utils.detect_waf_tags(self._get_header(baseline_resp, "server"), self._get_header(baseline_resp, "via")))
-            waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(baseline_resp)))
+            waf_tags.update(
+                enrich_utils.detect_waf_tags(
+                    self._get_header(baseline_resp, "server"),
+                    self._get_header(baseline_resp, "via"),
+                )
+            )
+            waf_tags.update(
+                enrich_utils.infer_cookie_tags(self._cookie_headers(baseline_resp))
+            )
             waf_tags.update(self._header_tags(attack_resp))
-            waf_tags.update(enrich_utils.detect_waf_tags(self._get_header(attack_resp, "server"), self._get_header(attack_resp, "via")))
-            waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(attack_resp)))
+            waf_tags.update(
+                enrich_utils.detect_waf_tags(
+                    self._get_header(attack_resp, "server"),
+                    self._get_header(attack_resp, "via"),
+                )
+            )
+            waf_tags.update(
+                enrich_utils.infer_cookie_tags(self._cookie_headers(attack_resp))
+            )
             waf_tags.update(self._header_tags(alt_resp))
-            waf_tags.update(enrich_utils.detect_waf_tags(self._get_header(alt_resp, "server"), self._get_header(alt_resp, "via")))
-            waf_tags.update(enrich_utils.infer_cookie_tags(self._cookie_headers(alt_resp)))
+            waf_tags.update(
+                enrich_utils.detect_waf_tags(
+                    self._get_header(alt_resp, "server"),
+                    self._get_header(alt_resp, "via"),
+                )
+            )
+            waf_tags.update(
+                enrich_utils.infer_cookie_tags(self._cookie_headers(alt_resp))
+            )
 
             blocked_delta = self._blocked_delta(baseline_meta, attack_meta)
             indicators = 0
@@ -246,7 +270,7 @@ class WafProbeStage(Stage):
                 indicators += 1
             if self._looks_challenge(attack_resp, attack_snip):
                 indicators += 1
-            if (not baseline_blocked and attack_blocked):
+            if not baseline_blocked and attack_blocked:
                 indicators += 1
 
             if indicators >= 2:
@@ -293,7 +317,9 @@ class WafProbeStage(Stage):
                 if context.results.append(finding):
                     findings += 1
 
-            if (baseline_blocked and not alt_blocked) or (attack_blocked and not alt_blocked):
+            if (baseline_blocked and not alt_blocked) or (
+                attack_blocked and not alt_blocked
+            ):
                 signal_id = context.emit_signal(
                     "waf_bypass_possible",
                     "url",
@@ -357,9 +383,18 @@ class WafProbeStage(Stage):
         query = parts.query
         probe = f"recon_probe={quote_plus(payload)}"
         new_query = f"{query}&{probe}" if query else probe
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, new_query, parts.fragment)
+        )
 
-    def _fetch(self, context: PipelineContext, url: str, requests_mod, timeout: int, headers: dict) -> Tuple[object, str]:
+    def _fetch(
+        self,
+        context: PipelineContext,
+        url: str,
+        requests_mod,
+        timeout: int,
+        headers: dict,
+    ) -> Tuple[object, str]:
         session = context.auth_session(url)
         if session:
             resp = session.get(
@@ -413,7 +448,9 @@ class WafProbeStage(Stage):
             "title": self._extract_title(body_snippet),
         }
 
-    def _blocked_delta(self, baseline: Dict[str, object], attack: Dict[str, object]) -> bool:
+    def _blocked_delta(
+        self, baseline: Dict[str, object], attack: Dict[str, object]
+    ) -> bool:
         try:
             baseline_status = int(baseline.get("status") or 0)
         except Exception:
@@ -422,7 +459,10 @@ class WafProbeStage(Stage):
             attack_status = int(attack.get("status") or 0)
         except Exception:
             attack_status = 0
-        if attack_status in self.BLOCK_STATUSES and baseline_status not in self.BLOCK_STATUSES:
+        if (
+            attack_status in self.BLOCK_STATUSES
+            and baseline_status not in self.BLOCK_STATUSES
+        ):
             return True
         base_len = int(baseline.get("length") or 0)
         attack_len = int(attack.get("length") or 0)
@@ -431,7 +471,10 @@ class WafProbeStage(Stage):
         base_title = str(baseline.get("title") or "")
         attack_title = str(attack.get("title") or "")
         if base_title and attack_title and base_title != attack_title:
-            if any(keyword in attack_title.lower() for keyword in ("denied", "blocked", "forbidden")):
+            if any(
+                keyword in attack_title.lower()
+                for keyword in ("denied", "blocked", "forbidden")
+            ):
                 return True
         return False
 

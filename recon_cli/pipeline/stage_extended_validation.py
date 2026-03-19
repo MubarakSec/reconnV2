@@ -34,7 +34,9 @@ class ExtendedValidationStage(Stage):
     VALUE_FILE_RE = re.compile(r"\\.[a-z0-9]{2,5}$", re.IGNORECASE)
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(getattr(context.runtime_config, "enable_extended_validation", False))
+        return bool(
+            getattr(context.runtime_config, "enable_extended_validation", False)
+        )
 
     def execute(self, context: PipelineContext) -> None:
         try:
@@ -59,8 +61,12 @@ class ExtendedValidationStage(Stage):
         retry_count = int(getattr(runtime, "retry_count", 1))
         retry_backoff_base = float(getattr(runtime, "retry_backoff_base", 1.0))
         retry_backoff_factor = float(getattr(runtime, "retry_backoff_factor", 2.0))
-        max_duration = max(0, int(getattr(runtime, "extended_validation_max_duration", 0) or 0))
-        max_total_probes = max(0, int(getattr(runtime, "extended_validation_max_probes", 0) or 0))
+        max_duration = max(
+            0, int(getattr(runtime, "extended_validation_max_duration", 0) or 0)
+        )
+        max_total_probes = max(
+            0, int(getattr(runtime, "extended_validation_max_probes", 0) or 0)
+        )
         limiter = context.get_rate_limiter(
             "extended_validation",
             rps=float(getattr(runtime, "oast_rps", 0)),
@@ -92,7 +98,9 @@ class ExtendedValidationStage(Stage):
             nonlocal duration_cap_hit, probe_cap_hit, stop_requested
             if context.stop_requested():
                 if not stop_requested:
-                    context.logger.warning("extended validation stop requested; stopping stage work")
+                    context.logger.warning(
+                        "extended validation stop requested; stopping stage work"
+                    )
                 stop_requested = True
                 return True
             elapsed = int(time.monotonic() - started_at)
@@ -125,11 +133,17 @@ class ExtendedValidationStage(Stage):
                     continue
                 token = self._token()
                 payload = f"https://example.com/{token}"
-                test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
-                if not context.url_allowed(test_url) or not test_url.startswith(("http://", "https://")):
+                test_url, method, data, json_body = self._prepare_payload_request(
+                    entry, payload
+                )
+                if not context.url_allowed(test_url) or not test_url.startswith(
+                    ("http://", "https://")
+                ):
                     continue
                 session = context.auth_session(test_url)
-                headers = context.auth_headers({"User-Agent": "recon-cli redirect-validate"})
+                headers = context.auth_headers(
+                    {"User-Agent": "recon-cli redirect-validate"}
+                )
                 resp = self._request_with_retries(
                     requests,
                     session,
@@ -166,7 +180,13 @@ class ExtendedValidationStage(Stage):
                 )
                 if cap_reached():
                     break
-                if resp.status_code in {301, 302, 303, 307, 308} and self._is_open_redirect(url, location, payload):
+                if resp.status_code in {
+                    301,
+                    302,
+                    303,
+                    307,
+                    308,
+                } and self._is_open_redirect(url, location, payload):
                     confirm_key = ("open_redirect", url)
                     if confirm_key in confirmed_keys:
                         continue
@@ -210,7 +230,9 @@ class ExtendedValidationStage(Stage):
                     str(entry.get("location") or "query"),
                     str(entry.get("method") or "get"),
                 )
-                baseline_status, baseline_body = baseline_cache.get(baseline_key, (0, ""))
+                baseline_status, baseline_body = baseline_cache.get(
+                    baseline_key, (0, "")
+                )
                 if baseline_key not in baseline_cache:
                     baseline_status, baseline_body = self._fetch_baseline(
                         context,
@@ -224,17 +246,28 @@ class ExtendedValidationStage(Stage):
                         limiter,
                     )
                     baseline_cache[baseline_key] = (baseline_status, baseline_body)
-                baseline_has_sig = bool(baseline_body and self._looks_like_lfi(baseline_body))
-                for payload in ("../../../../etc/passwd", "..\\..\\..\\windows\\win.ini"):
+                baseline_has_sig = bool(
+                    baseline_body and self._looks_like_lfi(baseline_body)
+                )
+                for payload in (
+                    "../../../../etc/passwd",
+                    "..\\..\\..\\windows\\win.ini",
+                ):
                     if cap_reached():
                         break
                     if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                         continue
-                    test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
-                    if not context.url_allowed(test_url) or not test_url.startswith(("http://", "https://")):
+                    test_url, method, data, json_body = self._prepare_payload_request(
+                        entry, payload
+                    )
+                    if not context.url_allowed(test_url) or not test_url.startswith(
+                        ("http://", "https://")
+                    ):
                         continue
                     session = context.auth_session(test_url)
-                    headers = context.auth_headers({"User-Agent": "recon-cli lfi-validate"})
+                    headers = context.auth_headers(
+                        {"User-Agent": "recon-cli lfi-validate"}
+                    )
                     resp = self._request_with_retries(
                         requests,
                         session,
@@ -272,7 +305,11 @@ class ExtendedValidationStage(Stage):
                         break
                     if baseline_has_sig:
                         continue
-                    if resp.status_code < 400 and len(body) > 200 and self._looks_like_lfi(body):
+                    if (
+                        resp.status_code < 400
+                        and len(body) > 200
+                        and self._looks_like_lfi(body)
+                    ):
                         confirm_key = ("lfi", url)
                         if confirm_key in confirmed_keys:
                             continue
@@ -319,7 +356,9 @@ class ExtendedValidationStage(Stage):
                 domain_override=oast_domain_override,
             )
             if not session.start():
-                context.logger.warning("OAST session failed to start; skipping SSRF/XXE validation")
+                context.logger.warning(
+                    "OAST session failed to start; skipping SSRF/XXE validation"
+                )
                 note_missing_tool(context, "interactsh-client")
             else:
                 try:
@@ -336,12 +375,20 @@ class ExtendedValidationStage(Stage):
                         oast_url = session.make_url(token)
                         if not oast_url:
                             continue
-                        test_url, method, data, json_body = self._prepare_payload_request(entry, oast_url)
-                        if not context.url_allowed(test_url) or not test_url.startswith(("http://", "https://")):
+                        test_url, method, data, json_body = (
+                            self._prepare_payload_request(entry, oast_url)
+                        )
+                        if not context.url_allowed(test_url) or not test_url.startswith(
+                            ("http://", "https://")
+                        ):
                             continue
-                        if limiter and not limiter.wait_for_slot(test_url, timeout=timeout):
+                        if limiter and not limiter.wait_for_slot(
+                            test_url, timeout=timeout
+                        ):
                             continue
-                        headers = context.auth_headers({"User-Agent": "recon-cli ssrf-validate"})
+                        headers = context.auth_headers(
+                            {"User-Agent": "recon-cli ssrf-validate"}
+                        )
                         session_http = context.auth_session(test_url)
                         resp = self._request_with_retries(
                             requests,
@@ -450,7 +497,9 @@ class ExtendedValidationStage(Stage):
                             break
 
                     if enable_header and not cap_reached():
-                        header_candidates = self._select_header_candidates(candidates, header_max_urls)
+                        header_candidates = self._select_header_candidates(
+                            candidates, header_max_urls
+                        )
                         for url in header_candidates:
                             if cap_reached():
                                 break
@@ -459,10 +508,14 @@ class ExtendedValidationStage(Stage):
                             if not oast_url:
                                 continue
                             oast_host = self._oast_host(oast_url)
-                            headers = context.auth_headers({"User-Agent": "recon-cli ssrf-header"})
+                            headers = context.auth_headers(
+                                {"User-Agent": "recon-cli ssrf-header"}
+                            )
                             for header_name in self.HEADER_SSRF_HEADERS:
                                 headers[header_name] = oast_host
-                            if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+                            if limiter and not limiter.wait_for_slot(
+                                url, timeout=timeout
+                            ):
                                 continue
                             session_http = context.auth_session(url)
                             resp = self._request_with_retries(
@@ -505,13 +558,19 @@ class ExtendedValidationStage(Stage):
                                 break
 
                     if oast_tokens and not cap_reached():
-                        collected = session.collect_interactions(list(oast_tokens.keys()))
+                        collected = session.collect_interactions(
+                            list(oast_tokens.keys())
+                        )
                         interactions = [interaction.raw for interaction in collected]
                         for interaction in collected:
                             info = oast_tokens.get(interaction.token)
                             if not info:
                                 continue
-                            signal_type = "ssrf_confirmed" if info["type"] == "ssrf" else "xxe_confirmed"
+                            signal_type = (
+                                "ssrf_confirmed"
+                                if info["type"] == "ssrf"
+                                else "xxe_confirmed"
+                            )
                             confirm_key = (info["type"], info["url"])
                             if confirm_key in confirmed_keys:
                                 continue
@@ -540,10 +599,15 @@ class ExtendedValidationStage(Stage):
                                     "vector": info.get("vector"),
                                     "interaction": interaction.raw,
                                 },
-                                "tags": [info["type"], "confirmed", "oast"] + (["header"] if info.get("vector") == "header" else []),
+                                "tags": [info["type"], "confirmed", "oast"]
+                                + (
+                                    ["header"] if info.get("vector") == "header" else []
+                                ),
                                 "score": 90,
                                 "priority": "high",
-                                "severity": "critical" if info["type"] == "ssrf" else "high",
+                                "severity": "critical"
+                                if info["type"] == "ssrf"
+                                else "high",
                                 "evidence_id": signal_id or None,
                             }
                             if context.results.append(finding):
@@ -553,7 +617,11 @@ class ExtendedValidationStage(Stage):
                                 context.emit_signal(
                                     "oast_interaction",
                                     "url",
-                                    str(interaction.get("full-id") or interaction.get("url") or ""),
+                                    str(
+                                        interaction.get("full-id")
+                                        or interaction.get("url")
+                                        or ""
+                                    ),
                                     confidence=0.3,
                                     source="extended-validation",
                                     tags=["oast"],
@@ -592,7 +660,9 @@ class ExtendedValidationStage(Stage):
         )
         context.manager.update_metadata(context.record)
 
-    def _collect_candidates(self, context: PipelineContext, signals: Dict[str, Dict[str, Set[str]]]) -> Dict[str, List[Dict[str, object]]]:
+    def _collect_candidates(
+        self, context: PipelineContext, signals: Dict[str, Dict[str, Set[str]]]
+    ) -> Dict[str, List[Dict[str, object]]]:
         redirect_map: Dict[Tuple[str, str, str, str], Dict[str, object]] = {}
         ssrf_map: Dict[Tuple[str, str, str, str], Dict[str, object]] = {}
         lfi_map: Dict[Tuple[str, str, str, str], Dict[str, object]] = {}
@@ -603,11 +673,16 @@ class ExtendedValidationStage(Stage):
                 url = entry.get("url")
                 if not isinstance(url, str) or not url:
                     continue
-                if not context.url_allowed(url) or not url.startswith(("http://", "https://")):
+                if not context.url_allowed(url) or not url.startswith(
+                    ("http://", "https://")
+                ):
                     continue
                 host = urlparse(url).hostname or ""
                 host_signals = signals.get("by_host", {}).get(host, set())
-                if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
+                if (
+                    "waf_detected" in host_signals
+                    and "waf_bypass_possible" not in host_signals
+                ):
                     continue
                 params = parse_qsl(urlparse(url).query, keep_blank_values=True)
                 for key, value in params:
@@ -624,20 +699,40 @@ class ExtendedValidationStage(Stage):
                     if key_lower in self.REDIRECT_PARAMS:
                         redirect_map[candidate_key] = self._pick_best(
                             redirect_map.get(candidate_key),
-                            {"url": url, "param": key, "location": "query", "method": "get", "score": score},
+                            {
+                                "url": url,
+                                "param": key,
+                                "location": "query",
+                                "method": "get",
+                                "score": score,
+                            },
                         )
                     if key_lower in self.SSRF_PARAMS:
                         ssrf_map[candidate_key] = self._pick_best(
                             ssrf_map.get(candidate_key),
-                            {"url": url, "param": key, "location": "query", "method": "get", "score": score},
+                            {
+                                "url": url,
+                                "param": key,
+                                "location": "query",
+                                "method": "get",
+                                "score": score,
+                            },
                         )
                     if key_lower in self.LFI_PARAMS:
                         lfi_map[candidate_key] = self._pick_best(
                             lfi_map.get(candidate_key),
-                            {"url": url, "param": key, "location": "query", "method": "get", "score": score},
+                            {
+                                "url": url,
+                                "param": key,
+                                "location": "query",
+                                "method": "get",
+                                "score": score,
+                            },
                         )
                 tags = entry.get("tags", [])
-                if "api:schema" in tags and any(tag.startswith("method:") for tag in tags):
+                if "api:schema" in tags and any(
+                    tag.startswith("method:") for tag in tags
+                ):
                     method = "post"
                     for tag in tags:
                         if tag.startswith("method:"):
@@ -654,32 +749,57 @@ class ExtendedValidationStage(Stage):
                         lfi_key = (url, "file", "json", method)
                         redirect_map[redirect_key] = self._pick_best(
                             redirect_map.get(redirect_key),
-                            {"url": url, "param": "url", "location": "json", "method": method, "score": score},
+                            {
+                                "url": url,
+                                "param": "url",
+                                "location": "json",
+                                "method": method,
+                                "score": score,
+                            },
                         )
                         ssrf_map[ssrf_key] = self._pick_best(
                             ssrf_map.get(ssrf_key),
-                            {"url": url, "param": "url", "location": "json", "method": method, "score": score},
+                            {
+                                "url": url,
+                                "param": "url",
+                                "location": "json",
+                                "method": method,
+                                "score": score,
+                            },
                         )
                         lfi_map[lfi_key] = self._pick_best(
                             lfi_map.get(lfi_key),
-                            {"url": url, "param": "file", "location": "json", "method": method, "score": score},
+                            {
+                                "url": url,
+                                "param": "file",
+                                "location": "json",
+                                "method": method,
+                                "score": score,
+                            },
                         )
             elif etype == "parameter":
                 name = entry.get("name")
                 if not isinstance(name, str):
                     continue
                 name_lower = name.lower()
-                if name_lower not in (self.REDIRECT_PARAMS | self.SSRF_PARAMS | self.LFI_PARAMS):
+                if name_lower not in (
+                    self.REDIRECT_PARAMS | self.SSRF_PARAMS | self.LFI_PARAMS
+                ):
                     continue
                 examples = entry.get("examples") or []
                 for example in examples:
                     if not isinstance(example, str) or not example:
                         continue
-                    if not example.startswith(("http://", "https://")) or not context.url_allowed(example):
+                    if not example.startswith(
+                        ("http://", "https://")
+                    ) or not context.url_allowed(example):
                         continue
                     host = urlparse(example).hostname or ""
                     host_signals = signals.get("by_host", {}).get(host, set())
-                    if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
+                    if (
+                        "waf_detected" in host_signals
+                        and "waf_bypass_possible" not in host_signals
+                    ):
                         continue
                     score = int(entry.get("score", 0))
                     example_value = self._extract_param_value(example, name)
@@ -694,23 +814,43 @@ class ExtendedValidationStage(Stage):
                     if name_lower in self.REDIRECT_PARAMS:
                         redirect_map[candidate_key] = self._pick_best(
                             redirect_map.get(candidate_key),
-                            {"url": example, "param": name, "location": "query", "method": "get", "score": score},
+                            {
+                                "url": example,
+                                "param": name,
+                                "location": "query",
+                                "method": "get",
+                                "score": score,
+                            },
                         )
                     if name_lower in self.SSRF_PARAMS:
                         ssrf_map[candidate_key] = self._pick_best(
                             ssrf_map.get(candidate_key),
-                            {"url": example, "param": name, "location": "query", "method": "get", "score": score},
+                            {
+                                "url": example,
+                                "param": name,
+                                "location": "query",
+                                "method": "get",
+                                "score": score,
+                            },
                         )
                     if name_lower in self.LFI_PARAMS:
                         lfi_map[candidate_key] = self._pick_best(
                             lfi_map.get(candidate_key),
-                            {"url": example, "param": name, "location": "query", "method": "get", "score": score},
+                            {
+                                "url": example,
+                                "param": name,
+                                "location": "query",
+                                "method": "get",
+                                "score": score,
+                            },
                         )
             elif etype == "form":
                 action = entry.get("action") or entry.get("url")
                 if not isinstance(action, str) or not action:
                     continue
-                if not context.url_allowed(action) or not action.startswith(("http://", "https://")):
+                if not context.url_allowed(action) or not action.startswith(
+                    ("http://", "https://")
+                ):
                     continue
                 method = str(entry.get("method") or "post").lower()
                 inputs = entry.get("inputs") or []
@@ -729,24 +869,52 @@ class ExtendedValidationStage(Stage):
                         redirect_key = (action, name_lower, location, method)
                         redirect_map[redirect_key] = self._pick_best(
                             redirect_map.get(redirect_key),
-                            {"url": action, "param": name, "location": location, "method": method, "score": score},
+                            {
+                                "url": action,
+                                "param": name,
+                                "location": location,
+                                "method": method,
+                                "score": score,
+                            },
                         )
                     if name_lower in self.SSRF_PARAMS:
                         ssrf_key = (action, name_lower, location, method)
                         ssrf_map[ssrf_key] = self._pick_best(
                             ssrf_map.get(ssrf_key),
-                            {"url": action, "param": name, "location": location, "method": method, "score": score},
+                            {
+                                "url": action,
+                                "param": name,
+                                "location": location,
+                                "method": method,
+                                "score": score,
+                            },
                         )
                     if name_lower in self.LFI_PARAMS:
                         lfi_key = (action, name_lower, location, method)
                         lfi_map[lfi_key] = self._pick_best(
                             lfi_map.get(lfi_key),
-                            {"url": action, "param": name, "location": location, "method": method, "score": score},
+                            {
+                                "url": action,
+                                "param": name,
+                                "location": location,
+                                "method": method,
+                                "score": score,
+                            },
                         )
-        redirect = sorted(redirect_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True)
-        ssrf = sorted(ssrf_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True)
-        lfi = sorted(lfi_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True)
-        xxe = sorted(xxe_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True)
+        redirect = sorted(
+            redirect_map.values(),
+            key=lambda item: int(item.get("score", 0)),
+            reverse=True,
+        )
+        ssrf = sorted(
+            ssrf_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
+        )
+        lfi = sorted(
+            lfi_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
+        )
+        xxe = sorted(
+            xxe_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
+        )
         return {"redirect": redirect, "ssrf": ssrf, "lfi": lfi, "xxe": xxe}
 
     @staticmethod
@@ -808,7 +976,9 @@ class ExtendedValidationStage(Stage):
         return True
 
     @staticmethod
-    def _pick_best(existing: Optional[Dict[str, object]], candidate: Dict[str, object]) -> Dict[str, object]:
+    def _pick_best(
+        existing: Optional[Dict[str, object]], candidate: Dict[str, object]
+    ) -> Dict[str, object]:
         if not existing:
             return candidate
         if int(candidate.get("score", 0)) > int(existing.get("score", 0)):
@@ -837,7 +1007,9 @@ class ExtendedValidationStage(Stage):
         backoff_factor: float,
         limiter,
     ) -> Tuple[int, str]:
-        test_url, method, data, json_body = self._prepare_payload_request(entry, "recon_baseline")
+        test_url, method, data, json_body = self._prepare_payload_request(
+            entry, "recon_baseline"
+        )
         if not context.url_allowed(test_url):
             return 0, ""
         session = context.auth_session(test_url)
@@ -870,10 +1042,8 @@ class ExtendedValidationStage(Stage):
     @staticmethod
     def _xxe_payload(oast_url: str) -> str:
         return (
-            "<?xml version=\"1.0\"?>"
-            "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \""
-            + oast_url
-            + "\">]>"
+            '<?xml version="1.0"?>'
+            '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "' + oast_url + '">]>'
             "<foo>&xxe;</foo>"
         )
 
@@ -978,7 +1148,7 @@ class ExtendedValidationStage(Stage):
             except requests_mod.exceptions.RequestException:
                 if attempt >= retries:
                     return None
-                delay = backoff_base * (backoff_factor ** attempt)
+                delay = backoff_base * (backoff_factor**attempt)
                 time.sleep(max(0.1, delay))
                 attempt += 1
         return None

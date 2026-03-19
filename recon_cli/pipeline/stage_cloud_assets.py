@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
-from typing import List, Sequence, Set, Tuple
+from typing import List, Sequence, Set, Tuple, Dict
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -28,7 +28,12 @@ class CloudAssetDiscoveryStage(Stage):
     PUBLIC_STATUSES = {200, 206}
     EXISTS_STATUSES = {200, 206, 301, 302, 307, 308, 401, 403}
     NOT_FOUND_STATUSES = {400, 404}
-    S3_KEYWORDS = ("NoSuchBucket", "AccessDenied", "AllAccessDisabled", "ListBucketResult")
+    S3_KEYWORDS = (
+        "NoSuchBucket",
+        "AccessDenied",
+        "AllAccessDisabled",
+        "ListBucketResult",
+    )
     GCS_KEYWORDS = ("NoSuchBucket", "AccessDenied", "Bucket", "ListBucketResult")
     AZURE_KEYWORDS = ("ResourceNotFound", "AuthenticationFailed", "Container", "Blob")
 
@@ -84,7 +89,10 @@ class CloudAssetDiscoveryStage(Stage):
             elapsed = time.monotonic() - stage_started
             if max_duration and elapsed >= max_duration:
                 duration_cap_hit = True
-                context.logger.warning("Cloud discovery duration cap reached (%ss); stopping stage", max_duration)
+                context.logger.warning(
+                    "Cloud discovery duration cap reached (%ss); stopping stage",
+                    max_duration,
+                )
                 break
             checked += 1
             if checked % progress_every == 0:
@@ -118,7 +126,9 @@ class CloudAssetDiscoveryStage(Stage):
             exists, public, reason = self._classify(provider, status, body, headers)
             if not exists:
                 continue
-            checks.append(CloudCheck(provider, url, bucket, exists, public, status, reason))
+            checks.append(
+                CloudCheck(provider, url, bucket, exists, public, status, reason)
+            )
 
             tags = [f"cloud:{provider}", "cloud-asset"]
             if public:
@@ -139,7 +149,12 @@ class CloudAssetDiscoveryStage(Stage):
                     "finding_type": "cloud_asset_public",
                     "description": f"Public cloud asset detected ({provider})",
                     "url": url,
-                    "details": {"bucket": bucket, "provider": provider, "status": status, "reason": reason},
+                    "details": {
+                        "bucket": bucket,
+                        "provider": provider,
+                        "status": status,
+                        "reason": reason,
+                    },
                     "tags": tags,
                     "score": 80,
                     "priority": "high",
@@ -179,7 +194,9 @@ class CloudAssetDiscoveryStage(Stage):
             try:
                 import json as _json
 
-                enrichment_map = _json.loads(enrichment_artifact.read_text(encoding="utf-8"))
+                enrichment_map = _json.loads(
+                    enrichment_artifact.read_text(encoding="utf-8")
+                )
             except Exception:
                 enrichment_map = {}
             for entries in enrichment_map.values():
@@ -222,7 +239,9 @@ class CloudAssetDiscoveryStage(Stage):
             checks.append(("azure", f"https://{safe}.blob.core.windows.net/", safe))
         return checks
 
-    def _classify(self, provider: str, status: int, body: str, headers: Dict[str, str]) -> Tuple[bool, bool, str]:
+    def _classify(
+        self, provider: str, status: int, body: str, headers: Dict[str, str]
+    ) -> Tuple[bool, bool, str]:
         if status in self.NOT_FOUND_STATUSES:
             return False, False, "not_found"
 
@@ -231,9 +250,13 @@ class CloudAssetDiscoveryStage(Stage):
         is_genuine = False
         if provider == "s3" and ("AmazonS3" in server or "x-amz-request-id" in headers):
             is_genuine = True
-        elif provider == "gcs" and ("UploadServer" in server or "x-guploader-uploadid" in headers):
+        elif provider == "gcs" and (
+            "UploadServer" in server or "x-guploader-uploadid" in headers
+        ):
             is_genuine = True
-        elif provider == "azure" and ("Windows-Azure-Blob" in server or "x-ms-request-id" in headers):
+        elif provider == "azure" and (
+            "Windows-Azure-Blob" in server or "x-ms-request-id" in headers
+        ):
             is_genuine = True
 
         if not is_genuine:
@@ -272,7 +295,14 @@ class CloudAssetDiscoveryStage(Stage):
         root_dash = root.replace(".", "-")
         root_label = root.split(".")[0]
         sub = host.split(".")[0]
-        for item in {root, root_dash, root_label, host.replace(".", "-"), sub, f"{sub}-{root_label}"}:
+        for item in {
+            root,
+            root_dash,
+            root_label,
+            host.replace(".", "-"),
+            sub,
+            f"{sub}-{root_label}",
+        }:
             if item:
                 variants.add(item)
         return variants

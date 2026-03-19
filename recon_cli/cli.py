@@ -35,7 +35,16 @@ app = typer.Typer(
 
 
 @app.callback()
-def cli_entry(ctx: typer.Context, verbose: int = typer.Option(0, '--verbose', '-v', help='Increase log verbosity (-v info, -vv/-vvv debug)', count=True)) -> None:
+def cli_entry(
+    ctx: typer.Context,
+    verbose: int = typer.Option(
+        0,
+        "--verbose",
+        "-v",
+        help="Increase log verbosity (-v info, -vv/-vvv debug)",
+        count=True,
+    ),
+) -> None:
     """Configure logging and shared context before dispatching commands."""
     if verbose >= 2:
         level = logging.DEBUG
@@ -45,16 +54,23 @@ def cli_entry(ctx: typer.Context, verbose: int = typer.Option(0, '--verbose', '-
     logging.getLogger().setLevel(level)
     config.ensure_base_directories()
 
+
 BASE_PROFILES = {"passive", "full", "fuzz-only"}
 PROFILE_PRESETS = config.available_profiles()
 PROFILE_CHOICES = sorted(BASE_PROFILES | set(PROFILE_PRESETS.keys()))
 PROFILE_PRESET_NAMES = sorted(PROFILE_PRESETS.keys())
 if PROFILE_PRESET_NAMES:
-    PROFILE_HELP = "Scan profile (base: passive/full/fuzz-only; presets: {names})".format(names=", ".join(PROFILE_PRESET_NAMES))
+    PROFILE_HELP = (
+        "Scan profile (base: passive/full/fuzz-only; presets: {names})".format(
+            names=", ".join(PROFILE_PRESET_NAMES)
+        )
+    )
 else:
     PROFILE_HELP = "Scan profile (base: passive/full/fuzz-only)"
 ACTIVE_MODULE_CHOICES = active_modules.available_modules()
-ACTIVE_MODULE_HELP = "none available" if not ACTIVE_MODULE_CHOICES else ", ".join(ACTIVE_MODULE_CHOICES)
+ACTIVE_MODULE_HELP = (
+    "none available" if not ACTIVE_MODULE_CHOICES else ", ".join(ACTIVE_MODULE_CHOICES)
+)
 SCANNER_CHOICES = ["nuclei", "wpscan"]
 SCANNER_HELP = ", ".join(SCANNER_CHOICES)
 STATUS_CHOICES = ["queued", "running", "finished", "failed"]
@@ -88,7 +104,9 @@ def _print_job(record: JobRecord) -> None:
     rich_print(f"  error             : {metadata.error}")
 
 
-def _resolve_trace_paths(record: Optional[JobRecord] = None) -> tuple[Optional[Path], Optional[Path]]:
+def _resolve_trace_paths(
+    record: Optional[JobRecord] = None,
+) -> tuple[Optional[Path], Optional[Path]]:
     from recon_cli.utils.last_run import (
         artifacts_last_events_path,
         artifacts_last_trace_path,
@@ -96,7 +114,9 @@ def _resolve_trace_paths(record: Optional[JobRecord] = None) -> tuple[Optional[P
     )
 
     if record is not None:
-        return record.paths.artifact("trace.json"), record.paths.artifact("trace_events.jsonl")
+        return record.paths.artifact("trace.json"), record.paths.artifact(
+            "trace_events.jsonl"
+        )
 
     trace_path = resolve_pointer_target(artifacts_last_trace_path())
     events_path = resolve_pointer_target(artifacts_last_events_path())
@@ -131,7 +151,11 @@ def _reset_job_state(record: JobRecord, *, clear_results: bool) -> None:
     record.metadata.stage = "queued"
     if not clear_results:
         return
-    for path in (record.paths.results_jsonl, record.paths.results_txt, record.paths.trimmed_results_jsonl):
+    for path in (
+        record.paths.results_jsonl,
+        record.paths.results_txt,
+        record.paths.trimmed_results_jsonl,
+    ):
         if path.exists():
             _truncate_file(path)
     report_path = record.paths.root / "report.html"
@@ -249,16 +273,46 @@ def _run_async_command(coro):
 @app.command()
 def scan(
     target: Optional[str] = typer.Argument(None, help="Domain or hostname to scan"),
-    profile: str = typer.Option("passive", "--profile", case_sensitive=False, help=PROFILE_HELP, show_default=True),
-    quickstart: bool = typer.Option(False, "--quickstart", help="Use the quick profile if available (passive-minimal)"),
-    project: Optional[str] = typer.Option(None, "--project", help="Associate job with a project name"),
-    incremental_from: Optional[str] = typer.Option(None, "--incremental-from", help="Job ID to reuse artifacts (incremental recon)"),
+    profile: str = typer.Option(
+        "passive",
+        "--profile",
+        case_sensitive=False,
+        help=PROFILE_HELP,
+        show_default=True,
+    ),
+    quickstart: bool = typer.Option(
+        False,
+        "--quickstart",
+        help="Use the quick profile if available (passive-minimal)",
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", help="Associate job with a project name"
+    ),
+    incremental_from: Optional[str] = typer.Option(
+        None, "--incremental-from", help="Job ID to reuse artifacts (incremental recon)"
+    ),
     inline: bool = typer.Option(False, "--inline", help="Run the pipeline immediately"),
-    wordlist: Optional[Path] = typer.Option(None, "--wordlist", help="Override default wordlist"),
-    max_screenshots: Optional[int] = typer.Option(None, "--max-screenshots", min=0, help="Limit screenshots"),
-    force: bool = typer.Option(False, "--force", help="Re-run all stages even if checkpoints exist"),
-    allow_ip: bool = typer.Option(False, "--allow-ip", help="Allow IP addresses as targets"),
-    targets_file: Optional[Path] = typer.Option(None, "--targets-file", exists=True, file_okay=True, dir_okay=False, readable=True, help="File with multiple targets"),
+    wordlist: Optional[Path] = typer.Option(
+        None, "--wordlist", help="Override default wordlist"
+    ),
+    max_screenshots: Optional[int] = typer.Option(
+        None, "--max-screenshots", min=0, help="Limit screenshots"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-run all stages even if checkpoints exist"
+    ),
+    allow_ip: bool = typer.Option(
+        False, "--allow-ip", help="Allow IP addresses as targets"
+    ),
+    targets_file: Optional[Path] = typer.Option(
+        None,
+        "--targets-file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="File with multiple targets",
+    ),
     active_module: List[str] = typer.Option(
         [],
         "--active-module",
@@ -271,8 +325,16 @@ def scan(
         help=f"Trigger smart scanner integration (repeatable). Choices: {SCANNER_HELP}",
         show_default=False,
     ),
-    insecure: bool = typer.Option(False, "--insecure", help="Disable TLS verification for HTTP requests (not recommended)"),
-    split_targets: bool = typer.Option(False, "--split-targets", help="When using --targets-file, create one job per target"),
+    insecure: bool = typer.Option(
+        False,
+        "--insecure",
+        help="Disable TLS verification for HTTP requests (not recommended)",
+    ),
+    split_targets: bool = typer.Option(
+        False,
+        "--split-targets",
+        help="When using --targets-file, create one job per target",
+    ),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
@@ -300,7 +362,9 @@ def scan(
         if isinstance(runtime_values, dict):
             runtime_overrides = dict(runtime_values)
     if base_profile not in BASE_PROFILES:
-        typer.echo(f"Profile preset maps to unknown base profile: {base_profile}", err=True)
+        typer.echo(
+            f"Profile preset maps to unknown base profile: {base_profile}", err=True
+        )
         raise typer.Exit(code=1)
     selected_profile = base_profile
     profile = selected_profile
@@ -326,7 +390,9 @@ def scan(
     modules = [module.strip().lower() for module in active_module if module]
     env_active = os.environ.get("RECON_ACTIVE_MODULES")
     if not modules and env_active:
-        modules = [part.strip().lower() for part in env_active.split(",") if part.strip()]
+        modules = [
+            part.strip().lower() for part in env_active.split(",") if part.strip()
+        ]
     invalid = [module for module in modules if module not in ACTIVE_MODULE_CHOICES]
     if invalid:
         typer.echo(f"Unknown active modules: {', '.join(invalid)}", err=True)
@@ -335,7 +401,9 @@ def scan(
     scanners = [item.strip().lower() for item in scanner if item]
     env_scanners = os.environ.get("RECON_SCANNERS")
     if not scanners and env_scanners:
-        scanners = [part.strip().lower() for part in env_scanners.split(",") if part.strip()]
+        scanners = [
+            part.strip().lower() for part in env_scanners.split(",") if part.strip()
+        ]
     invalid_scanners = [item for item in scanners if item not in SCANNER_CHOICES]
     if invalid_scanners:
         typer.echo(f"Unknown scanners: {', '.join(invalid_scanners)}", err=True)
@@ -409,7 +477,9 @@ def scan(
 
 @app.command("worker-run")
 def worker_run(
-    poll_interval: int = typer.Option(5, "--poll-interval", min=1, help="Seconds between queue checks"),
+    poll_interval: int = typer.Option(
+        5, "--poll-interval", min=1, help="Seconds between queue checks"
+    ),
     max_workers: int = typer.Option(
         1,
         "--max-workers",
@@ -464,7 +534,9 @@ def worker_run(
 
     workers: list[threading.Thread] = []
     for idx in range(max_workers):
-        t = threading.Thread(target=worker_loop, args=(f"worker-{idx+1}",), daemon=True)
+        t = threading.Thread(
+            target=worker_loop, args=(f"worker-{idx + 1}",), daemon=True
+        )
         workers.append(t)
         t.start()
 
@@ -486,9 +558,15 @@ def status(job_id: str) -> None:
 
 @app.command()
 def trace(
-    job_id: Optional[str] = typer.Argument(None, help="Job to inspect. Defaults to the last trace."),
-    events: int = typer.Option(8, "--events", min=0, help="Show the last N trace events"),
-    as_json: bool = typer.Option(False, "--json", help="Emit trace data as JSON for automation"),
+    job_id: Optional[str] = typer.Argument(
+        None, help="Job to inspect. Defaults to the last trace."
+    ),
+    events: int = typer.Option(
+        8, "--events", min=0, help="Show the last N trace events"
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit trace data as JSON for automation"
+    ),
 ) -> None:
     """Show a job trace summary and recent events."""
     manager = JobManager()
@@ -505,7 +583,9 @@ def trace(
 
     event_rows: List[Dict[str, Any]] = []
     if events > 0 and events_path is not None and events_path.exists():
-        event_rows = [row for row in read_jsonl(events_path) if isinstance(row, dict)][-events:]
+        event_rows = [row for row in read_jsonl(events_path) if isinstance(row, dict)][
+            -events:
+        ]
 
     if as_json:
         payload: Dict[str, Any] = {"trace": redact_json_value(trace_payload)}
@@ -516,11 +596,17 @@ def trace(
 
     attrs = trace_payload.get("attributes", {})
     stats = trace_payload.get("stats", {})
-    span_counts = stats.get("span_counts_by_type", {}) if isinstance(stats, dict) else {}
+    span_counts = (
+        stats.get("span_counts_by_type", {}) if isinstance(stats, dict) else {}
+    )
     spans = trace_payload.get("spans", [])
-    stage_spans = [span for span in spans if isinstance(span, dict) and span.get("span_type") == "stage"]
+    stage_spans = [
+        span
+        for span in spans
+        if isinstance(span, dict) and span.get("span_type") == "stage"
+    ]
 
-    rich_print(f"[bold]Trace {trace_payload.get('trace_id', '-') }[/bold]")
+    rich_print(f"[bold]Trace {trace_payload.get('trace_id', '-')}[/bold]")
     rich_print(f"  job_id            : {attrs.get('job_id', '-')}")
     rich_print(f"  target            : {attrs.get('target', '-')}")
     rich_print(f"  profile           : {attrs.get('profile', '-')}")
@@ -539,7 +625,11 @@ def trace(
     if stage_spans:
         rich_print("[bold]Stage Spans[/bold]")
         for span in stage_spans:
-            attributes = span.get("attributes", {}) if isinstance(span.get("attributes"), dict) else {}
+            attributes = (
+                span.get("attributes", {})
+                if isinstance(span.get("attributes"), dict)
+                else {}
+            )
             detail_parts = []
             if attributes.get("skip_reason"):
                 detail_parts.append(f"skip={attributes.get('skip_reason')}")
@@ -589,7 +679,9 @@ def tail_logs(job_id: str) -> None:
 @app.command("list-jobs")
 def list_jobs(
     status: Optional[str] = typer.Argument(None, help="Optional status filter"),
-    project: Optional[str] = typer.Option(None, "--project", help="Filter jobs by project"),
+    project: Optional[str] = typer.Option(
+        None, "--project", help="Filter jobs by project"
+    ),
 ) -> None:
     """List jobs, optionally filtered by status or project."""
     if status and status not in STATUS_CHOICES:
@@ -619,7 +711,9 @@ def requeue(job_id: str) -> None:
 @app.command()
 def rerun(
     job_id: str,
-    restart: bool = typer.Option(False, "--restart", help="Clear checkpoints and rerun all stages"),
+    restart: bool = typer.Option(
+        False, "--restart", help="Clear checkpoints and rerun all stages"
+    ),
     stages: List[str] = typer.Option(
         [],
         "--stages",
@@ -661,7 +755,9 @@ def rerun(
 
     try:
         run_force = bool(running_record.spec.force or selected_stages)
-        run_pipeline(running_record, manager, force=run_force, stages=selected_stages or None)
+        run_pipeline(
+            running_record, manager, force=run_force, stages=selected_stages or None
+        )
     except Exception as exc:  # pragma: no cover - runtime path
         typer.echo(f"Job {job_id} failed: {exc}", err=True)
         lifecycle.move_to_failed(job_id)
@@ -673,8 +769,12 @@ def rerun(
 @app.command()
 def cancel(
     job_id: str,
-    requeue: bool = typer.Option(True, "--requeue/--no-requeue", help="Requeue automatically after stop"),
-    wait: int = typer.Option(30, "--wait", min=0, help="Seconds to wait for graceful stop"),
+    requeue: bool = typer.Option(
+        True, "--requeue/--no-requeue", help="Requeue automatically after stop"
+    ),
+    wait: int = typer.Option(
+        30, "--wait", min=0, help="Seconds to wait for graceful stop"
+    ),
     hard: bool = typer.Option(
         False,
         "--hard",
@@ -699,7 +799,11 @@ def cancel(
     stop_path = record.paths.root / "stop.request"
     fs.write_json(
         stop_path,
-        {"requested_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "requested_by": "cli", "action": "cancel"},
+        {
+            "requested_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "requested_by": "cli",
+            "action": "cancel",
+        },
     )
     typer.echo(f"Stop requested for job {job_id}")
 
@@ -745,7 +849,9 @@ def cancel(
 
 @app.command()
 def doctor(
-    fix: bool = typer.Option(False, "--fix", help="Attempt to regenerate default configs/resolvers"),
+    fix: bool = typer.Option(
+        False, "--fix", help="Attempt to regenerate default configs/resolvers"
+    ),
     fix_deps: bool = typer.Option(
         False,
         "--fix-deps",
@@ -815,24 +921,71 @@ def doctor(
         return "error", lines[0][:120]
 
     tool_checks = [
-        ("subfinder", ["-version"], "install via go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"),
-        ("amass", ["-version"], "install via go install github.com/owasp-amass/amass/v4/...@latest"),
+        (
+            "subfinder",
+            ["-version"],
+            "install via go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
+        ),
+        (
+            "amass",
+            ["-version"],
+            "install via go install github.com/owasp-amass/amass/v4/...@latest",
+        ),
         ("massdns", ["-h"], "install from https://github.com/blechschmidt/massdns"),
-        ("httpx", ["-version"], "install via go install github.com/projectdiscovery/httpx/cmd/httpx@latest"),
+        (
+            "httpx",
+            ["-version"],
+            "install via go install github.com/projectdiscovery/httpx/cmd/httpx@latest",
+        ),
         ("ffuf", ["-V"], "install via go install github.com/ffuf/ffuf@latest"),
-        ("nuclei", ["-version"], "install via go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"),
-        ("naabu", ["-version"], "install via go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"),
-        ("katana", ["-version"], "install via go install github.com/projectdiscovery/katana/cmd/katana@latest"),
-        ("dalfox", ["version"], "install via go install github.com/hahwul/dalfox/v2@latest"),
-        ("sqlmap", ["--version"], "install via pipx install sqlmap or apt install sqlmap"),
+        (
+            "nuclei",
+            ["-version"],
+            "install via go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+        ),
+        (
+            "naabu",
+            ["-version"],
+            "install via go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest",
+        ),
+        (
+            "katana",
+            ["-version"],
+            "install via go install github.com/projectdiscovery/katana/cmd/katana@latest",
+        ),
+        (
+            "dalfox",
+            ["version"],
+            "install via go install github.com/hahwul/dalfox/v2@latest",
+        ),
+        (
+            "sqlmap",
+            ["--version"],
+            "install via pipx install sqlmap or apt install sqlmap",
+        ),
         ("nmap", ["--version"], "install via apt install nmap"),
         ("wpscan", ["--version"], "install via gem install wpscan"),
-        ("droopescan", ["--help"], "install via pipx install droopescan or pip install droopescan"),
-        ("interactsh-client", ["-version"], "install via go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"),
-        ("waybackurls", ["-h"], "install via go install github.com/tomnomnom/waybackurls@latest"),
+        (
+            "droopescan",
+            ["--help"],
+            "install via pipx install droopescan or pip install droopescan",
+        ),
+        (
+            "interactsh-client",
+            ["-version"],
+            "install via go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest",
+        ),
+        (
+            "waybackurls",
+            ["-h"],
+            "install via go install github.com/tomnomnom/waybackurls@latest",
+        ),
         ("gau", ["-h"], "install via go install github.com/lc/gau/v2/cmd/gau@latest"),
     ]
-    def _collect_tool_health(*, emit_warnings: bool) -> tuple[list[tuple[str, str, str]], list[str], list[str]]:
+
+    def _collect_tool_health(
+        *, emit_warnings: bool
+    ) -> tuple[list[tuple[str, str, str]], list[str], list[str]]:
         tool_results: list[tuple[str, str, str]] = []
         local_warnings: list[str] = []
         missing_tools: list[str] = []
@@ -852,9 +1005,13 @@ def doctor(
             local_warnings.append(f"tool:{tool}:error")
             if emit_warnings:
                 suffix = f": {detail}" if detail else ""
-                typer.echo(f"[warn] tool '{tool}' is installed but failed the health probe{suffix}")
+                typer.echo(
+                    f"[warn] tool '{tool}' is installed but failed the health probe{suffix}"
+                )
 
-        if not (CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")):
+        if not (
+            CommandExecutor.available("waybackurls") or CommandExecutor.available("gau")
+        ):
             local_warnings.append("tool:waybackurls-or-gau")
             if emit_warnings:
                 typer.echo(
@@ -870,6 +1027,7 @@ def doctor(
         ("requests", "requests", "pip install requests"),
         ("pyyaml", "yaml", "pip install pyyaml"),
     ]
+
     def _collect_python_health(
         *, emit_warnings: bool
     ) -> tuple[list[tuple[str, str, str]], str, str, list[str], list[str]]:
@@ -882,13 +1040,18 @@ def doctor(
                 missing_python.append(label)
                 local_warnings.append(f"python:{label}")
                 if emit_warnings:
-                    typer.echo(f"[warn] Python package '{label}' not available ({hint})")
+                    typer.echo(
+                        f"[warn] Python package '{label}' not available ({hint})"
+                    )
             else:
                 python_results.append((label, "ok", ""))
 
         browser_status = "unknown"
         browser_detail = ""
-        if any(label == "playwright" and status == "ok" for label, status, _ in python_results):
+        if any(
+            label == "playwright" and status == "ok"
+            for label, status, _ in python_results
+        ):
             try:
                 from playwright.sync_api import sync_playwright
 
@@ -902,18 +1065,30 @@ def doctor(
                     browser_detail = "playwright install chromium"
                     local_warnings.append("python:playwright-browsers")
                     if emit_warnings:
-                        typer.echo("[warn] Playwright browsers not installed (run: playwright install chromium)")
+                        typer.echo(
+                            "[warn] Playwright browsers not installed (run: playwright install chromium)"
+                        )
             except Exception as exc:
                 browser_status = "missing"
                 browser_detail = str(exc).splitlines()[0]
                 local_warnings.append("python:playwright-browsers")
                 if emit_warnings:
-                    typer.echo("[warn] Playwright browser check failed (run: playwright install chromium)")
-        return python_results, browser_status, browser_detail, local_warnings, missing_python
+                    typer.echo(
+                        "[warn] Playwright browser check failed (run: playwright install chromium)"
+                    )
+        return (
+            python_results,
+            browser_status,
+            browser_detail,
+            local_warnings,
+            missing_python,
+        )
 
-    tool_results, tool_warnings, missing_tools = _collect_tool_health(emit_warnings=not fix_deps)
-    python_results, browser_status, browser_detail, python_warnings, missing_python = _collect_python_health(
+    tool_results, tool_warnings, missing_tools = _collect_tool_health(
         emit_warnings=not fix_deps
+    )
+    python_results, browser_status, browser_detail, python_warnings, missing_python = (
+        _collect_python_health(emit_warnings=not fix_deps)
     )
     warnings = tool_warnings + python_warnings
 
@@ -947,11 +1122,17 @@ def doctor(
         if "interactsh-client" in missing_tools:
             attempted = True
             if not CommandExecutor.available("go"):
-                typer.echo("[warn] 'go' not found; cannot auto-install interactsh-client")
+                typer.echo(
+                    "[warn] 'go' not found; cannot auto-install interactsh-client"
+                )
             else:
                 typer.echo("[fix] Installing interactsh-client via go install")
                 install = subprocess.run(
-                    ["go", "install", "github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"],
+                    [
+                        "go",
+                        "install",
+                        "github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest",
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=900,
@@ -965,7 +1146,9 @@ def doctor(
         if browser_status != "ok":
             attempted = True
             if importlib.util.find_spec("playwright") is None:
-                typer.echo("[warn] Playwright module missing; cannot install browsers yet")
+                typer.echo(
+                    "[warn] Playwright module missing; cannot install browsers yet"
+                )
             else:
                 typer.echo("[fix] Installing Playwright Chromium browser")
                 install = subprocess.run(
@@ -984,7 +1167,9 @@ def doctor(
             typer.echo("[fix] No missing dependencies detected")
 
         tool_results, tool_warnings, _ = _collect_tool_health(emit_warnings=True)
-        python_results, browser_status, browser_detail, python_warnings, _ = _collect_python_health(emit_warnings=True)
+        python_results, browser_status, browser_detail, python_warnings, _ = (
+            _collect_python_health(emit_warnings=True)
+        )
         warnings = tool_warnings + python_warnings
 
     typer.echo("")
@@ -1021,17 +1206,26 @@ def doctor(
         raise typer.Exit(code=1)
 
     if warnings:
-        typer.secho(f"Doctor completed with {len(warnings)} warning(s)", fg=typer.colors.YELLOW)
+        typer.secho(
+            f"Doctor completed with {len(warnings)} warning(s)", fg=typer.colors.YELLOW
+        )
         return
 
     typer.secho("All checks passed", fg=typer.colors.GREEN)
 
 
-
 @app.command()
 def prune(
-    days: int = typer.Option(None, "--days", min=1, help="Remove finished jobs older than N days", show_default=False),
-    archive: bool = typer.Option(False, "--archive", help="Move jobs to archive instead of deleting"),
+    days: int = typer.Option(
+        None,
+        "--days",
+        min=1,
+        help="Remove finished jobs older than N days",
+        show_default=False,
+    ),
+    archive: bool = typer.Option(
+        False, "--archive", help="Move jobs to archive instead of deleting"
+    ),
 ) -> None:
     """Delete or archive finished jobs older than the given number of days."""
     if days is None:
@@ -1054,7 +1248,9 @@ def prune(
         if not finished_at:
             continue
         try:
-            finished_ts = datetime.strptime(finished_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            finished_ts = datetime.strptime(finished_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
+            )
         except ValueError:
             continue
         if finished_ts > cutoff:
@@ -1075,9 +1271,18 @@ def prune(
 @app.command()
 def export(
     job_id: str,
-    fmt: str = typer.Option("jsonl", "--format", case_sensitive=False, help="Export format: jsonl|triage|txt|zip"),
-    verified_only: bool = typer.Option(False, "--verified-only", help="Export only verified findings (jsonl only)"),
-    proof_required: bool = typer.Option(False, "--proof-required", help="Export only findings with proof (jsonl only)"),
+    fmt: str = typer.Option(
+        "jsonl",
+        "--format",
+        case_sensitive=False,
+        help="Export format: jsonl|triage|txt|zip",
+    ),
+    verified_only: bool = typer.Option(
+        False, "--verified-only", help="Export only verified findings (jsonl only)"
+    ),
+    proof_required: bool = typer.Option(
+        False, "--proof-required", help="Export only findings with proof (jsonl only)"
+    ),
     hunter_mode: bool = typer.Option(
         False,
         "--hunter-mode",
@@ -1107,21 +1312,44 @@ def export(
         from recon_cli.utils.reporting import filter_findings, is_finding, rank_findings
 
         if verified_only or proof_required or limit is not None:
-            entries = [entry for entry in read_jsonl(record.paths.results_jsonl) if is_finding(entry)]
-            filtered = filter_findings(entries, verified_only=verified_only, proof_required=proof_required)
+            entries = [
+                entry
+                for entry in read_jsonl(record.paths.results_jsonl)
+                if is_finding(entry)
+            ]
+            filtered = filter_findings(
+                entries, verified_only=verified_only, proof_required=proof_required
+            )
             if limit is not None:
                 filtered = rank_findings(filtered, limit=limit)
-            payload = "\n".join(json.dumps(item, separators=(",", ":"), ensure_ascii=True) for item in filtered) + "\n"
+            payload = (
+                "\n".join(
+                    json.dumps(item, separators=(",", ":"), ensure_ascii=True)
+                    for item in filtered
+                )
+                + "\n"
+            )
             typer.echo(redact(payload) or payload)
         else:
             payload = record.paths.results_jsonl.read_text(encoding="utf-8")
             typer.echo(redact(payload) or payload)
     elif fmt == "triage":
         from recon_cli.utils.jsonl import read_jsonl
-        from recon_cli.utils.reporting import build_triage_entry, filter_findings, is_finding, rank_findings
+        from recon_cli.utils.reporting import (
+            build_triage_entry,
+            filter_findings,
+            is_finding,
+            rank_findings,
+        )
 
-        entries = [entry for entry in read_jsonl(record.paths.results_jsonl) if is_finding(entry)]
-        filtered = filter_findings(entries, verified_only=verified_only, proof_required=proof_required)
+        entries = [
+            entry
+            for entry in read_jsonl(record.paths.results_jsonl)
+            if is_finding(entry)
+        ]
+        filtered = filter_findings(
+            entries, verified_only=verified_only, proof_required=proof_required
+        )
         ranked = rank_findings(filtered, limit=limit)
         triage_entries = []
         triage_dir = record.paths.ensure_subdir("triage")
@@ -1150,17 +1378,29 @@ def export(
                 )
                 triage_entry["artifact_path"] = str(artifact_path)
             triage_entries.append(triage_entry)
-        payload = "\n".join(json.dumps(item, separators=(",", ":"), ensure_ascii=True) for item in triage_entries) + "\n"
+        payload = (
+            "\n".join(
+                json.dumps(item, separators=(",", ":"), ensure_ascii=True)
+                for item in triage_entries
+            )
+            + "\n"
+        )
         typer.echo(redact(payload) or payload)
     elif fmt == "txt":
         if verified_only or proof_required or hunter_mode or limit is not None:
-            typer.echo("verified-only/proof-required filters are only supported for jsonl/triage exports", err=True)
+            typer.echo(
+                "verified-only/proof-required filters are only supported for jsonl/triage exports",
+                err=True,
+            )
             raise typer.Exit(code=2)
         payload = record.paths.results_txt.read_text(encoding="utf-8")
         typer.echo(redact(payload) or payload)
     else:
         if verified_only or proof_required or hunter_mode or limit is not None:
-            typer.echo("verified-only/proof-required filters are only supported for jsonl/triage exports", err=True)
+            typer.echo(
+                "verified-only/proof-required filters are only supported for jsonl/triage exports",
+                err=True,
+            )
             raise typer.Exit(code=2)
         import shutil
 
@@ -1173,10 +1413,18 @@ def export(
 
 def _report_legacy(
     job_id: str,
-    fmt: str = typer.Option("txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html"),
-    verified_only: bool = typer.Option(False, "--verified-only", help="Include only verified findings (html only)"),
-    proof_required: bool = typer.Option(False, "--proof-required", help="Include only findings with proof (html only)"),
-    hunter_mode: bool = typer.Option(False, "--hunter-mode", help="Hunter mode report preset (html only)"),
+    fmt: str = typer.Option(
+        "txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html"
+    ),
+    verified_only: bool = typer.Option(
+        False, "--verified-only", help="Include only verified findings (html only)"
+    ),
+    proof_required: bool = typer.Option(
+        False, "--proof-required", help="Include only findings with proof (html only)"
+    ),
+    hunter_mode: bool = typer.Option(
+        False, "--hunter-mode", help="Hunter mode report preset (html only)"
+    ),
 ) -> None:
     """Emit a shareable report for a finished job."""
     fmt = fmt.lower()
@@ -1187,17 +1435,30 @@ def _report_legacy(
     record = _load_job_or_exit(manager, job_id)
     if fmt == "txt":
         if verified_only or proof_required or hunter_mode:
-            typer.echo("verified-only/proof-required filters are only supported for html reports", err=True)
+            typer.echo(
+                "verified-only/proof-required filters are only supported for html reports",
+                err=True,
+            )
             raise typer.Exit(code=2)
         payload = record.paths.results_txt.read_text(encoding="utf-8")
         typer.echo(redact(payload) or payload)
         return
     if fmt == "md":
         if verified_only or proof_required or hunter_mode:
-            typer.echo("verified-only/proof-required filters are only supported for html reports", err=True)
+            typer.echo(
+                "verified-only/proof-required filters are only supported for html reports",
+                err=True,
+            )
             raise typer.Exit(code=2)
         content = redact(record.paths.results_txt.read_text(encoding="utf-8")) or ""
-        md_lines = ["# recon-cli report", f"Job: {job_id}", "", "```", content.strip(), "```"]
+        md_lines = [
+            "# recon-cli report",
+            f"Job: {job_id}",
+            "",
+            "```",
+            content.strip(),
+            "```",
+        ]
         typer.echo("\n".join(md_lines))
         return
     if fmt == "html":
@@ -1257,7 +1518,9 @@ def projects() -> None:
 
 
 @app.command()
-def schema(fmt: str = typer.Option("json", "--format", help="Output format: json")) -> None:
+def schema(
+    fmt: str = typer.Option("json", "--format", help="Output format: json"),
+) -> None:
     """Emit machine-readable schema for automation clients."""
     from recon_cli.api import schema_json
 
@@ -1272,6 +1535,7 @@ def schema(fmt: str = typer.Option("json", "--format", help="Output format: json
 def cache_stats() -> None:
     """Show cache statistics."""
     from recon_cli.utils.cache import HybridCache
+
     cache = HybridCache(config.RECON_HOME / "cache")
     stats = cache.stats()
     rich_print("[bold]📊 Cache Statistics[/bold]")
@@ -1286,6 +1550,7 @@ def cache_stats() -> None:
 def cache_clear() -> None:
     """Clear all cached data."""
     from recon_cli.utils.cache import HybridCache
+
     cache = HybridCache(config.RECON_HOME / "cache")
     cache.clear()
     typer.secho("✅ Cache cleared", fg=typer.colors.GREEN)
@@ -1300,37 +1565,46 @@ def serve(
     try:
         import uvicorn
         from recon_cli.api.app import app as api_app
-        typer.secho(f"🚀 Starting API server at http://{host}:{port}", fg=typer.colors.GREEN)
+
+        typer.secho(
+            f"🚀 Starting API server at http://{host}:{port}", fg=typer.colors.GREEN
+        )
         typer.echo(f"   Docs: http://{host}:{port}/docs")
         uvicorn.run(api_app, host=host, port=port)
     except ImportError:
-        typer.echo("❌ FastAPI/Uvicorn not installed. Run: pip install fastapi uvicorn", err=True)
+        typer.echo(
+            "❌ FastAPI/Uvicorn not installed. Run: pip install fastapi uvicorn",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
 
 @app.command("notify")
 def notify(
     message: str = typer.Argument("", help="Message to send"),
-    channel: str = typer.Option("telegram", "--channel", "-c", help="Channel: telegram, slack, discord, email"),
+    channel: str = typer.Option(
+        "telegram", "--channel", "-c", help="Channel: telegram, slack, discord, email"
+    ),
 ) -> None:
     """Send a notification to configured channels."""
     from recon_cli.utils.notify import NotificationManager, NotificationConfig
 
     if not message:
         raise typer.BadParameter("message is required")
-    
+
     # Load config from environment or defaults
     import os
+
     cfg = NotificationConfig(
         telegram_token=os.environ.get("TELEGRAM_TOKEN"),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
         slack_webhook_url=os.environ.get("SLACK_WEBHOOK_URL"),
         discord_webhook_url=os.environ.get("DISCORD_WEBHOOK_URL"),
     )
-    
+
     manager = NotificationManager(cfg)
     results = manager.send(message, channels=[channel])
-    
+
     for ch, success in results.items():
         if success:
             typer.secho(f"✅ {ch}: Message sent", fg=typer.colors.GREEN)
@@ -1342,6 +1616,7 @@ def notify(
 def db_init() -> None:
     """Initialize the SQLite database."""
     from recon_cli.db.models import init_db, get_db_path
+
     init_db()
     typer.secho(f"✅ Database initialized at {get_db_path()}", fg=typer.colors.GREEN)
 
@@ -1350,13 +1625,14 @@ def db_init() -> None:
 def db_stats() -> None:
     """Show database statistics."""
     from recon_cli.db.storage import get_dashboard_stats
+
     stats = get_dashboard_stats()
-    
+
     rich_print("[bold]📊 Database Statistics[/bold]")
     rich_print("\n[bold]Jobs:[/bold]")
     for status, count in stats.get("jobs", {}).items():
         rich_print(f"  {status}: {count}")
-    
+
     rich_print("\n[bold]Vulnerabilities:[/bold]")
     for severity, count in stats.get("vulnerabilities", {}).items():
         rich_print(f"  {severity}: {count}")
@@ -1366,25 +1642,27 @@ def db_stats() -> None:
 def optimize() -> None:
     """Run performance optimizations."""
     from recon_cli.utils.performance import optimize_memory, get_pool
-    
+
     rich_print("[bold]🔧 Running optimizations...[/bold]")
-    
+
     # Memory optimization
     result = optimize_memory()
     rich_print(f"  Resources cleaned: {result['resources_cleaned']}")
-    
+
     # Pool stats
     pool = get_pool()
     pool_stats = pool.stats()
     rich_print(f"  Active sessions: {pool_stats['active_sessions']}")
-    
+
     typer.secho("✅ Optimization complete", fg=typer.colors.GREEN)
 
 
 @app.command("pdf")
 def pdf_report(
     job_id: str = typer.Argument("", help="Job ID to generate PDF report for"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Output file path"
+    ),
     title: str = typer.Option("تقرير الاستطلاع الأمني", "--title", help="Report title"),
 ) -> None:
     """Generate PDF report for a job."""
@@ -1392,35 +1670,40 @@ def pdf_report(
 
     if not job_id:
         raise typer.BadParameter("job_id is required")
-    
+
     manager = JobManager()
     record = _load_job_or_exit(manager, job_id)
     job_path = record.paths.root
-    
-    config = PDFReportConfig(
-        title=title,
-        company_name="ReconnV2"
-    )
-    
+
+    config = PDFReportConfig(title=title, company_name="ReconnV2")
+
     try:
         pdf_path = generate_pdf_report(job_path, output, config)
         typer.secho(f"✅ PDF report generated: {pdf_path}", fg=typer.colors.GREEN)
     except RuntimeError as e:
         typer.secho(f"❌ Error: {e}", fg=typer.colors.RED)
-        typer.secho("💡 Install dependencies with: pip install weasyprint reportlab", fg=typer.colors.YELLOW)
+        typer.secho(
+            "💡 Install dependencies with: pip install weasyprint reportlab",
+            fg=typer.colors.YELLOW,
+        )
         raise typer.Exit(code=1)
 
 
 @app.command("plugins")
 def list_plugins(
-    plugin_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by type: scanner, enricher, reporter, notifier"),
+    plugin_type: Optional[str] = typer.Option(
+        None,
+        "--type",
+        "-t",
+        help="Filter by type: scanner, enricher, reporter, notifier",
+    ),
 ) -> None:
     """List available plugins."""
     from recon_cli.plugins import get_registry, PluginType
-    
+
     registry = get_registry()
     registry.setup()
-    
+
     type_filter = None
     if plugin_type:
         try:
@@ -1428,13 +1711,13 @@ def list_plugins(
         except ValueError:
             typer.secho(f"Invalid type: {plugin_type}", fg=typer.colors.RED)
             raise typer.Exit(code=1)
-    
+
     plugins = registry.loader.list_plugins(plugin_type=type_filter)
-    
+
     if not plugins:
         typer.secho("No plugins found", fg=typer.colors.YELLOW)
         return
-    
+
     rich_print("[bold]📦 Available Plugins[/bold]")
     for meta in plugins:
         rich_print(f"\n[bold cyan]{meta.name}[/bold cyan] v{meta.version}")
@@ -1448,26 +1731,30 @@ def list_plugins(
 @app.command("run-plugin")
 def run_plugin(
     name: str = typer.Argument("", help="Plugin name to run"),
-    target: Optional[str] = typer.Option(None, "--target", "-t", help="Target for scanner plugins"),
-    message: Optional[str] = typer.Option(None, "--message", "-m", help="Message for notifier plugins"),
+    target: Optional[str] = typer.Option(
+        None, "--target", "-t", help="Target for scanner plugins"
+    ),
+    message: Optional[str] = typer.Option(
+        None, "--message", "-m", help="Message for notifier plugins"
+    ),
 ) -> None:
     """Run a plugin."""
     from recon_cli.plugins import get_registry
 
     if not name:
         raise typer.BadParameter("name is required")
-    
+
     registry = get_registry()
     registry.setup()
-    
+
     context = {}
     if target:
         context["target"] = target
     if message:
         context["message"] = message
-    
+
     result = registry.loader.execute_plugin(name, context)
-    
+
     if result.success:
         typer.secho("✅ Plugin executed successfully", fg=typer.colors.GREEN)
         if result.data:
@@ -1481,15 +1768,16 @@ def run_plugin(
 # INTERACTIVE MODE & WIZARD COMMANDS
 # ============================================================================
 
+
 @app.command("interactive")
 def interactive_mode() -> None:
     """Start interactive wizard mode for guided scanning."""
     try:
         from recon_cli.cli_wizard import InteractiveMode
-        
+
         rich_print("[bold cyan]🧙 ReconnV2 Interactive Mode[/bold cyan]")
         rich_print("Type 'help' for available commands, 'quit' to exit.\n")
-        
+
         mode = InteractiveMode()
         _run_async_command(mode.run())
     except ImportError as e:
@@ -1503,16 +1791,16 @@ def scan_wizard() -> None:
     """Launch step-by-step scan configuration wizard."""
     try:
         from recon_cli.cli_wizard import ScanWizard
-        
+
         rich_print("[bold cyan]🧙 Scan Configuration Wizard[/bold cyan]\n")
-        
+
         wizard = ScanWizard()
         result = _run_async_command(wizard.run())
-        
+
         if result.completed:
             rich_print("\n[bold green]✅ Wizard completed![/bold green]")
             rich_print(f"Configuration: {json.dumps(result.data, indent=2)}")
-            
+
             # Ask to run scan
             if typer.confirm("Run scan with this configuration?"):
                 spec = result.data
@@ -1531,11 +1819,18 @@ def scan_wizard() -> None:
 # SHELL COMPLETIONS
 # ============================================================================
 
+
 @app.command("completions")
 def setup_completions(
-    shell: str = typer.Option(None, "--shell", "-s", help="Shell type: bash, zsh, fish, powershell"),
-    install: bool = typer.Option(False, "--install", "-i", help="Auto-install completions"),
-    show: bool = typer.Option(False, "--show", help="Show completion script without installing"),
+    shell: str = typer.Option(
+        None, "--shell", "-s", help="Shell type: bash, zsh, fish, powershell"
+    ),
+    install: bool = typer.Option(
+        False, "--install", "-i", help="Auto-install completions"
+    ),
+    show: bool = typer.Option(
+        False, "--show", help="Show completion script without installing"
+    ),
 ) -> None:
     """Generate or install shell completions."""
     try:
@@ -1545,10 +1840,11 @@ def setup_completions(
             RECON_COMMANDS,
             Shell,
         )
-        
+
         # Auto-detect shell if not specified
         if not shell:
             import os
+
             shell_env = os.environ.get("SHELL", "")
             if "zsh" in shell_env:
                 shell = "zsh"
@@ -1560,44 +1856,68 @@ def setup_completions(
                 shell = "bash"
         else:
             shell = shell.lower()
-        
+
         shell_enum = Shell(shell.lower())
         generator = CompletionGenerator(RECON_COMMANDS)
-        
+
         if show or not install:
             script = generator.generate(shell_enum)
             rich_print(f"[bold]Completion script for {shell}:[/bold]\n")
             print(script)
             rich_print("\n[dim]Use --install to auto-install[/dim]")
-        
+
         if install:
             installer = CompletionInstaller()
             installed_path = installer.install(shell_enum)
-            typer.secho(f"✅ Installed completion script at: {installed_path}", fg=typer.colors.GREEN)
+            typer.secho(
+                f"✅ Installed completion script at: {installed_path}",
+                fg=typer.colors.GREEN,
+            )
             source_command = installer.get_source_command(shell_enum)
             if source_command:
                 typer.echo(source_command)
-                
+
     except ImportError as e:
         typer.secho(f"Completions module not available: {e}", fg=typer.colors.RED)
     except ValueError:
-        typer.secho(f"Invalid shell: {shell}. Use bash, zsh, fish, or powershell", fg=typer.colors.RED)
+        typer.secho(
+            f"Invalid shell: {shell}. Use bash, zsh, fish, or powershell",
+            fg=typer.colors.RED,
+        )
 
 
 # ============================================================================
 # REPORT GENERATION
 # ============================================================================
 
+
 @app.command("report")
 def generate_report(
     job_id: str = typer.Argument("", help="Job ID to generate report for"),
-    format: str = typer.Option("html", "--format", "-f", help="Report format: html, json, csv, markdown, xml, pdf"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path"),
-    executive: bool = typer.Option(False, "--executive", "-e", help="Generate executive summary only"),
-    title: Optional[str] = typer.Option(None, "--title", "-t", help="Custom report title"),
-    verified_only: bool = typer.Option(False, "--verified-only", help="Include only verified findings in the report"),
-    proof_required: bool = typer.Option(False, "--proof-required", help="Include only findings with proof in the report"),
-    hunter_mode: bool = typer.Option(False, "--hunter-mode", help="Hunter mode report preset (html only)"),
+    format: str = typer.Option(
+        "html",
+        "--format",
+        "-f",
+        help="Report format: html, json, csv, markdown, xml, pdf",
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Output file path"
+    ),
+    executive: bool = typer.Option(
+        False, "--executive", "-e", help="Generate executive summary only"
+    ),
+    title: Optional[str] = typer.Option(
+        None, "--title", "-t", help="Custom report title"
+    ),
+    verified_only: bool = typer.Option(
+        False, "--verified-only", help="Include only verified findings in the report"
+    ),
+    proof_required: bool = typer.Option(
+        False, "--proof-required", help="Include only findings with proof in the report"
+    ),
+    hunter_mode: bool = typer.Option(
+        False, "--hunter-mode", help="Hunter mode report preset (html only)"
+    ),
 ) -> None:
     """Generate a report for a completed job."""
     try:
@@ -1606,7 +1926,7 @@ def generate_report(
 
         if not job_id:
             raise typer.BadParameter("job_id is required")
-        
+
         manager = JobManager()
         record = _load_job_or_exit(manager, job_id)
 
@@ -1619,52 +1939,61 @@ def generate_report(
         if executive and hunter_mode:
             typer.echo("--hunter-mode cannot be combined with --executive", err=True)
             raise typer.Exit(code=2)
-        
+
         # Load job data
         job_data = {
             "id": job_id,
             "job_id": job_id,
-            "targets": [record.spec.target] if hasattr(record.spec, 'target') else [],
+            "targets": [record.spec.target] if hasattr(record.spec, "target") else [],
             "findings": [],
             "hosts": [],
             "start_time": record.metadata.started_at,
             "end_time": record.metadata.finished_at,
         }
-        
+
         # Load results
         if record.paths.results_jsonl.exists():
             from recon_cli.utils.jsonl import read_jsonl
             from recon_cli.utils.reporting import categorize_results, filter_findings
-            categorized = categorize_results(read_jsonl(record.paths.results_jsonl), include_secret_in_findings=True)
+
+            categorized = categorize_results(
+                read_jsonl(record.paths.results_jsonl), include_secret_in_findings=True
+            )
             job_data["hosts"].extend(categorized["hosts"])
             findings = categorized["findings"]
             if verified_only or proof_required:
-                findings = filter_findings(findings, verified_only=verified_only, proof_required=proof_required)
+                findings = filter_findings(
+                    findings, verified_only=verified_only, proof_required=proof_required
+                )
             job_data["findings"].extend(findings)
-        
+
         if executive:
             # Executive summary only
             gen = ExecutiveSummaryGenerator(author="ReconnV2")
             summary = gen.generate(job_data, title=title)
-            
+
             if format == "html":
                 content = summary.to_html()
-                ext = ".html"
             else:
                 content = summary.to_text()
-                ext = ".txt"
-            
+
             if output:
                 output.write_text(content)
-                typer.secho(f"✅ Executive summary saved to {output}", fg=typer.colors.GREEN)
+                typer.secho(
+                    f"✅ Executive summary saved to {output}", fg=typer.colors.GREEN
+                )
             else:
                 print(content)
         else:
             # Full report
             report_format = ReportFormat(format.lower())
-            if report_format == ReportFormat.HTML and (verified_only or proof_required or hunter_mode):
+            if report_format == ReportFormat.HTML and (
+                verified_only or proof_required or hunter_mode
+            ):
                 from recon_cli.utils.reporter import ReportConfig as LegacyReportConfig
-                from recon_cli.utils.reporter import generate_html_report as generate_legacy_html_report
+                from recon_cli.utils.reporter import (
+                    generate_html_report as generate_legacy_html_report,
+                )
 
                 output_path = output or (record.paths.root / "report.html")
                 config = LegacyReportConfig(
@@ -1682,38 +2011,53 @@ def generate_report(
             )
             generator = ReportGenerator(config)
             import asyncio
-            content = asyncio.run(generator.generate(job_data, format=report_format, output_path=output))
+
+            content = asyncio.run(
+                generator.generate(job_data, format=report_format, output_path=output)
+            )
             if output:
                 typer.secho(f"✅ Report saved to {output}", fg=typer.colors.GREEN)
             else:
                 print(content)
-                
+
     except ImportError as e:
         typer.secho(f"Reports module not available: {e}", fg=typer.colors.RED)
     except ValueError:
-        typer.secho(f"Invalid format: {format}. Use html, json, csv, markdown, xml, or pdf", fg=typer.colors.RED)
+        typer.secho(
+            f"Invalid format: {format}. Use html, json, csv, markdown, xml, or pdf",
+            fg=typer.colors.RED,
+        )
 
 
 # ============================================================================
 # QUICK START HELPER
 # ============================================================================
 
+
 @app.command("telegram-bot")
 def start_telegram_bot(
-    token: Optional[str] = typer.Option(None, "--token", envvar="RECON_TELEGRAM_TOKEN", help="Telegram Bot Token"),
-    chat_id: Optional[str] = typer.Option(None, "--chat-id", envvar="RECON_TELEGRAM_CHAT_ID", help="Allowed Chat ID"),
+    token: Optional[str] = typer.Option(
+        None, "--token", envvar="RECON_TELEGRAM_TOKEN", help="Telegram Bot Token"
+    ),
+    chat_id: Optional[str] = typer.Option(
+        None, "--chat-id", envvar="RECON_TELEGRAM_CHAT_ID", help="Allowed Chat ID"
+    ),
 ) -> None:
     """Start the interactive Telegram Bot listener."""
     if not token or not chat_id:
-        rich_print("[bold red]Error:[/bold red] Missing Telegram token or chat ID. Set RECON_TELEGRAM_TOKEN and RECON_TELEGRAM_CHAT_ID.")
+        rich_print(
+            "[bold red]Error:[/bold red] Missing Telegram token or chat ID. Set RECON_TELEGRAM_TOKEN and RECON_TELEGRAM_CHAT_ID."
+        )
         raise typer.Exit(code=1)
 
     from recon_cli.utils.telegram_bot import TelegramBot
+
     bot = TelegramBot(token, chat_id)
-    
-    rich_print(f"[bold green]Starting Telegram Bot...[/bold green]")
+
+    rich_print("[bold green]Starting Telegram Bot...[/bold green]")
+
     rich_print(f"Locked to Chat ID: {chat_id}")
-    
+
     try:
         asyncio.run(bot.start())
     except KeyboardInterrupt:

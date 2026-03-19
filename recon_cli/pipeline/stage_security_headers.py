@@ -61,10 +61,14 @@ class SecurityHeadersStage(Stage):
                 best_by_host[host] = (score, url, parsed.scheme or "")
                 continue
             current_score, current_url, current_scheme = current
-            if (parsed.scheme == "https" and current_scheme != "https") or score > current_score:
+            if (
+                parsed.scheme == "https" and current_scheme != "https"
+            ) or score > current_score:
                 best_by_host[host] = (score, url, parsed.scheme or "")
 
-        candidates = sorted(best_by_host.values(), key=lambda item: item[0], reverse=True)
+        candidates = sorted(
+            best_by_host.values(), key=lambda item: item[0], reverse=True
+        )
         candidates = candidates[:max_urls] if max_urls > 0 else candidates
         if not candidates:
             return

@@ -58,22 +58,22 @@ class JobManager:
     def _sanitize_target(self, target: str) -> str:
         """Sanitize target for use in job ID (filesystem-safe)."""
         # Remove protocol
-        clean = re.sub(r'^https?://', '', target)
+        clean = re.sub(r"^https?://", "", target)
         # Remove wildcards
-        clean = clean.replace('*', '').replace('*.', '')
+        clean = clean.replace("*", "").replace("*.", "")
         # Keep only alphanumeric, dots, and hyphens
-        clean = re.sub(r'[^a-zA-Z0-9.-]', '', clean)
+        clean = re.sub(r"[^a-zA-Z0-9.-]", "", clean)
         # Truncate to reasonable length
         clean = clean[:30] if len(clean) > 30 else clean
         # Remove leading/trailing dots and hyphens
-        clean = clean.strip('.-')
-        return clean or 'scan'
+        clean = clean.strip(".-")
+        return clean or "scan"
 
     def generate_job_id(self, target: str = "") -> str:
         """Generate meaningful job ID: target_YYYYMMDD_HHMMSS_suffix."""
         ts = time_utils.utc_now().strftime("%Y%m%d_%H%M%S")
         suffix = secrets.token_hex(2)
-        
+
         if target:
             sanitized = self._sanitize_target(target)
             return f"{sanitized}_{ts}_{suffix}"
@@ -176,7 +176,9 @@ class JobManager:
             try:
                 source = source.resolve(strict=True)
             except FileNotFoundError as exc:
-                raise FileNotFoundError(f"Targets file not found: {targets_file}") from exc
+                raise FileNotFoundError(
+                    f"Targets file not found: {targets_file}"
+                ) from exc
             inputs_dir.mkdir(parents=True, exist_ok=True)
             dest = inputs_dir / source.name
             try:
@@ -233,6 +235,7 @@ class JobManager:
         if project:
             try:
                 from recon_cli.projects import ensure_project
+
                 ensure_project(project)
             except Exception:
                 pass
@@ -258,9 +261,16 @@ class JobManager:
         metadata = JobMetadata.from_dict(metadata_payload)
         return JobRecord(spec=spec, metadata=metadata, paths=paths)
 
-    def list_jobs(self, status: Optional[str] = None, project: Optional[str] = None) -> List[str]:
+    def list_jobs(
+        self, status: Optional[str] = None, project: Optional[str] = None
+    ) -> List[str]:
         groups = {
-            None: [config.QUEUED_JOBS, config.RUNNING_JOBS, config.FINISHED_JOBS, config.FAILED_JOBS],
+            None: [
+                config.QUEUED_JOBS,
+                config.RUNNING_JOBS,
+                config.FINISHED_JOBS,
+                config.FAILED_JOBS,
+            ],
             "queued": [config.QUEUED_JOBS],
             "running": [config.RUNNING_JOBS],
             "finished": [config.FINISHED_JOBS],
@@ -276,7 +286,9 @@ class JobManager:
             for child in directory.iterdir():
                 if child.is_dir():
                     if project:
-                        spec_payload = fs.read_json(child / config.SPEC_NAME, default={})
+                        spec_payload = fs.read_json(
+                            child / config.SPEC_NAME, default={}
+                        )
                         if spec_payload.get("project") != project:
                             continue
                     job_ids.append(child.name)

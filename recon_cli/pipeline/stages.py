@@ -50,7 +50,9 @@ from recon_cli.pipeline.stage_ssrf_validator import SSRFValidatorStage
 from recon_cli.pipeline.stage_exploit_validation import ExploitValidationStage
 from recon_cli.pipeline.stage_open_redirect_validator import OpenRedirectValidatorStage
 from recon_cli.pipeline.stage_auth_bypass_validator import AuthBypassValidatorStage
-from recon_cli.pipeline.stage_secret_exposure_validator import SecretExposureValidatorStage
+from recon_cli.pipeline.stage_secret_exposure_validator import (
+    SecretExposureValidatorStage,
+)
 from recon_cli.pipeline.stage_screenshots import ScreenshotStage
 from recon_cli.pipeline.stage_finalize import FinalizeStage
 

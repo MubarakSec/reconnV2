@@ -34,12 +34,13 @@ DNS_RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA"]
 @dataclass
 class DNSRecord:
     """سجل DNS"""
+
     domain: str
     record_type: str
     value: str
     ttl: int = 300
     timestamp: float = field(default_factory=time.time)
-    
+
     @property
     def is_expired(self) -> bool:
         return time.time() > self.timestamp + self.ttl
@@ -48,24 +49,25 @@ class DNSRecord:
 @dataclass
 class DNSResult:
     """نتيجة استعلام DNS"""
+
     domain: str
     records: List[DNSRecord] = field(default_factory=list)
     error: Optional[str] = None
     query_time: float = 0.0
     resolver_used: str = ""
-    
+
     @property
     def has_records(self) -> bool:
         return len(self.records) > 0
-    
+
     @property
     def a_records(self) -> List[str]:
         return [r.value for r in self.records if r.record_type == "A"]
-    
+
     @property
     def cname_records(self) -> List[str]:
         return [r.value for r in self.records if r.record_type == "CNAME"]
-    
+
     def to_dict(self) -> dict:
         return {
             "domain": self.domain,
@@ -81,47 +83,47 @@ class DNSResult:
 class DNSCache:
     """
     Cache لنتائج DNS.
-    
+
     يخزن النتائج مع TTL.
     """
-    
+
     def __init__(self, default_ttl: int = 300):
         self.default_ttl = default_ttl
         self._cache: Dict[Tuple[str, str], DNSRecord] = {}
         self._hits = 0
         self._misses = 0
-    
+
     def get(self, domain: str, record_type: str = "A") -> Optional[DNSRecord]:
         """الحصول على سجل من الـ cache"""
         key = (domain.lower(), record_type)
         record = self._cache.get(key)
-        
+
         if record and not record.is_expired:
             self._hits += 1
             return record
-        
+
         self._misses += 1
         if record:
             del self._cache[key]
         return None
-    
+
     def set(self, record: DNSRecord) -> None:
         """تخزين سجل"""
         key = (record.domain.lower(), record.record_type)
         self._cache[key] = record
-    
+
     def set_many(self, records: List[DNSRecord]) -> None:
         """تخزين سجلات متعددة"""
         for record in records:
             self.set(record)
-    
+
     def clear_expired(self) -> int:
         """مسح السجلات المنتهية"""
         expired = [k for k, v in self._cache.items() if v.is_expired]
         for k in expired:
             del self._cache[k]
         return len(expired)
-    
+
     @property
     def stats(self) -> Dict[str, int]:
         return {
@@ -135,21 +137,21 @@ class DNSCache:
 class AsyncDNSResolver:
     """
     محلل DNS غير متزامن.
-    
+
     Example:
         >>> async with AsyncDNSResolver() as resolver:
         ...     result = await resolver.resolve("example.com")
         ...     print(result.a_records)
     """
-    
+
     DEFAULT_RESOLVERS = [
-        "8.8.8.8",        # Google
-        "8.8.4.4",        # Google
-        "1.1.1.1",        # Cloudflare
-        "1.0.0.1",        # Cloudflare
-        "9.9.9.9",        # Quad9
+        "8.8.8.8",  # Google
+        "8.8.4.4",  # Google
+        "1.1.1.1",  # Cloudflare
+        "1.0.0.1",  # Cloudflare
+        "9.9.9.9",  # Quad9
     ]
-    
+
     def __init__(
         self,
         resolvers: Optional[List[str]] = None,
@@ -172,7 +174,7 @@ class AsyncDNSResolver:
         self.max_concurrent = max_concurrent
         self.timeout = timeout
         self.retries = retries
-        
+
         self._cache = DNSCache(cache_ttl) if use_cache else None
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._stats = {
@@ -181,31 +183,31 @@ class AsyncDNSResolver:
             "failed": 0,
             "cached": 0,
         }
-    
+
     async def __aenter__(self) -> "AsyncDNSResolver":
         return self
-    
+
     async def __aexit__(self, *args) -> None:
         pass
-    
+
     @classmethod
     def load_resolvers(cls, file_path: str) -> List[str]:
         """تحميل resolvers من ملف"""
         resolvers = []
         path = Path(file_path)
-        
+
         if not path.exists():
             logger.warning(f"Resolvers file not found: {file_path}")
             return cls.DEFAULT_RESOLVERS.copy()
-        
+
         with open(path) as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     resolvers.append(line)
-        
+
         return resolvers or cls.DEFAULT_RESOLVERS.copy()
-    
+
     async def _resolve_single(
         self,
         domain: str,
@@ -214,7 +216,7 @@ class AsyncDNSResolver:
         """استعلام واحد"""
         start = time.time()
         self._stats["queries"] += 1
-        
+
         # Check cache
         if self._cache:
             cached = self._cache.get(domain, record_type)
@@ -226,26 +228,22 @@ class AsyncDNSResolver:
                     query_time=0,
                     resolver_used="cache",
                 )
-        
+
         async with self._semaphore:
             for attempt in range(self.retries + 1):
                 resolver = random.choice(self.resolvers)
-                
+
                 try:
                     # Use asyncio.to_thread for blocking DNS lookup
                     loop = asyncio.get_event_loop()
-                    
+
                     if record_type == "A":
                         # Get A records
                         result = await asyncio.wait_for(
-                            loop.run_in_executor(
-                                None,
-                                socket.gethostbyname_ex,
-                                domain
-                            ),
-                            timeout=self.timeout
+                            loop.run_in_executor(None, socket.gethostbyname_ex, domain),
+                            timeout=self.timeout,
                         )
-                        
+
                         hostname, aliases, addresses = result
                         records = [
                             DNSRecord(
@@ -256,11 +254,11 @@ class AsyncDNSResolver:
                             )
                             for addr in addresses
                         ]
-                        
+
                         # Cache results
                         if self._cache:
                             self._cache.set_many(records)
-                        
+
                         self._stats["successful"] += 1
                         return DNSResult(
                             domain=domain,
@@ -268,19 +266,22 @@ class AsyncDNSResolver:
                             query_time=time.time() - start,
                             resolver_used=resolver,
                         )
-                    
+
                     else:
                         # For other record types, use dns.resolver if available
                         try:
                             import dns.resolver
+
                             answers = await asyncio.wait_for(
                                 loop.run_in_executor(
                                     None,
-                                    lambda: list(dns.resolver.resolve(domain, record_type))
+                                    lambda: list(
+                                        dns.resolver.resolve(domain, record_type)
+                                    ),
                                 ),
-                                timeout=self.timeout
+                                timeout=self.timeout,
                             )
-                            
+
                             records = [
                                 DNSRecord(
                                     domain=domain,
@@ -290,10 +291,10 @@ class AsyncDNSResolver:
                                 )
                                 for rdata in answers
                             ]
-                            
+
                             if self._cache:
                                 self._cache.set_many(records)
-                            
+
                             self._stats["successful"] += 1
                             return DNSResult(
                                 domain=domain,
@@ -301,7 +302,7 @@ class AsyncDNSResolver:
                                 query_time=time.time() - start,
                                 resolver_used=resolver,
                             )
-                            
+
                         except ImportError:
                             # Fall back to A record only
                             return DNSResult(
@@ -309,7 +310,7 @@ class AsyncDNSResolver:
                                 error=f"dnspython not installed for {record_type} lookups",
                                 query_time=time.time() - start,
                             )
-                
+
                 except socket.gaierror as e:
                     if attempt == self.retries:
                         self._stats["failed"] += 1
@@ -318,7 +319,7 @@ class AsyncDNSResolver:
                             error=f"DNS resolution failed: {e}",
                             query_time=time.time() - start,
                         )
-                
+
                 except asyncio.TimeoutError:
                     if attempt == self.retries:
                         self._stats["failed"] += 1
@@ -327,7 +328,7 @@ class AsyncDNSResolver:
                             error="DNS resolution timeout",
                             query_time=time.time() - start,
                         )
-                
+
                 except Exception as e:
                     if attempt == self.retries:
                         self._stats["failed"] += 1
@@ -336,13 +337,13 @@ class AsyncDNSResolver:
                             error=str(e),
                             query_time=time.time() - start,
                         )
-        
+
         return DNSResult(
             domain=domain,
             error="Max retries exceeded",
             query_time=time.time() - start,
         )
-    
+
     async def resolve(
         self,
         domain: str,
@@ -350,28 +351,28 @@ class AsyncDNSResolver:
     ) -> DNSResult:
         """
         حل domain واحد.
-        
+
         Args:
             domain: الـ domain
             record_types: أنواع السجلات (default: ["A"])
-            
+
         Returns:
             DNSResult
         """
         record_types = record_types or ["A"]
-        
+
         # Get all record types
         all_records = []
         for rtype in record_types:
             result = await self._resolve_single(domain, rtype)
             all_records.extend(result.records)
-        
+
         return DNSResult(
             domain=domain,
             records=all_records,
             query_time=sum(r.ttl for r in all_records) / max(1, len(all_records)),
         )
-    
+
     async def resolve_many(
         self,
         domains: List[str],
@@ -379,56 +380,51 @@ class AsyncDNSResolver:
     ) -> List[DNSResult]:
         """
         حل domains متعددة بالتوازي.
-        
+
         Args:
             domains: قائمة الـ domains
             record_type: نوع السجل
-            
+
         Returns:
             قائمة DNSResult
         """
-        tasks = [
-            self._resolve_single(domain, record_type)
-            for domain in domains
-        ]
-        
+        tasks = [self._resolve_single(domain, record_type) for domain in domains]
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         processed = []
         for domain, result in zip(domains, results):
             if isinstance(result, Exception):
-                processed.append(DNSResult(
-                    domain=domain,
-                    error=str(result),
-                ))
+                processed.append(
+                    DNSResult(
+                        domain=domain,
+                        error=str(result),
+                    )
+                )
             else:
                 processed.append(result)
-        
+
         return processed
-    
+
     async def reverse_lookup(self, ip: str) -> DNSResult:
         """
         Reverse DNS lookup.
-        
+
         Args:
             ip: عنوان IP
-            
+
         Returns:
             DNSResult
         """
         start = time.time()
-        
+
         try:
             loop = asyncio.get_event_loop()
             hostname, aliases, _ = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    socket.gethostbyaddr,
-                    ip
-                ),
-                timeout=self.timeout
+                loop.run_in_executor(None, socket.gethostbyaddr, ip),
+                timeout=self.timeout,
             )
-            
+
             records = [
                 DNSRecord(
                     domain=ip,
@@ -437,44 +433,46 @@ class AsyncDNSResolver:
                     ttl=300,
                 )
             ]
-            
+
             for alias in aliases:
-                records.append(DNSRecord(
-                    domain=ip,
-                    record_type="PTR",
-                    value=alias,
-                    ttl=300,
-                ))
-            
+                records.append(
+                    DNSRecord(
+                        domain=ip,
+                        record_type="PTR",
+                        value=alias,
+                        ttl=300,
+                    )
+                )
+
             return DNSResult(
                 domain=ip,
                 records=records,
                 query_time=time.time() - start,
             )
-            
+
         except Exception as e:
             return DNSResult(
                 domain=ip,
                 error=str(e),
                 query_time=time.time() - start,
             )
-    
+
     async def check_wildcard(self, domain: str) -> bool:
         """
         فحص إذا كان الـ domain يستخدم wildcard DNS.
-        
+
         Args:
             domain: الـ domain
-            
+
         Returns:
             True إذا كان wildcard
         """
         # Generate random subdomain
         random_sub = f"random-{random.randint(100000, 999999)}.{domain}"
-        
+
         result = await self._resolve_single(random_sub, "A")
         return result.has_records
-    
+
     def get_stats(self) -> Dict[str, int]:
         """إحصائيات"""
         stats = self._stats.copy()
@@ -487,24 +485,22 @@ class AsyncDNSResolver:
 #                     Convenience Functions
 # ═══════════════════════════════════════════════════════════
 
+
 async def bulk_resolve(
     domains: List[str],
     max_concurrent: int = 100,
 ) -> Dict[str, List[str]]:
     """
     حل domains متعددة وإرجاع A records.
-    
+
     Example:
         >>> results = await bulk_resolve(["google.com", "example.com"])
         >>> print(results["google.com"])  # ["142.250.185.46", ...]
     """
     async with AsyncDNSResolver(max_concurrent=max_concurrent) as resolver:
         results = await resolver.resolve_many(domains)
-    
-    return {
-        r.domain: r.a_records
-        for r in results
-    }
+
+    return {r.domain: r.a_records for r in results}
 
 
 async def filter_resolvable(
@@ -513,14 +509,14 @@ async def filter_resolvable(
 ) -> List[str]:
     """
     تصفية الـ domains القابلة للحل.
-    
+
     Example:
         >>> valid = await filter_resolvable(["google.com", "invalid.test"])
         >>> print(valid)  # ["google.com"]
     """
     async with AsyncDNSResolver(max_concurrent=max_concurrent) as resolver:
         results = await resolver.resolve_many(domains)
-    
+
     return [r.domain for r in results if r.has_records]
 
 

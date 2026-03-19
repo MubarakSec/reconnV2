@@ -18,7 +18,13 @@ class AuthBypassValidatorStage(Stage):
 
     SUCCESS_STATUS = {200, 201, 202, 204, 206}
     AUTH_BLOCK_STATUS = {401, 403}
-    AUTH_HINTS = ("unauthorized", "forbidden", "access denied", "login required", "authentication required")
+    AUTH_HINTS = (
+        "unauthorized",
+        "forbidden",
+        "access denied",
+        "login required",
+        "authentication required",
+    )
     SENSITIVE_PATH_HINTS = (
         "/admin",
         "/internal",
@@ -33,7 +39,9 @@ class AuthBypassValidatorStage(Stage):
     )
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(getattr(context.runtime_config, "enable_auth_bypass_validator", True))
+        return bool(
+            getattr(context.runtime_config, "enable_auth_bypass_validator", True)
+        )
 
     def execute(self, context: PipelineContext) -> None:
         try:
@@ -44,15 +52,21 @@ class AuthBypassValidatorStage(Stage):
 
         runtime = context.runtime_config
         max_urls = max(1, int(getattr(runtime, "auth_bypass_validator_max_urls", 25)))
-        max_per_host = max(1, int(getattr(runtime, "auth_bypass_validator_max_per_host", 6)))
+        max_per_host = max(
+            1, int(getattr(runtime, "auth_bypass_validator_max_per_host", 6))
+        )
         min_score = int(getattr(runtime, "auth_bypass_validator_min_score", 35))
         timeout = max(1, int(getattr(runtime, "auth_bypass_validator_timeout", 10)))
         verify_tls = bool(getattr(runtime, "verify_tls", True))
         retry_count = max(0, int(getattr(runtime, "retry_count", 1)))
         retry_backoff_base = float(getattr(runtime, "retry_backoff_base", 1.0))
         retry_backoff_factor = float(getattr(runtime, "retry_backoff_factor", 2.0))
-        enable_forced_browse = bool(getattr(runtime, "auth_bypass_validator_enable_forced_browse", True))
-        enable_boundary = bool(getattr(runtime, "auth_bypass_validator_enable_privilege_boundary", True))
+        enable_forced_browse = bool(
+            getattr(runtime, "auth_bypass_validator_enable_forced_browse", True)
+        )
+        enable_boundary = bool(
+            getattr(runtime, "auth_bypass_validator_enable_privilege_boundary", True)
+        )
         limiter = context.get_rate_limiter(
             "auth_bypass_validator",
             rps=float(getattr(runtime, "auth_bypass_validator_rps", 0)),
@@ -67,7 +81,16 @@ class AuthBypassValidatorStage(Stage):
         )
         stats = context.record.metadata.stats.setdefault("auth_bypass_validator", {})
         if not candidates:
-            stats.update({"attempted": 0, "confirmed": 0, "confirmed_forced": 0, "confirmed_boundary": 0, "failed": 0, "skipped": 0})
+            stats.update(
+                {
+                    "attempted": 0,
+                    "confirmed": 0,
+                    "confirmed_forced": 0,
+                    "confirmed_boundary": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                }
+            )
             context.manager.update_metadata(context.record)
             context.logger.info("No auth bypass validator candidates")
             return
@@ -118,7 +141,6 @@ class AuthBypassValidatorStage(Stage):
 
             baseline_status = baseline_resp["status"]
             baseline_text = baseline_resp["text"]
-            baseline_hash = baseline_resp["hash"]
             restricted = self._is_auth_restricted(
                 status=baseline_status,
                 text=baseline_text,
@@ -181,7 +203,10 @@ class AuthBypassValidatorStage(Stage):
                         confidence=1.0,
                         source="auth-bypass-validator",
                         tags=["auth-bypass", "forced-browse", "confirmed"],
-                        evidence={"technique": technique["name"], "status_code": resp["status"]},
+                        evidence={
+                            "technique": technique["name"],
+                            "status_code": resp["status"],
+                        },
                     )
                     finding = {
                         "type": "finding",
@@ -207,7 +232,12 @@ class AuthBypassValidatorStage(Stage):
                     }
                     break
 
-            if finding is None and enable_boundary and len(tokens) >= 2 and self._is_sensitive_target(url):
+            if (
+                finding is None
+                and enable_boundary
+                and len(tokens) >= 2
+                and self._is_sensitive_target(url)
+            ):
                 auth_profiles: Dict[str, Dict[str, object]] = {}
                 for label, token in tokens:
                     headers = {
@@ -232,7 +262,9 @@ class AuthBypassValidatorStage(Stage):
                         failed += 1
                         continue
                     auth_profiles[label] = resp
-                finding = self._evaluate_boundary_issue(url, candidate, baseline_resp, auth_profiles)
+                finding = self._evaluate_boundary_issue(
+                    url, candidate, baseline_resp, auth_profiles
+                )
                 if finding:
                     artifacts.append(
                         {
@@ -240,8 +272,12 @@ class AuthBypassValidatorStage(Stage):
                             "kind": "privilege_boundary_probe",
                             "url": url,
                             "baseline_status": baseline_status,
-                            "token_a_status": int(auth_profiles.get("token-a", {}).get("status", 0) or 0),
-                            "token_b_status": int(auth_profiles.get("token-b", {}).get("status", 0) or 0),
+                            "token_a_status": int(
+                                auth_profiles.get("token-a", {}).get("status", 0) or 0
+                            ),
+                            "token_b_status": int(
+                                auth_profiles.get("token-b", {}).get("status", 0) or 0
+                            ),
                             "reason": finding.get("details", {}).get("reason"),
                         }
                     )
@@ -307,13 +343,23 @@ class AuthBypassValidatorStage(Stage):
             if not parsed.scheme or not parsed.netloc:
                 continue
             score = int(entry.get("score", 0) or 0)
-            finding_type = str(entry.get("finding_type") or entry.get("type") or "").lower()
+            finding_type = str(
+                entry.get("finding_type") or entry.get("type") or ""
+            ).lower()
             source = str(entry.get("source") or "").lower()
             status = int(entry.get("status_code") or entry.get("variant_status") or 0)
             raw_tags = entry.get("tags")
-            tags = {str(tag).lower() for tag in raw_tags} if isinstance(raw_tags, list) else set()
+            tags = (
+                {str(tag).lower() for tag in raw_tags}
+                if isinstance(raw_tags, list)
+                else set()
+            )
             restricted_hint = status in self.AUTH_BLOCK_STATUS
-            if "auth:challenge" in tags or "auth" in source or finding_type in {"auth_matrix_issue", "idor_suspect"}:
+            if (
+                "auth:challenge" in tags
+                or "auth" in source
+                or finding_type in {"auth_matrix_issue", "idor_suspect"}
+            ):
                 restricted_hint = True
                 score = max(score, 70)
             sensitive_target = self._is_sensitive_target(url)
@@ -379,7 +425,11 @@ class AuthBypassValidatorStage(Stage):
             limiter.on_response(url, status)
         text = str(getattr(resp, "text", "") or "")[:4000]
         location = str(getattr(resp, "headers", {}).get("Location", "") or "")
-        body_hash = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest() if text else ""
+        body_hash = (
+            hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
+            if text
+            else ""
+        )
         resp.close()
         return {"status": status, "text": text, "location": location, "hash": body_hash}
 
@@ -409,24 +459,44 @@ class AuthBypassValidatorStage(Stage):
             except Exception:
                 if attempt >= retries:
                     return None
-                delay = backoff_base * (backoff_factor ** attempt)
+                delay = backoff_base * (backoff_factor**attempt)
                 time.sleep(max(0.1, delay))
                 attempt += 1
         return None
 
-    def _forced_browse_techniques(self, base_url: str, path: str) -> List[Dict[str, object]]:
+    def _forced_browse_techniques(
+        self, base_url: str, path: str
+    ) -> List[Dict[str, object]]:
         safe_path = path if path.startswith("/") else f"/{path}"
         path_dot = safe_path.rstrip("/") + "/."
         path_encoded = safe_path.rstrip("/") + "/%2e/"
         parsed = urlparse(base_url)
         base_clean = urlunparse(parsed._replace(path=safe_path, query="", fragment=""))
         path_dot_url = urlunparse(parsed._replace(path=path_dot, query="", fragment=""))
-        path_encoded_url = urlunparse(parsed._replace(path=path_encoded, query="", fragment=""))
+        path_encoded_url = urlunparse(
+            parsed._replace(path=path_encoded, query="", fragment="")
+        )
         return [
-            {"name": "x_original_url", "url": base_clean, "headers": {"X-Original-URL": safe_path}},
-            {"name": "x_rewrite_url", "url": base_clean, "headers": {"X-Rewrite-URL": safe_path}},
-            {"name": "x_custom_ip_auth", "url": base_clean, "headers": {"X-Custom-IP-Authorization": "127.0.0.1"}},
-            {"name": "x_forwarded_for", "url": base_clean, "headers": {"X-Forwarded-For": "127.0.0.1"}},
+            {
+                "name": "x_original_url",
+                "url": base_clean,
+                "headers": {"X-Original-URL": safe_path},
+            },
+            {
+                "name": "x_rewrite_url",
+                "url": base_clean,
+                "headers": {"X-Rewrite-URL": safe_path},
+            },
+            {
+                "name": "x_custom_ip_auth",
+                "url": base_clean,
+                "headers": {"X-Custom-IP-Authorization": "127.0.0.1"},
+            },
+            {
+                "name": "x_forwarded_for",
+                "url": base_clean,
+                "headers": {"X-Forwarded-For": "127.0.0.1"},
+            },
             {"name": "path_dot_bypass", "url": path_dot_url, "headers": {}},
             {"name": "path_encoded_dot_bypass", "url": path_encoded_url, "headers": {}},
         ]
@@ -446,7 +516,9 @@ class AuthBypassValidatorStage(Stage):
         token_b_ok = int(token_b.get("status", 0) or 0) in self.SUCCESS_STATUS
         if not token_a_ok or not token_b_ok:
             return None
-        token_match = bool(token_a.get("hash")) and str(token_a.get("hash")) == str(token_b.get("hash"))
+        token_match = bool(token_a.get("hash")) and str(token_a.get("hash")) == str(
+            token_b.get("hash")
+        )
         if not token_match:
             return None
 
@@ -487,7 +559,9 @@ class AuthBypassValidatorStage(Stage):
         lower = url.lower()
         return any(hint in lower for hint in self.SENSITIVE_PATH_HINTS)
 
-    def _is_auth_restricted(self, *, status: int, text: str, location: str, hinted: bool) -> bool:
+    def _is_auth_restricted(
+        self, *, status: int, text: str, location: str, hinted: bool
+    ) -> bool:
         if status in self.AUTH_BLOCK_STATUS:
             return True
         lowered = (text or "").lower()

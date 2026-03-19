@@ -35,7 +35,11 @@ class ParamMiningStage(Stage):
                 if isinstance(url, str) and "{" in url and "}" in url:
                     parsed = urlparse(url)
                     for token in parsed.path.split("/"):
-                        if token.startswith("{") and token.endswith("}") and len(token) > 2:
+                        if (
+                            token.startswith("{")
+                            and token.endswith("}")
+                            and len(token) > 2
+                        ):
                             name = token[1:-1]
                             auth_inputs.setdefault(name, []).append(url)
             elif etype == "auth_form":
@@ -47,7 +51,9 @@ class ParamMiningStage(Stage):
                             continue
                         name = item.get("name")
                         if name:
-                            auth_inputs.setdefault(str(name), []).append(str(url) if url else "")
+                            auth_inputs.setdefault(str(name), []).append(
+                                str(url) if url else ""
+                            )
         js_endpoints = context.get_data("js_endpoints", []) or []
         for url in js_endpoints:
             if url and "?" in url:
@@ -97,12 +103,29 @@ class ParamMiningStage(Stage):
             }
             context.results.append(payload)
         mutation_catalog: Dict[str, Dict[str, object]] = {}
-        if bool(getattr(context.runtime_config, "param_mining_generate_mutations", True)):
-            max_mutations = max(1, int(getattr(context.runtime_config, "param_mining_mutations_per_param", 8)))
+        if bool(
+            getattr(context.runtime_config, "param_mining_generate_mutations", True)
+        ):
+            max_mutations = max(
+                1,
+                int(
+                    getattr(
+                        context.runtime_config, "param_mining_mutations_per_param", 8
+                    )
+                ),
+            )
             for name, count in params.most_common(max_params):
-                category = self._infer_param_category(name, value_examples.get(name, []))
-                values = self._mutation_values_for_category(category, max_mutations=max_mutations)
-                mutation_catalog[name] = {"category": category, "values": values, "count": count}
+                category = self._infer_param_category(
+                    name, value_examples.get(name, [])
+                )
+                values = self._mutation_values_for_category(
+                    category, max_mutations=max_mutations
+                )
+                mutation_catalog[name] = {
+                    "category": category,
+                    "values": values,
+                    "count": count,
+                }
                 context.results.append(
                     {
                         "type": "param_mutation",
@@ -136,15 +159,34 @@ class ParamMiningStage(Stage):
         stats["params"] = min(len(params), max_params)
         stats["urls"] = len(candidates)
         stats["mutation_params"] = len(mutation_catalog)
-        stats["mutation_values"] = sum(len(item.get("values", [])) for item in mutation_catalog.values())
+        stats["mutation_values"] = sum(
+            len(item.get("values", [])) for item in mutation_catalog.values()
+        )
         context.manager.update_metadata(context.record)
 
     def _infer_param_category(self, name: str, values: List[str]) -> str:
         lowered = (name or "").lower()
         observed = " ".join(values).lower()
-        if lowered in {"id", "uid", "user_id", "account_id", "order_id"} or lowered.endswith("_id"):
+        if lowered in {
+            "id",
+            "uid",
+            "user_id",
+            "account_id",
+            "order_id",
+        } or lowered.endswith("_id"):
             return "identifier"
-        if any(token in lowered for token in {"url", "uri", "redirect", "callback", "next", "dest", "target"}):
+        if any(
+            token in lowered
+            for token in {
+                "url",
+                "uri",
+                "redirect",
+                "callback",
+                "next",
+                "dest",
+                "target",
+            }
+        ):
             return "url"
         if lowered in {"url", "uri", "dest", "target", "next", "redirect", "callback"}:
             return "url"
@@ -164,9 +206,19 @@ class ParamMiningStage(Stage):
             return "url"
         return "generic"
 
-    def _mutation_values_for_category(self, category: str, *, max_mutations: int) -> List[str]:
+    def _mutation_values_for_category(
+        self, category: str, *, max_mutations: int
+    ) -> List[str]:
         catalog = {
-            "identifier": ["0", "1", "2", "999999", "-1", "00000000-0000-0000-0000-000000000000", "null"],
+            "identifier": [
+                "0",
+                "1",
+                "2",
+                "999999",
+                "-1",
+                "00000000-0000-0000-0000-000000000000",
+                "null",
+            ],
             "url": [
                 "https://example.org/cb",
                 "//example.org/cb",
@@ -174,11 +226,27 @@ class ParamMiningStage(Stage):
                 "http://169.254.169.254/latest/meta-data/",
                 "javascript:alert(1)",
             ],
-            "file_path": ["../../etc/passwd", "/etc/passwd", "..\\..\\windows\\win.ini", "file:///etc/passwd"],
-            "email": ["attacker@example.org", "admin@example.org", "test+recon@example.org"],
+            "file_path": [
+                "../../etc/passwd",
+                "/etc/passwd",
+                "..\\..\\windows\\win.ini",
+                "file:///etc/passwd",
+            ],
+            "email": [
+                "attacker@example.org",
+                "admin@example.org",
+                "test+recon@example.org",
+            ],
             "token": ["invalid-token", "A" * 40, "null", "undefined", ""],
             "pagination": ["0", "1", "100", "1000", "-1"],
             "boolean_flag": ["true", "false", "1", "0", "on", "off"],
-            "generic": ["test", "<script>alert(1)</script>", "' OR '1'='1", "${7*7}", "%0a", ""],
+            "generic": [
+                "test",
+                "<script>alert(1)</script>",
+                "' OR '1'='1",
+                "${7*7}",
+                "%0a",
+                "",
+            ],
         }
         return list(catalog.get(category, catalog["generic"]))[:max_mutations]

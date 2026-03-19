@@ -10,7 +10,9 @@ from recon_cli.jobs.models import JobSpec, JobMetadata
 def schema() -> Dict[str, object]:
     """Return machine-consumable schema hints for automation clients."""
     return {
-        "job_spec": JobSpec(job_id="string", target="string", profile="string").to_dict(),
+        "job_spec": JobSpec(
+            job_id="string", target="string", profile="string"
+        ).to_dict(),
         "job_metadata": JobMetadata(job_id="string", queued_at="timestamp").to_dict(),
         "results_meta": {"type": "meta", "schema_version": "1.0.0"},
     }

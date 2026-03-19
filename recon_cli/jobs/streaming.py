@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StreamingConfig:
     """إعدادات البث"""
+
     batch_size: int = 100
     buffer_size: int = 1000
     flush_interval: float = 1.0
@@ -41,15 +42,15 @@ class StreamingConfig:
 class ResultStream:
     """
     Stream للنتائج من ملف JSONL.
-    
+
     يقرأ سطر بسطر لتوفير الذاكرة.
-    
+
     Example:
         >>> stream = ResultStream("results.jsonl")
         >>> for result in stream:
         ...     process(result)
     """
-    
+
     def __init__(
         self,
         file_path: Union[str, Path],
@@ -59,38 +60,38 @@ class ResultStream:
         self.filter_func = filter_func
         self._count = 0
         self._filtered = 0
-    
+
     def __iter__(self) -> Iterator[dict]:
         if not self.file_path.exists():
             return
-        
+
         with open(self.file_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                
+
                 try:
                     result = json.loads(line)
                     self._count += 1
-                    
+
                     if self.filter_func and not self.filter_func(result):
                         self._filtered += 1
                         continue
-                    
+
                     yield result
-                    
+
                 except json.JSONDecodeError as e:
                     logger.warning(f"Invalid JSON line: {e}")
-    
+
     def count(self) -> int:
         """عدد النتائج الكلي"""
         if not self.file_path.exists():
             return 0
-        
+
         with open(self.file_path, "r", encoding="utf-8") as f:
             return sum(1 for line in f if line.strip())
-    
+
     def batched(self, batch_size: int = 100) -> Iterator[List[dict]]:
         """إرجاع batches من النتائج"""
         batch = []
@@ -101,7 +102,7 @@ class ResultStream:
                 batch = []
         if batch:
             yield batch
-    
+
     @property
     def stats(self) -> Dict[str, int]:
         return {
@@ -114,13 +115,13 @@ class ResultStream:
 class AsyncResultStream:
     """
     Async stream للنتائج.
-    
+
     Example:
         >>> async with AsyncResultStream("results.jsonl") as stream:
         ...     async for result in stream:
         ...         await process(result)
     """
-    
+
     def __init__(
         self,
         file_path: Union[str, Path],
@@ -134,22 +135,22 @@ class AsyncResultStream:
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=buffer_size)
         self._reader_task: Optional[asyncio.Task] = None
         self._done = False
-    
+
     async def __aenter__(self) -> "AsyncResultStream":
         await self.start()
         return self
-    
+
     async def __aexit__(self, *args) -> None:
         await self.close()
-    
+
     async def start(self) -> None:
         """بدء القراءة"""
         if not self.file_path.exists():
             self._done = True
             return
-        
+
         self._reader_task = asyncio.create_task(self._read_file())
-    
+
     async def close(self) -> None:
         """إغلاق الـ stream"""
         if self._reader_task:
@@ -158,12 +159,12 @@ class AsyncResultStream:
                 await self._reader_task
             except asyncio.CancelledError:
                 pass
-    
+
     async def _read_file(self) -> None:
         """قراءة الملف في الخلفية"""
         try:
             loop = asyncio.get_event_loop()
-            
+
             def read_sync():
                 results = []
                 with open(self.file_path, "r", encoding="utf-8") as f:
@@ -179,25 +180,22 @@ class AsyncResultStream:
                         except json.JSONDecodeError:
                             pass
                 return results
-            
+
             results = await loop.run_in_executor(None, read_sync)
-            
+
             for result in results:
                 await self._queue.put(result)
-            
+
         finally:
             self._done = True
-    
+
     async def __aiter__(self) -> AsyncIterator[dict]:
         while True:
             if self._done and self._queue.empty():
                 break
-            
+
             try:
-                result = await asyncio.wait_for(
-                    self._queue.get(),
-                    timeout=0.1
-                )
+                result = await asyncio.wait_for(self._queue.get(), timeout=0.1)
                 yield result
             except asyncio.TimeoutError:
                 if self._done:
@@ -207,16 +205,16 @@ class AsyncResultStream:
 class ResultWriter:
     """
     كاتب نتائج مع buffering.
-    
+
     يكتب بـ batches لتحسين الأداء.
-    
+
     Example:
         >>> writer = ResultWriter("results.jsonl")
         >>> for result in results:
         ...     writer.write(result)
         >>> writer.flush()
     """
-    
+
     def __init__(
         self,
         file_path: Union[str, Path],
@@ -229,35 +227,35 @@ class ResultWriter:
         self._buffer: List[dict] = []
         self._total_written = 0
         self._file = None
-    
+
     def __enter__(self) -> "ResultWriter":
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = open(self.file_path, "a", encoding="utf-8")
         return self
-    
+
     def __exit__(self, *args) -> None:
         self.close()
-    
+
     def write(self, result: dict) -> None:
         """كتابة نتيجة"""
         self._buffer.append(result)
-        
+
         if self.auto_flush and len(self._buffer) >= self.buffer_size:
             self.flush()
-    
+
     def write_many(self, results: List[dict]) -> None:
         """كتابة نتائج متعددة"""
         for result in results:
             self.write(result)
-    
+
     def flush(self) -> int:
         """كتابة الـ buffer للملف"""
         if not self._buffer:
             return 0
-        
+
         if not self._file:
             self._file = open(self.file_path, "a", encoding="utf-8")
-        
+
         count = 0
         for result in self._buffer:
             try:
@@ -266,20 +264,20 @@ class ResultWriter:
                 count += 1
             except (TypeError, ValueError) as e:
                 logger.warning(f"Failed to serialize result: {e}")
-        
+
         self._file.flush()
         self._total_written += count
         self._buffer.clear()
-        
+
         return count
-    
+
     def close(self) -> None:
         """إغلاق الملف"""
         self.flush()
         if self._file:
             self._file.close()
             self._file = None
-    
+
     @property
     def total_written(self) -> int:
         return self._total_written
@@ -288,12 +286,12 @@ class ResultWriter:
 class AsyncResultWriter:
     """
     Async كاتب نتائج.
-    
+
     Example:
         >>> async with AsyncResultWriter("results.jsonl") as writer:
         ...     await writer.write(result)
     """
-    
+
     def __init__(
         self,
         file_path: Union[str, Path],
@@ -307,53 +305,52 @@ class AsyncResultWriter:
         self._writer_task: Optional[asyncio.Task] = None
         self._total_written = 0
         self._running = False
-    
+
     async def __aenter__(self) -> "AsyncResultWriter":
         await self.start()
         return self
-    
+
     async def __aexit__(self, *args) -> None:
         await self.close()
-    
+
     async def start(self) -> None:
         """بدء الكتابة"""
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self._running = True
         self._writer_task = asyncio.create_task(self._write_loop())
-    
+
     async def _write_loop(self) -> None:
         """حلقة الكتابة"""
         buffer = []
         last_flush = asyncio.get_event_loop().time()
-        
+
         while self._running or not self._queue.empty():
             try:
                 result = await asyncio.wait_for(
-                    self._queue.get(),
-                    timeout=self.flush_interval
+                    self._queue.get(), timeout=self.flush_interval
                 )
                 buffer.append(result)
             except asyncio.TimeoutError:
                 pass
-            
+
             current_time = asyncio.get_event_loop().time()
             should_flush = (
-                len(buffer) >= self.buffer_size or
-                (current_time - last_flush) >= self.flush_interval
+                len(buffer) >= self.buffer_size
+                or (current_time - last_flush) >= self.flush_interval
             )
-            
+
             if buffer and should_flush:
                 await self._flush_buffer(buffer)
                 buffer.clear()
                 last_flush = current_time
-        
+
         if buffer:
             await self._flush_buffer(buffer)
-    
+
     async def _flush_buffer(self, buffer: List[dict]) -> None:
         """كتابة الـ buffer"""
         loop = asyncio.get_event_loop()
-        
+
         def write_sync():
             with open(self.file_path, "a", encoding="utf-8") as f:
                 for result in buffer:
@@ -363,25 +360,25 @@ class AsyncResultWriter:
                     except (TypeError, ValueError):
                         pass
             return len(buffer)
-        
+
         count = await loop.run_in_executor(None, write_sync)
         self._total_written += count
-    
+
     async def write(self, result: dict) -> None:
         """كتابة نتيجة"""
         await self._queue.put(result)
-    
+
     async def write_many(self, results: List[dict]) -> None:
         """كتابة نتائج متعددة"""
         for result in results:
             await self._queue.put(result)
-    
+
     async def close(self) -> None:
         """إغلاق"""
         self._running = False
         if self._writer_task:
             await self._writer_task
-    
+
     @property
     def total_written(self) -> int:
         return self._total_written
@@ -391,6 +388,7 @@ class AsyncResultWriter:
 #                     Aggregation Helpers
 # ═══════════════════════════════════════════════════════════
 
+
 def stream_aggregate(
     file_path: Union[str, Path],
     key_func: Callable[[dict], str],
@@ -399,7 +397,7 @@ def stream_aggregate(
 ) -> Dict[str, dict]:
     """
     تجميع النتائج بشكل streaming.
-    
+
     Example:
         >>> results = stream_aggregate(
         ...     "results.jsonl",
@@ -408,12 +406,12 @@ def stream_aggregate(
         ... )
     """
     aggregates: Dict[str, dict] = {}
-    
+
     for result in ResultStream(file_path):
         key = key_func(result)
         current = aggregates.get(key, initial_value or {})
         aggregates[key] = agg_func(current, result)
-    
+
     return aggregates
 
 
@@ -424,7 +422,7 @@ def stream_filter_write(
 ) -> int:
     """
     تصفية وكتابة النتائج.
-    
+
     Example:
         >>> count = stream_filter_write(
         ...     "all_results.jsonl",
@@ -435,7 +433,7 @@ def stream_filter_write(
     with ResultWriter(output_path) as writer:
         for result in ResultStream(input_path, filter_func):
             writer.write(result)
-    
+
     return writer.total_written
 
 
@@ -446,7 +444,7 @@ def merge_result_files(
 ) -> int:
     """
     دمج ملفات نتائج متعددة.
-    
+
     Example:
         >>> count = merge_result_files(
         ...     ["results1.jsonl", "results2.jsonl"],
@@ -455,7 +453,7 @@ def merge_result_files(
         ... )
     """
     seen = set()
-    
+
     with ResultWriter(output_path) as writer:
         for path in input_paths:
             for result in ResultStream(path):
@@ -464,7 +462,7 @@ def merge_result_files(
                     if key in seen:
                         continue
                     seen.add(key)
-                
+
                 writer.write(result)
-    
+
     return writer.total_written

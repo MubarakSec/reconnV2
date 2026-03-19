@@ -15,11 +15,45 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.jsonl import read_jsonl
 
-SENSITIVE_KEYS = {"email", "role", "roles", "balance", "owner_id", "user_id", "account_id"}
-SUBJECT_KEYS = {"id", "user_id", "owner_id", "account_id", "uid", "tenant_id", "org_id", "project_id"}
-AUTH_HINTS = ("unauthorized", "forbidden", "access denied", "permission", "login required")
-USER_SCOPED_HINTS = ("/me", "/profile", "/account", "/user", "/users", "/tenant", "/org", "/project")
-UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+SENSITIVE_KEYS = {
+    "email",
+    "role",
+    "roles",
+    "balance",
+    "owner_id",
+    "user_id",
+    "account_id",
+}
+SUBJECT_KEYS = {
+    "id",
+    "user_id",
+    "owner_id",
+    "account_id",
+    "uid",
+    "tenant_id",
+    "org_id",
+    "project_id",
+}
+AUTH_HINTS = (
+    "unauthorized",
+    "forbidden",
+    "access denied",
+    "permission",
+    "login required",
+)
+USER_SCOPED_HINTS = (
+    "/me",
+    "/profile",
+    "/account",
+    "/user",
+    "/users",
+    "/tenant",
+    "/org",
+    "/project",
+)
+UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 
 @dataclass
@@ -76,7 +110,9 @@ class AuthMatrixStage(Stage):
 
     def is_enabled(self, context: PipelineContext) -> bool:
         if requests is None:
-            context.logger.info("requests library not available; skipping AuthMatrix stage")
+            context.logger.info(
+                "requests library not available; skipping AuthMatrix stage"
+            )
             return False
         return True
 
@@ -99,7 +135,9 @@ class AuthMatrixStage(Stage):
         if getattr(runtime, "idor_token_b", None):
             tokens.append(("token-b", runtime.idor_token_b))
         if len(tokens) < 2:
-            context.logger.info("AuthMatrix stage: additional tokens not configured; skipping")
+            context.logger.info(
+                "AuthMatrix stage: additional tokens not configured; skipping"
+            )
             return
 
         session = requests.Session()
@@ -111,13 +149,24 @@ class AuthMatrixStage(Stage):
                 pass
 
         timeout = int(getattr(runtime, "idor_timeout", 10))
-        stats = context.record.metadata.stats.setdefault("auth_matrix", {"tests": 0, "issues": 0})
+        stats = context.record.metadata.stats.setdefault(
+            "auth_matrix", {"tests": 0, "issues": 0}
+        )
         tsv_lines = ["url\tauth\tstatus\tbody_md5\tlength\tsensitive_keys\tsubject_ids"]
 
         for url in urls:
             records: List[AuthRecord] = []
             for auth_label, token in tokens:
-                data = self._fetch(session, context, url, auth_label, token, timeout, verify_tls, limiter)
+                data = self._fetch(
+                    session,
+                    context,
+                    url,
+                    auth_label,
+                    token,
+                    timeout,
+                    verify_tls,
+                    limiter,
+                )
                 if not data:
                     continue
                 stats["tests"] += 1
@@ -132,8 +181,14 @@ class AuthMatrixStage(Stage):
                     auth_error=bool(data.get("auth_error")),
                 )
                 records.append(record)
-                sensitive_keys = ",".join(sorted(record.sensitive.keys())) if record.sensitive else ""
-                subject_ids = ",".join(sorted(record.subject_ids)) if record.subject_ids else ""
+                sensitive_keys = (
+                    ",".join(sorted(record.sensitive.keys()))
+                    if record.sensitive
+                    else ""
+                )
+                subject_ids = (
+                    ",".join(sorted(record.subject_ids)) if record.subject_ids else ""
+                )
                 tsv_lines.append(
                     f"{url}\t{auth_label}\t{record.status}\t{record.body_md5}\t{record.length}\t{sensitive_keys}\t{subject_ids}"
                 )
@@ -144,13 +199,31 @@ class AuthMatrixStage(Stage):
                     stats["issues"] += 1
 
         artifacts_dir = context.record.paths.ensure_subdir("auth_matrix")
-        (artifacts_dir / "auth_matrix.tsv").write_text("\n".join(tsv_lines) + "\n", encoding="utf-8")
+        (artifacts_dir / "auth_matrix.tsv").write_text(
+            "\n".join(tsv_lines) + "\n", encoding="utf-8"
+        )
         context.manager.update_metadata(context.record)
 
     def _collect_urls(self, context: PipelineContext) -> List[str]:
         items = read_jsonl(context.record.paths.results_jsonl)
-        max_targets = max(1, int(getattr(context.runtime_config, "auth_matrix_max_targets", self.MAX_TARGETS)))
-        max_per_host = max(1, int(getattr(context.runtime_config, "auth_matrix_max_per_host", self.MAX_PER_HOST)))
+        max_targets = max(
+            1,
+            int(
+                getattr(
+                    context.runtime_config, "auth_matrix_max_targets", self.MAX_TARGETS
+                )
+            ),
+        )
+        max_per_host = max(
+            1,
+            int(
+                getattr(
+                    context.runtime_config,
+                    "auth_matrix_max_per_host",
+                    self.MAX_PER_HOST,
+                )
+            ),
+        )
         candidates: List[Tuple[int, str, str]] = []
         seen = set()
         for entry in items:
@@ -205,7 +278,11 @@ class AuthMatrixStage(Stage):
         query_params = parse_qsl(parsed.query, keep_blank_values=True)
         for key, _ in query_params:
             key_lower = key.lower()
-            if key_lower in SUBJECT_KEYS or key_lower.endswith("_id") or key_lower in {"id", "uid"}:
+            if (
+                key_lower in SUBJECT_KEYS
+                or key_lower.endswith("_id")
+                or key_lower in {"id", "uid"}
+            ):
                 score += 10
         tags = entry.get("tags")
         if isinstance(tags, list):
@@ -234,9 +311,17 @@ class AuthMatrixStage(Stage):
         if limiter and not limiter.wait_for_slot(url, timeout=timeout):
             return None
         try:
-            resp = session.get(url, headers=headers, timeout=timeout, verify=verify_tls, allow_redirects=True)
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                verify=verify_tls,
+                allow_redirects=True,
+            )
         except requests.exceptions.RequestException as exc:
-            context.logger.debug("AuthMatrix request failed for %s (%s): %s", url, auth_label, exc)
+            context.logger.debug(
+                "AuthMatrix request failed for %s (%s): %s", url, auth_label, exc
+            )
             if limiter:
                 limiter.on_error(url)
             return None
@@ -266,7 +351,9 @@ class AuthMatrixStage(Stage):
             "auth_error": auth_error,
         }
 
-    def _extract_sensitive(self, data_json: Dict[str, object], text: str) -> Dict[str, object]:
+    def _extract_sensitive(
+        self, data_json: Dict[str, object], text: str
+    ) -> Dict[str, object]:
         payload: Dict[str, object] = {}
         if data_json:
             self._collect_sensitive(data_json, payload, prefix="", depth=0)
@@ -290,7 +377,9 @@ class AuthMatrixStage(Stage):
                     break
         return subject_ids
 
-    def _detect_issues(self, url: str, records: Sequence[AuthRecord]) -> List[Dict[str, object]]:
+    def _detect_issues(
+        self, url: str, records: Sequence[AuthRecord]
+    ) -> List[Dict[str, object]]:
         findings: List[Dict[str, object]] = []
         record_map = {record.auth: record for record in records}
         user_scoped = self._is_user_scoped(url)
@@ -418,7 +507,9 @@ class AuthMatrixStage(Stage):
             return data
         return {}
 
-    def _collect_sensitive(self, node: object, out: Dict[str, object], *, prefix: str, depth: int) -> None:
+    def _collect_sensitive(
+        self, node: object, out: Dict[str, object], *, prefix: str, depth: int
+    ) -> None:
         if depth > 4:
             return
         if isinstance(node, dict):

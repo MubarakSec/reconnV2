@@ -44,10 +44,20 @@ class DedupeStage(Stage):
                 prev_dedupe = prev.paths.artifact("dedupe_hosts.txt")
                 if prev_dedupe.exists():
                     try:
-                        prev_hosts = {line.strip() for line in prev_dedupe.read_text(encoding="utf-8").splitlines() if line.strip()}
+                        prev_hosts = {
+                            line.strip()
+                            for line in prev_dedupe.read_text(
+                                encoding="utf-8"
+                            ).splitlines()
+                            if line.strip()
+                        }
                         merged = sorted(set(normalized) | prev_hosts)
-                        dedupe_path.write_text("\n".join(merged) + "\n", encoding="utf-8")
+                        dedupe_path.write_text(
+                            "\n".join(merged) + "\n", encoding="utf-8"
+                        )
                         context.record.metadata.stats["dedupe_hosts"] = len(merged)
                         context.manager.update_metadata(context.record)
                     except Exception:
-                        context.logger.warning("Failed to merge previous dedupe hosts for incremental run")
+                        context.logger.warning(
+                            "Failed to merge previous dedupe hosts for incremental run"
+                        )

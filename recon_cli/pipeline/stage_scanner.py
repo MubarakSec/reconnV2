@@ -18,11 +18,15 @@ class ScannerStage(Stage):
     name = "scanner"
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(context.record.spec.scanners) or bool(getattr(context.runtime_config, "auto_scanners", True))
+        return bool(context.record.spec.scanners) or bool(
+            getattr(context.runtime_config, "auto_scanners", True)
+        )
 
     def execute(self, context: PipelineContext) -> None:
         if scanner_integrations is None:
-            context.logger.warning("Scanner integrations unavailable; skipping scanner stage")
+            context.logger.warning(
+                "Scanner integrations unavailable; skipping scanner stage"
+            )
             return
         scanners = [s.lower() for s in context.record.spec.scanners]
         if not scanners and getattr(context.runtime_config, "auto_scanners", True):
@@ -35,7 +39,9 @@ class ScannerStage(Stage):
                 context.logger.warning("Unknown scanner requested: %s", scanner)
                 continue
             if not CommandExecutor.available(scanner):
-                context.logger.info("Scanner %s not available in PATH; skipping", scanner)
+                context.logger.info(
+                    "Scanner %s not available in PATH; skipping", scanner
+                )
                 continue
             available.append(scanner)
         if not available:
@@ -48,7 +54,9 @@ class ScannerStage(Stage):
             if entry.get("type") != "url":
                 continue
             url_value = entry.get("url")
-            host_value = entry.get("hostname") or (url_value and urlparse(url_value).hostname)
+            host_value = entry.get("hostname") or (
+                url_value and urlparse(url_value).hostname
+            )
             if url_value and not context.url_in_scope(str(url_value)):
                 continue
             if host_value and not context.host_in_scope(str(host_value)):
@@ -60,12 +68,20 @@ class ScannerStage(Stage):
 
         host_info: Dict[str, Dict[str, object]] = {}
         for entry in url_entries:
-            host = entry.get("hostname") or (entry.get("url") and urlparse(entry["url"]).hostname)
+            host = entry.get("hostname") or (
+                entry.get("url") and urlparse(entry["url"]).hostname
+            )
             if not host:
                 continue
             data = host_info.setdefault(
                 host,
-                {"urls": [], "tags": set(), "servers": set(), "api": False, "technologies": set()},
+                {
+                    "urls": [],
+                    "tags": set(),
+                    "servers": set(),
+                    "api": False,
+                    "technologies": set(),
+                },
             )
             url = entry.get("url")
             if url:
@@ -82,7 +98,9 @@ class ScannerStage(Stage):
                 data["servers"].add(server.lower())
             technologies = entry.get("technologies") or []
             if isinstance(technologies, list):
-                data["technologies"].update({str(item).lower() for item in technologies if item})
+                data["technologies"].update(
+                    {str(item).lower() for item in technologies if item}
+                )
             elif technologies:
                 data["technologies"].add(str(technologies).lower())
 
@@ -103,14 +121,20 @@ class ScannerStage(Stage):
             findings: List[scanner_integrations.ScannerFinding] = []
             nuclei_tags: List[str] = []
             if getattr(runtime, "nuclei_tags", None):
-                nuclei_tags = [tag.strip() for tag in str(runtime.nuclei_tags).split(",") if tag.strip()]
+                nuclei_tags = [
+                    tag.strip()
+                    for tag in str(runtime.nuclei_tags).split(",")
+                    if tag.strip()
+                ]
             targets: List[str] = []
             for host in api_hosts:
                 urls = host_info[host]["urls"]
                 base_url = urls[0] if urls else f"https://{host}"
                 targets.append(base_url)
             batch_size = max(1, int(getattr(runtime, "nuclei_batch_size", 1)))
-            pending_batches = [targets[i : i + batch_size] for i in range(0, len(targets), batch_size)]
+            pending_batches = [
+                targets[i : i + batch_size] for i in range(0, len(targets), batch_size)
+            ]
             timed_out_batches = 0
             batches_run = 0
             retried_singles: Set[str] = set()
@@ -118,13 +142,21 @@ class ScannerStage(Stage):
                 batch = pending_batches.pop(0)
                 if not batch:
                     continue
-                computed_timeout = int(getattr(runtime, "nuclei_batch_timeout_base", 300)) + int(
-                    getattr(runtime, "nuclei_batch_timeout_per_target", 45)
-                ) * len(batch)
-                max_timeout = int(getattr(runtime, "nuclei_batch_timeout_max", runtime.scanner_timeout))
+                computed_timeout = int(
+                    getattr(runtime, "nuclei_batch_timeout_base", 300)
+                ) + int(getattr(runtime, "nuclei_batch_timeout_per_target", 45)) * len(
+                    batch
+                )
+                max_timeout = int(
+                    getattr(
+                        runtime, "nuclei_batch_timeout_max", runtime.scanner_timeout
+                    )
+                )
                 if max_timeout < runtime.scanner_timeout:
                     max_timeout = runtime.scanner_timeout
-                batch_timeout = min(max_timeout, max(computed_timeout, runtime.scanner_timeout))
+                batch_timeout = min(
+                    max_timeout, max(computed_timeout, runtime.scanner_timeout)
+                )
                 batch_run_id = batches_run + 1
                 result = scanner_integrations.run_nuclei_batch(
                     context.executor,
@@ -151,7 +183,9 @@ class ScannerStage(Stage):
                         single_target = batch[0]
                         if single_target not in retried_singles:
                             retried_singles.add(single_target)
-                            single_timeout = int(getattr(runtime, "nuclei_single_timeout", batch_timeout))
+                            single_timeout = int(
+                                getattr(runtime, "nuclei_single_timeout", batch_timeout)
+                            )
                             retry_run_id = batches_run + 1
                             retry_result = scanner_integrations.run_nuclei_batch(
                                 context.executor,
@@ -161,7 +195,9 @@ class ScannerStage(Stage):
                                 max(single_timeout, batch_timeout),
                                 artifact_suffix=f"run{retry_run_id}",
                                 tags=nuclei_tags or None,
-                                request_timeout=int(getattr(runtime, "nuclei_timeout", 10)),
+                                request_timeout=int(
+                                    getattr(runtime, "nuclei_timeout", 10)
+                                ),
                                 retries=int(getattr(runtime, "nuclei_retries", 1)),
                             )
                             batches_run += 1
@@ -181,7 +217,9 @@ class ScannerStage(Stage):
                 tags = {t.lower() for t in info.get("tags", set())}
                 if any("wordpress" in tag for tag in tags):
                     return True
-                if "cms:wordpress" in signal_index.get("by_host", {}).get(host_value, set()):
+                if "cms:wordpress" in signal_index.get("by_host", {}).get(
+                    host_value, set()
+                ):
                     return True
                 techs = info.get("technologies", set())
                 if any("wordpress" in tech for tech in techs):
@@ -192,11 +230,22 @@ class ScannerStage(Stage):
                 urls = info.get("urls", [])
                 for url in urls:
                     path = urlparse(url).path.lower()
-                    if any(token in path for token in ("/wp-", "/wp-admin", "/wp-content", "/wp-json", "/xmlrpc.php")):
+                    if any(
+                        token in path
+                        for token in (
+                            "/wp-",
+                            "/wp-admin",
+                            "/wp-content",
+                            "/wp-json",
+                            "/xmlrpc.php",
+                        )
+                    ):
                         return True
                 return False
 
-            wp_hosts = [host for host, info in host_info.items() if is_wordpress(info, host)]
+            wp_hosts = [
+                host for host, info in host_info.items() if is_wordpress(info, host)
+            ]
             wp_hosts = wp_hosts[: runtime.max_scanner_hosts]
             findings = []
             for host in wp_hosts:
@@ -210,8 +259,12 @@ class ScannerStage(Stage):
                     scanner_dir,
                     runtime.scanner_timeout,
                     enumerate=getattr(runtime, "wpscan_enumerate", None),
-                    plugins_detection=getattr(runtime, "wpscan_plugins_detection", None),
-                    random_user_agent=bool(getattr(runtime, "wpscan_random_user_agent", True)),
+                    plugins_detection=getattr(
+                        runtime, "wpscan_plugins_detection", None
+                    ),
+                    random_user_agent=bool(
+                        getattr(runtime, "wpscan_random_user_agent", True)
+                    ),
                     max_threads=int(getattr(runtime, "wpscan_max_threads", 0) or 0),
                     api_token=getattr(runtime, "wpscan_api_token", None),
                 )
@@ -230,5 +283,7 @@ class ScannerStage(Stage):
             context.manager.update_metadata(context.record)
             context.logger.info(
                 "Scanner summary: %s",
-                ", ".join(f"{name}:{data['findings']}" for name, data in summary.items()),
+                ", ".join(
+                    f"{name}:{data['findings']}" for name, data in summary.items()
+                ),
             )

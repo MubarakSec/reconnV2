@@ -17,7 +17,11 @@ class FuzzStage(Stage):
 
     def is_enabled(self, context: PipelineContext) -> bool:
         spec = context.record.spec
-        if not context.runtime_config.enable_fuzz and not context.runtime_config.enable_param_fuzz and not spec.wordlist:
+        if (
+            not context.runtime_config.enable_fuzz
+            and not context.runtime_config.enable_param_fuzz
+            and not spec.wordlist
+        ):
             return False
         return spec.profile in {"full", "fuzz-only"} or bool(spec.wordlist)
 
@@ -106,7 +110,9 @@ class FuzzStage(Stage):
                     limit=fuzz_param_max_words,
                 )
                 if param_wordlist and param_wordlist.exists():
-                    param_artifact = context.record.paths.artifact(f"ffuf_params_{host}.json")
+                    param_artifact = context.record.paths.artifact(
+                        f"ffuf_params_{host}.json"
+                    )
                     param_cmd = [
                         "ffuf",
                         "-w",
@@ -123,7 +129,9 @@ class FuzzStage(Stage):
                         "-o",
                         str(param_artifact),
                     ]
-                    if self._run_ffuf(context, param_cmd, tool_timeout, runtime, host=host):
+                    if self._run_ffuf(
+                        context, param_cmd, tool_timeout, runtime, host=host
+                    ):
                         self._ingest_ffuf_results(
                             context,
                             param_artifact,
@@ -138,7 +146,9 @@ class FuzzStage(Stage):
         results_path = context.record.paths.results_jsonl
         if not results_path.exists():
             return []
-        soft_404_hosts = set(context.record.metadata.stats.get("soft_404", {}).get("hosts", []))
+        soft_404_hosts = set(
+            context.record.metadata.stats.get("soft_404", {}).get("hosts", [])
+        )
         for entry in read_jsonl(results_path):
             if entry.get("type") == "url" and entry.get("status_code") in {200, 204}:
                 url_value = entry.get("url")
@@ -151,7 +161,10 @@ class FuzzStage(Stage):
         adjusted: Dict[str, int] = {}
         for host, score in hosts.items():
             host_signals = signals.get("by_host", {}).get(host, set())
-            if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
+            if (
+                "waf_detected" in host_signals
+                and "waf_bypass_possible" not in host_signals
+            ):
                 score = max(score - 20, 0)
             if "api_surface" in host_signals:
                 score += 10
@@ -163,9 +176,16 @@ class FuzzStage(Stage):
         sorted_hosts = sorted(adjusted.items(), key=lambda item: item[1], reverse=True)
         return [host for host, _ in sorted_hosts]
 
-    def _collect_fuzz_metadata(self, context: PipelineContext) -> Dict[str, Dict[str, object]]:
+    def _collect_fuzz_metadata(
+        self, context: PipelineContext
+    ) -> Dict[str, Dict[str, object]]:
         metadata: Dict[str, Dict[str, object]] = defaultdict(
-            lambda: {"path_words": set(), "param_words": set(), "base_url": None, "base_score": -1}
+            lambda: {
+                "path_words": set(),
+                "param_words": set(),
+                "base_url": None,
+                "base_score": -1,
+            }
         )
         results_path = context.record.paths.results_jsonl
         if not results_path.exists():
@@ -183,7 +203,9 @@ class FuzzStage(Stage):
                 if score > int(metadata[host].get("base_score", -1)):
                     metadata[host]["base_url"] = url_value
                     metadata[host]["base_score"] = score
-                self._add_path_words(metadata[host]["path_words"], urlparse(url_value).path)
+                self._add_path_words(
+                    metadata[host]["path_words"], urlparse(url_value).path
+                )
             elif etype == "form":
                 action = entry.get("action") or entry.get("url")
                 if not action:
@@ -191,7 +213,9 @@ class FuzzStage(Stage):
                 host = urlparse(action).hostname
                 if not host:
                     continue
-                self._add_path_words(metadata[host]["path_words"], urlparse(action).path)
+                self._add_path_words(
+                    metadata[host]["path_words"], urlparse(action).path
+                )
             elif etype == "parameter":
                 name = entry.get("name")
                 if not name:
@@ -300,7 +324,9 @@ class FuzzStage(Stage):
             combined.append(line)
             seen.add(line)
         if base_wordlist.exists():
-            for line in base_wordlist.read_text(encoding="utf-8", errors="ignore").splitlines():
+            for line in base_wordlist.read_text(
+                encoding="utf-8", errors="ignore"
+            ).splitlines():
                 line = line.strip()
                 if not line or line in seen:
                     continue
@@ -313,7 +339,14 @@ class FuzzStage(Stage):
         combined_path.write_text("\n".join(combined) + "\n", encoding="utf-8")
         return combined_path
 
-    def _run_ffuf(self, context: PipelineContext, cmd: List[str], tool_timeout: int, runtime, host: str = None) -> bool:
+    def _run_ffuf(
+        self,
+        context: PipelineContext,
+        cmd: List[str],
+        tool_timeout: int,
+        runtime,
+        host: str = None,
+    ) -> bool:
         try:
             ffuf_maxtime = max(0, int(getattr(runtime, "ffuf_maxtime", 0)))
             if ffuf_maxtime:
@@ -321,7 +354,11 @@ class FuzzStage(Stage):
 
             # Apply soft 404 filters if detected for this host
             if host:
-                soft_404_data = context.record.metadata.stats.get("soft_404", {}).get("fingerprints", {}).get(host)
+                soft_404_data = (
+                    context.record.metadata.stats.get("soft_404", {})
+                    .get("fingerprints", {})
+                    .get(host)
+                )
                 if soft_404_data:
                     size = soft_404_data.get("length")
                     words = soft_404_data.get("word_count")
@@ -332,18 +369,27 @@ class FuzzStage(Stage):
 
             timeout = tool_timeout
             if ffuf_maxtime:
-                timeout = ffuf_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
+                timeout = ffuf_maxtime + max(
+                    0, int(getattr(runtime, "ffuf_timeout_buffer", 30))
+                )
             context.executor.run(cmd, check=False, timeout=timeout)
             return True
         except CommandError as exc:
             retried = False
-            if getattr(runtime, "ffuf_retry_on_timeout", True) and "timeout" in str(exc).lower():
+            if (
+                getattr(runtime, "ffuf_retry_on_timeout", True)
+                and "timeout" in str(exc).lower()
+            ):
                 retry_maxtime = max(
                     ffuf_maxtime + int(getattr(runtime, "ffuf_retry_extra_time", 120)),
                     ffuf_maxtime,
                 )
-                retry_threads = max(10, int(context.runtime_config.ffuf_threads // 2) or 10)
-                retry_cmd = [part for part in cmd if part not in {"-maxtime", str(ffuf_maxtime)}]
+                retry_threads = max(
+                    10, int(context.runtime_config.ffuf_threads // 2) or 10
+                )
+                retry_cmd = [
+                    part for part in cmd if part not in {"-maxtime", str(ffuf_maxtime)}
+                ]
                 retry_cmd = list(retry_cmd)
                 if "-t" in retry_cmd:
                     t_idx = retry_cmd.index("-t") + 1
@@ -351,14 +397,19 @@ class FuzzStage(Stage):
                         retry_cmd[t_idx] = str(retry_threads)
                 if retry_maxtime:
                     retry_cmd.extend(["-maxtime", str(retry_maxtime)])
-                retry_timeout = retry_maxtime + max(0, int(getattr(runtime, "ffuf_timeout_buffer", 30)))
+                retry_timeout = retry_maxtime + max(
+                    0, int(getattr(runtime, "ffuf_timeout_buffer", 30))
+                )
                 try:
                     context.executor.run(retry_cmd, check=False, timeout=retry_timeout)
                     retried = True
                 except CommandError:
                     pass
             if not retried:
-                context.logger.warning("ffuf failed for %s", cmd[cmd.index("-u") + 1] if "-u" in cmd else "target")
+                context.logger.warning(
+                    "ffuf failed for %s",
+                    cmd[cmd.index("-u") + 1] if "-u" in cmd else "target",
+                )
             return retried
 
     def _ingest_ffuf_results(
@@ -415,7 +466,9 @@ class FuzzStage(Stage):
             url_value = entry.get("url")
             host = None
             if entry_type == "url":
-                host = entry.get("hostname") or (urlparse(url_value).hostname if url_value else None)
+                host = entry.get("hostname") or (
+                    urlparse(url_value).hostname if url_value else None
+                )
             elif entry_type in {"hostname", "cms"}:
                 host = entry.get("hostname")
             if not host:
@@ -426,7 +479,16 @@ class FuzzStage(Stage):
                 path = urlparse(url_value).path.lower()
                 if "/api" in path:
                     tags_by_host[host].add("service:api")
-                if any(token in path for token in ("/wp-", "/wp-admin", "/wp-content", "/wp-json", "/xmlrpc.php")):
+                if any(
+                    token in path
+                    for token in (
+                        "/wp-",
+                        "/wp-admin",
+                        "/wp-content",
+                        "/wp-json",
+                        "/xmlrpc.php",
+                    )
+                ):
                     tags_by_host[host].add("cms:wordpress")
         signals = context.signal_index()
         for host, host_signals in signals.get("by_host", {}).items():
@@ -440,28 +502,39 @@ class FuzzStage(Stage):
         base = runtime.seclists_root
         candidates: List[Path] = []
         if "cms:wordpress" in tags or "tech:wordpress" in tags:
-            candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "wordpress.fuzz.txt")
+            candidates.append(
+                base / "Discovery" / "Web-Content" / "CMS" / "wordpress.fuzz.txt"
+            )
         if "cms:drupal" in tags:
             candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "drupal.txt")
         if "cms:joomla" in tags:
             candidates.append(base / "Discovery" / "Web-Content" / "CMS" / "joomla.txt")
         if "service:api" in tags:
-            candidates.append(base / "Discovery" / "Web-Content" / "api" / "common-api-endpoints.txt")
-        if tags.intersection({"surface:login", "surface:password-reset", "surface:register"}):
+            candidates.append(
+                base / "Discovery" / "Web-Content" / "api" / "common-api-endpoints.txt"
+            )
+        if tags.intersection(
+            {"surface:login", "surface:password-reset", "surface:register"}
+        ):
             candidates.append(base / "Discovery" / "Web-Content" / "Logins.fuzz.txt")
         if "surface:admin" in tags:
             candidates.append(base / "Discovery" / "Web-Content" / "admin.txt")
         candidates.append(base / "Discovery" / "Web-Content" / "raft-medium-words.txt")
-        candidates.append(base / "Discovery" / "Web-Content" / "raft-medium-directories.txt")
+        candidates.append(
+            base / "Discovery" / "Web-Content" / "raft-medium-directories.txt"
+        )
         for candidate in candidates:
             if candidate.exists():
                 return candidate
         fallback_path = base / "Discovery" / "Web-Content" / "common.txt"
         if not fallback_path.exists():
             import tempfile
+
             tmp_path = Path(tempfile.gettempdir()) / "recon_default_wordlist.txt"
             if not tmp_path.exists():
-                tmp_path.write_text("admin\nlogin\napi\nconfig\n.env\ntest\nbackup\n", encoding="utf-8")
+                tmp_path.write_text(
+                    "admin\nlogin\napi\nconfig\n.env\ntest\nbackup\n", encoding="utf-8"
+                )
             return tmp_path
         return fallback_path
 
@@ -475,7 +548,9 @@ class FuzzStage(Stage):
         for candidate in candidates:
             if candidate.exists():
                 words: Set[str] = set()
-                for line in candidate.read_text(encoding="utf-8", errors="ignore").splitlines():
+                for line in candidate.read_text(
+                    encoding="utf-8", errors="ignore"
+                ).splitlines():
                     line = line.strip()
                     if not line or line.startswith("#"):
                         continue

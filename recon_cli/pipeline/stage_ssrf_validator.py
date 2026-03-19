@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+import requests
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -17,7 +18,17 @@ from recon_cli.utils.oast import InteractshSession
 class SSRFValidatorStage(Stage):
     name = "ssrf_validator"
 
-    SSRF_PARAMS = {"url", "uri", "link", "host", "domain", "site", "callback", "dest", "next"}
+    SSRF_PARAMS = {
+        "url",
+        "uri",
+        "link",
+        "host",
+        "domain",
+        "site",
+        "callback",
+        "dest",
+        "next",
+    }
     INTERNAL_PAYLOADS = (
         "http://127.0.0.1/",
         "http://localhost/",
@@ -64,10 +75,20 @@ class SSRFValidatorStage(Stage):
             per_host=float(getattr(runtime, "ssrf_validator_per_host_rps", 0)),
         )
 
-        candidates = self._collect_candidates(context, min_score=min_score, max_urls=max_urls, max_per_host=max_per_host)
+        candidates = self._collect_candidates(
+            context, min_score=min_score, max_urls=max_urls, max_per_host=max_per_host
+        )
         stats = context.record.metadata.stats.setdefault("ssrf_validator", {})
         if not candidates:
-            stats.update({"attempted": 0, "confirmed": 0, "failed": 0, "skipped": 0, "candidates": 0})
+            stats.update(
+                {
+                    "attempted": 0,
+                    "confirmed": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "candidates": 0,
+                }
+            )
             context.manager.update_metadata(context.record)
             context.logger.info("No SSRF validator candidates")
             return
@@ -88,13 +109,19 @@ class SSRFValidatorStage(Stage):
             session = InteractshSession(
                 output_path,
                 logger=context.logger,
-                wait_seconds=int(getattr(runtime, "ssrf_validator_oast_wait_seconds", 45)),
-                poll_interval=int(getattr(runtime, "ssrf_validator_oast_poll_interval", 5)),
+                wait_seconds=int(
+                    getattr(runtime, "ssrf_validator_oast_wait_seconds", 45)
+                ),
+                poll_interval=int(
+                    getattr(runtime, "ssrf_validator_oast_poll_interval", 5)
+                ),
                 timeout=8,
                 domain_override=getattr(runtime, "oast_domain", None),
             )
             if not session.start():
-                context.logger.warning("SSRF OAST session failed; skipping callback validation")
+                context.logger.warning(
+                    "SSRF OAST session failed; skipping callback validation"
+                )
                 note_missing_tool(context, "interactsh-client")
             else:
                 try:
@@ -109,15 +136,21 @@ class SSRFValidatorStage(Stage):
                         oast_url = session.make_url(token)
                         if not oast_url:
                             continue
-                        test_url, method, data, json_body = self._prepare_payload_request(entry, oast_url)
+                        test_url, method, data, json_body = (
+                            self._prepare_payload_request(entry, oast_url)
+                        )
                         if not context.url_allowed(test_url):
                             skipped += 1
                             continue
-                        if limiter and not limiter.wait_for_slot(test_url, timeout=timeout):
+                        if limiter and not limiter.wait_for_slot(
+                            test_url, timeout=timeout
+                        ):
                             skipped += 1
                             continue
                         attempted += 1
-                        headers = context.auth_headers({"User-Agent": "recon-cli ssrf-validator-oast"})
+                        headers = context.auth_headers(
+                            {"User-Agent": "recon-cli ssrf-validator-oast"}
+                        )
                         session_http = context.auth_session(test_url)
                         resp = self._request_with_retries(
                             requests,
@@ -162,7 +195,9 @@ class SSRFValidatorStage(Stage):
                         resp.close()
 
                     if oast_tokens:
-                        collected = session.collect_interactions(list(oast_tokens.keys()))
+                        collected = session.collect_interactions(
+                            list(oast_tokens.keys())
+                        )
                         interactions = [interaction.raw for interaction in collected]
                         for interaction in collected:
                             info = oast_tokens.get(interaction.token)
@@ -214,9 +249,11 @@ class SSRFValidatorStage(Stage):
                 key = (url, param)
                 if key in confirmed_keys:
                     continue
-                baseline_url, baseline_method, baseline_data, baseline_json = self._prepare_payload_request(
-                    entry,
-                    "https://example.com/",
+                baseline_url, baseline_method, baseline_data, baseline_json = (
+                    self._prepare_payload_request(
+                        entry,
+                        "https://example.com/",
+                    )
                 )
                 baseline_status, baseline_body = self._fetch_response(
                     context,
@@ -233,7 +270,9 @@ class SSRFValidatorStage(Stage):
                     limiter=limiter,
                 )
                 for payload in self.INTERNAL_PAYLOADS:
-                    test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
+                    test_url, method, data, json_body = self._prepare_payload_request(
+                        entry, payload
+                    )
                     if not context.url_allowed(test_url):
                         skipped += 1
                         continue
@@ -255,7 +294,12 @@ class SSRFValidatorStage(Stage):
                     if status == 0 and body == "":
                         failed += 1
                         continue
-                    matched = self._looks_internal(body, baseline_body=baseline_body, status=status, baseline_status=baseline_status)
+                    matched = self._looks_internal(
+                        body,
+                        baseline_body=baseline_body,
+                        status=status,
+                        baseline_status=baseline_status,
+                    )
                     probes.append(
                         {
                             "type": "ssrf_internal_probe",
@@ -371,17 +415,33 @@ class SSRFValidatorStage(Stage):
                 if candidate_key in seen:
                     continue
                 seen.add(candidate_key)
-                grouped[host].append({"url": url, "param": name, "location": "query", "method": method, "score": score})
+                grouped[host].append(
+                    {
+                        "url": url,
+                        "param": name,
+                        "location": "query",
+                        "method": method,
+                        "score": score,
+                    }
+                )
 
             finding_type = str(entry.get("finding_type") or "").lower()
             if finding_type == "ssrf":
-                param_name = str(entry.get("parameter") or entry.get("param") or "url").lower()
+                param_name = str(
+                    entry.get("parameter") or entry.get("param") or "url"
+                ).lower()
                 if param_name in self.SSRF_PARAMS:
                     candidate_key = (url, param_name, "query", method)
                     if candidate_key not in seen:
                         seen.add(candidate_key)
                         grouped[host].append(
-                            {"url": url, "param": param_name, "location": "query", "method": method, "score": max(score, 80)}
+                            {
+                                "url": url,
+                                "param": param_name,
+                                "location": "query",
+                                "method": method,
+                                "score": max(score, 80),
+                            }
                         )
 
         selected: List[Dict[str, object]] = []
@@ -465,7 +525,7 @@ class SSRFValidatorStage(Stage):
             except requests.exceptions.RequestException:
                 if attempt >= retries:
                     return None
-                delay = backoff_base * (backoff_factor ** attempt)
+                delay = backoff_base * (backoff_factor**attempt)
                 time.sleep(max(0.1, delay))
                 attempt += 1
         return None
@@ -488,7 +548,9 @@ class SSRFValidatorStage(Stage):
     ) -> Tuple[int, str]:
         if limiter and not limiter.wait_for_slot(url, timeout=timeout):
             return 0, ""
-        headers = context.auth_headers({"User-Agent": "recon-cli ssrf-validator-internal"})
+        headers = context.auth_headers(
+            {"User-Agent": "recon-cli ssrf-validator-internal"}
+        )
         session_http = context.auth_session(url)
         resp = self._request_with_retries(
             requests_mod,

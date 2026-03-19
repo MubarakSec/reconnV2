@@ -63,21 +63,74 @@ class JSIntelligenceStage(Stage):
         re.IGNORECASE,
     )
     QUERY_PARAM_PATTERN = re.compile(r"[?&]([a-zA-Z_][a-zA-Z0-9_-]{1,40})=")
-    PARAM_BLOCK_PATTERN = re.compile(r"(?:params|query|variables)\s*:\s*\{([^}]*)\}", re.IGNORECASE | re.DOTALL)
+    PARAM_BLOCK_PATTERN = re.compile(
+        r"(?:params|query|variables)\s*:\s*\{([^}]*)\}", re.IGNORECASE | re.DOTALL
+    )
     PARAM_KEY_PATTERN = re.compile(r"([a-zA-Z_][a-zA-Z0-9_-]{1,40})\s*:")
     GRAPHQL_ENDPOINT_PATTERN = re.compile(r"/graphql\b|/gql\b", re.IGNORECASE)
-    GRAPHQL_OPERATION_NAME_PATTERN = re.compile(r"operationName\s*[:=]\s*[\"']([A-Za-z0-9_]{2,})[\"']")
-    GRAPHQL_OPERATION_PATTERN = re.compile(r"\b(query|mutation|subscription)\s+([A-Za-z0-9_]{2,})")
-    PERSISTED_QUERY_PATTERN = re.compile(r"sha256Hash\s*[:=]\s*[\"']([a-fA-F0-9]{16,64})[\"']")
+    GRAPHQL_OPERATION_NAME_PATTERN = re.compile(
+        r"operationName\s*[:=]\s*[\"']([A-Za-z0-9_]{2,})[\"']"
+    )
+    GRAPHQL_OPERATION_PATTERN = re.compile(
+        r"\b(query|mutation|subscription)\s+([A-Za-z0-9_]{2,})"
+    )
+    PERSISTED_QUERY_PATTERN = re.compile(
+        r"sha256Hash\s*[:=]\s*[\"']([a-fA-F0-9]{16,64})[\"']"
+    )
     SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
-    AUTH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "register", "password", "reset", "forgot", "auth", "oauth", "sso")
-    ADMIN_HINTS = ("admin", "dashboard", "console", "manage", "staff", "internal", "superuser")
+    AUTH_HINTS = (
+        "login",
+        "signin",
+        "sign-in",
+        "signup",
+        "sign-up",
+        "register",
+        "password",
+        "reset",
+        "forgot",
+        "auth",
+        "oauth",
+        "sso",
+    )
+    ADMIN_HINTS = (
+        "admin",
+        "dashboard",
+        "console",
+        "manage",
+        "staff",
+        "internal",
+        "superuser",
+    )
     ACCOUNT_HINTS = ("account", "profile", "user", "customer", "member")
-    BILLING_HINTS = ("billing", "invoice", "payment", "stripe", "checkout", "subscription", "plan")
-    PII_HINTS = ("ssn", "passport", "token", "secret", "apikey", "api-key", "credit", "card")
+    BILLING_HINTS = (
+        "billing",
+        "invoice",
+        "payment",
+        "stripe",
+        "checkout",
+        "subscription",
+        "plan",
+    )
+    PII_HINTS = (
+        "ssn",
+        "passport",
+        "token",
+        "secret",
+        "apikey",
+        "api-key",
+        "credit",
+        "card",
+    )
     INTERNAL_HINTS = ("internal", "intranet", "employee", "corp", "backoffice")
     DEBUG_HINTS = ("debug", "trace", "health", "metrics", "status", "actuator")
-    UPLOAD_HINTS = ("upload", "file", "attachment", "media", "avatar", "profile-picture")
+    UPLOAD_HINTS = (
+        "upload",
+        "file",
+        "attachment",
+        "media",
+        "avatar",
+        "profile-picture",
+    )
     CONFIG_HINTS = ("config", "settings", "env", "secrets", "apikey", "token", "jwt")
     GRAPHQL_HINTS = ("graphql", "graphiql", "apollo", "gql")
     WS_HINTS = ("ws", "websocket", "socket", "socket.io", "sockjs", "live", "stream")
@@ -151,7 +204,10 @@ class JSIntelligenceStage(Stage):
                     continue
                 if not context.url_in_scope(url):
                     continue
-                if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
+                if (
+                    url.lower().endswith(".js")
+                    or "javascript" in str(entry.get("content_type", "")).lower()
+                ):
                     if entry.get("status_code") in {200, 302}:
                         direct_js_urls.append(url)
                         if url not in js_url_bases:
@@ -185,8 +241,12 @@ class JSIntelligenceStage(Stage):
         max_files = int(getattr(context.runtime_config, "js_intel_max_files", 40))
         timeout = int(getattr(context.runtime_config, "js_intel_timeout", 12))
         max_urls = int(getattr(context.runtime_config, "js_intel_max_urls", 120))
-        include_dynamic = bool(getattr(context.runtime_config, "js_intel_extract_dynamic_routes", True))
-        include_hidden = bool(getattr(context.runtime_config, "js_intel_extract_hidden_params", True))
+        include_dynamic = bool(
+            getattr(context.runtime_config, "js_intel_extract_dynamic_routes", True)
+        )
+        include_hidden = bool(
+            getattr(context.runtime_config, "js_intel_extract_hidden_params", True)
+        )
         runtime = context.runtime_config
         limiter = context.get_rate_limiter(
             "js_intel",
@@ -293,10 +353,20 @@ class JSIntelligenceStage(Stage):
                             limiter.on_error(source_map)
                         pass
             endpoints = self._normalize_candidates(extraction.endpoints)
-            graphql_candidates = set(self._normalize_candidates(extraction.graphql_endpoints))
+            graphql_candidates = set(
+                self._normalize_candidates(extraction.graphql_endpoints)
+            )
             ws_candidates = set(self._normalize_candidates(extraction.ws_endpoints))
-            combined_candidates = endpoints + [candidate for candidate in sorted(ws_candidates) if candidate not in endpoints]
-            combined_candidates = [candidate for candidate in combined_candidates if context.url_in_scope(candidate)]
+            combined_candidates = endpoints + [
+                candidate
+                for candidate in sorted(ws_candidates)
+                if candidate not in endpoints
+            ]
+            combined_candidates = [
+                candidate
+                for candidate in combined_candidates
+                if context.url_in_scope(candidate)
+            ]
             combined_candidates = combined_candidates[:max_urls]
             endpoint_set = set(combined_candidates)
             graphql_candidates &= endpoint_set
@@ -362,7 +432,9 @@ class JSIntelligenceStage(Stage):
                         source="js-intel",
                         tags=["source:js"],
                     )
-                    if tags.intersection({"surface:login", "surface:register", "surface:password-reset"}):
+                    if tags.intersection(
+                        {"surface:login", "surface:register", "surface:password-reset"}
+                    ):
                         context.emit_signal(
                             "auth_surface",
                             "url",
@@ -402,7 +474,9 @@ class JSIntelligenceStage(Stage):
                             tags=sorted(tags),
                             evidence={"url": endpoint},
                         )
-                    if tags.intersection({"surface:billing", "surface:pii", "surface:account"}):
+                    if tags.intersection(
+                        {"surface:billing", "surface:pii", "surface:account"}
+                    ):
                         context.emit_signal(
                             "sensitive_surface",
                             "url",
@@ -412,7 +486,9 @@ class JSIntelligenceStage(Stage):
                             tags=sorted(tags),
                             evidence={"url": endpoint},
                         )
-                    if ("/api" in path or "/graphql" in path) and host not in signaled_hosts:
+                    if (
+                        "/api" in path or "/graphql" in path
+                    ) and host not in signaled_hosts:
                         context.emit_signal(
                             "api_surface",
                             "host",
@@ -425,18 +501,24 @@ class JSIntelligenceStage(Stage):
                         signaled_hosts.add(host)
         if artifacts:
             artifact_path = context.record.paths.artifact("js_intel.json")
-            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            artifact_path.write_text(
+                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+            )
             context.set_data("js_endpoints", discovered_urls)
             if hidden_param_hints:
                 # Convert sets to lists for JSON serialization
-                serializable_hints = {k: sorted(v) for k, v in hidden_param_hints.items()}
+                serializable_hints = {
+                    k: sorted(v) for k, v in hidden_param_hints.items()
+                }
                 context.set_data("js_param_hints", serializable_hints)
             if graphql_endpoints:
                 context.set_data("js_graphql_endpoints", sorted(graphql_endpoints))
             if graphql_operations:
                 context.set_data("js_graphql_operations", sorted(graphql_operations))
             if persisted_query_hints:
-                context.set_data("js_persisted_query_hints", sorted(persisted_query_hints))
+                context.set_data(
+                    "js_persisted_query_hints", sorted(persisted_query_hints)
+                )
             if ws_endpoints:
                 context.set_data("js_ws_endpoints", sorted(ws_endpoints))
             if high_value_strings:
@@ -467,7 +549,9 @@ class JSIntelligenceStage(Stage):
             tags.add("service:api")
         if self._is_graphql_candidate(path):
             tags.add("api:graphql")
-        if any(hint in path for hint in self.SPEC_HINTS) and path.endswith((".json", ".yaml", ".yml")):
+        if any(hint in path for hint in self.SPEC_HINTS) and path.endswith(
+            (".json", ".yaml", ".yml")
+        ):
             tags.add("api:spec")
         if any(hint in path for hint in self.AUTH_HINTS):
             tags.add("surface:login")
@@ -540,7 +624,9 @@ class JSIntelligenceStage(Stage):
             normalized.append(norm)
         return normalized
 
-    def _extract_surface_from_blob(self, content: str, *, base_url: str, include_dynamic: bool) -> _JSSurfaceExtraction:
+    def _extract_surface_from_blob(
+        self, content: str, *, base_url: str, include_dynamic: bool
+    ) -> _JSSurfaceExtraction:
         extraction = _JSSurfaceExtraction()
         for absolute in self.ENDPOINT_PATTERN.findall(content):
             extraction.endpoints.add(absolute)

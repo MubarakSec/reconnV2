@@ -26,7 +26,9 @@ class LearningStage(Stage):
     def execute(self, context: PipelineContext) -> None:
         features_path = context.record.paths.artifact("correlation/features.json")
         if not features_path.exists():
-            context.logger.info("No correlation features found; skipping learning stage")
+            context.logger.info(
+                "No correlation features found; skipping learning stage"
+            )
             return
         try:
             features_payload = json.loads(features_path.read_text(encoding="utf-8"))
@@ -34,11 +36,15 @@ class LearningStage(Stage):
             context.logger.warning("Invalid features artifact; skipping learning stage")
             return
         if not isinstance(features_payload, dict):
-            context.logger.warning("Unexpected features format; skipping learning stage")
+            context.logger.warning(
+                "Unexpected features format; skipping learning stage"
+            )
             return
 
         if DatasetStore is None or HostFeatures is None or LearningModel is None:
-            context.logger.warning("Learning dependencies unavailable; skipping learning stage")
+            context.logger.warning(
+                "Learning dependencies unavailable; skipping learning stage"
+            )
             return
 
         learning_root = config.RECON_HOME / "learning"
@@ -62,14 +68,20 @@ class LearningStage(Stage):
             trained = model.train(labeled) if labeled else False
             predictions = model.predict(host_features)
         except Exception as exc:  # pragma: no cover - optional dependency
-            context.logger.warning("Learning model unavailable; skipping learning stage: %s", exc)
+            context.logger.warning(
+                "Learning model unavailable; skipping learning stage: %s", exc
+            )
             return
 
         artifacts_dir = context.record.paths.ensure_subdir("learning")
         predictions_path = artifacts_dir / "predictions.json"
         if predictions:
-            predictions_path.write_text(json.dumps(predictions, indent=2, sort_keys=True), encoding="utf-8")
-            for host, probability in sorted(predictions.items(), key=lambda item: item[1], reverse=True):
+            predictions_path.write_text(
+                json.dumps(predictions, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            for host, probability in sorted(
+                predictions.items(), key=lambda item: item[1], reverse=True
+            ):
                 context.results.append(
                     {
                         "type": "learning_prediction",
@@ -88,7 +100,9 @@ class LearningStage(Stage):
         if predictions:
             stats["top_hosts"] = [
                 [host, float(prob)]
-                for host, prob in sorted(predictions.items(), key=lambda item: item[1], reverse=True)[:5]
+                for host, prob in sorted(
+                    predictions.items(), key=lambda item: item[1], reverse=True
+                )[:5]
             ]
         context.manager.update_metadata(context.record)
         context.logger.info(

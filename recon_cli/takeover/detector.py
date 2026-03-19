@@ -53,11 +53,18 @@ class TakeoverDetector:
         self.timeout = timeout
         self.verify_tls = verify_tls
 
-    def check_host(self, hostname: str, providers: Optional[Set[str]] = None) -> Optional[TakeoverFinding]:
+    def check_host(
+        self, hostname: str, providers: Optional[Set[str]] = None
+    ) -> Optional[TakeoverFinding]:
         urls = [f"http://{hostname}", f"https://{hostname}"]
         for url in urls:
             try:
-                resp = self.session.get(url, timeout=self.timeout, allow_redirects=True, verify=self.verify_tls)
+                resp = self.session.get(
+                    url,
+                    timeout=self.timeout,
+                    allow_redirects=True,
+                    verify=self.verify_tls,
+                )
             except requests.RequestException:
                 continue
             body = (resp.text or "")[:2000]
@@ -74,4 +81,3 @@ class TakeoverDetector:
                             matched_url=url,
                         )
         return None
-

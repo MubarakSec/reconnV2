@@ -35,13 +35,23 @@ _SENSITIVE_KEYS = [
 
 _KEY_PATTERN = "|".join(re.escape(key) for key in _SENSITIVE_KEYS)
 
-_HEADER_PATTERN = re.compile(r'(?i)(\b(?:{keys})\b\s*[:=]\s*)([^\r\n]+)'.format(keys=_KEY_PATTERN))
-_JSON_DOUBLE_PATTERN = re.compile(r'(?i)("(?:{keys})"\s*:\s*")([^"\r\n]*)(")'.format(keys=_KEY_PATTERN))
-_JSON_SINGLE_PATTERN = re.compile(r"(?i)('(?:{keys})'\s*:\s*')([^'\r\n]*)(')".format(keys=_KEY_PATTERN))
-_ASSIGN_PATTERN = re.compile(r"(?i)(\b(?:{keys})\b\s*(?:=|:)\s*)([^\s,'\";]+)".format(keys=_KEY_PATTERN))
-_QUERY_PATTERN = re.compile(r'(?i)((?:\?|&)(?:{keys})=)([^&\s]+)'.format(keys=_KEY_PATTERN))
-_BEARER_PATTERN = re.compile(r'(?i)(bearer\s+)([A-Za-z0-9._\-]+)')
-_BASIC_PATTERN = re.compile(r'(?i)(basic\s+)([A-Za-z0-9+/=]+)')
+_HEADER_PATTERN = re.compile(
+    r"(?i)(\b(?:{keys})\b\s*[:=]\s*)([^\r\n]+)".format(keys=_KEY_PATTERN)
+)
+_JSON_DOUBLE_PATTERN = re.compile(
+    r'(?i)("(?:{keys})"\s*:\s*")([^"\r\n]*)(")'.format(keys=_KEY_PATTERN)
+)
+_JSON_SINGLE_PATTERN = re.compile(
+    r"(?i)('(?:{keys})'\s*:\s*')([^'\r\n]*)(')".format(keys=_KEY_PATTERN)
+)
+_ASSIGN_PATTERN = re.compile(
+    r"(?i)(\b(?:{keys})\b\s*(?:=|:)\s*)([^\s,'\";]+)".format(keys=_KEY_PATTERN)
+)
+_QUERY_PATTERN = re.compile(
+    r"(?i)((?:\?|&)(?:{keys})=)([^&\s]+)".format(keys=_KEY_PATTERN)
+)
+_BEARER_PATTERN = re.compile(r"(?i)(bearer\s+)([A-Za-z0-9._\-]+)")
+_BASIC_PATTERN = re.compile(r"(?i)(basic\s+)([A-Za-z0-9+/=]+)")
 _CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 _REPLACEMENTS: Sequence[Tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = (
@@ -92,7 +102,9 @@ def sanitize_text(value: Any, *, collapse_ws: bool = False) -> str:
     if value is None:
         return ""
     if isinstance(value, (dict, list, tuple)):
-        text = json.dumps(redact_json_value(value), ensure_ascii=True, separators=(",", ":"))
+        text = json.dumps(
+            redact_json_value(value), ensure_ascii=True, separators=(",", ":")
+        )
     else:
         text = redact(str(value)) or ""
     text = _CONTROL_CHARS_PATTERN.sub(" ", text)

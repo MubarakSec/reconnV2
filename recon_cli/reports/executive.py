@@ -95,13 +95,13 @@ def _is_finding_entry(finding: Dict[str, Any]) -> bool:
 
 class RiskLevel(Enum):
     """Risk assessment levels."""
-    
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
     MINIMAL = "minimal"
-    
+
     @property
     def color(self) -> str:
         """Get color for risk level."""
@@ -113,7 +113,7 @@ class RiskLevel(Enum):
             RiskLevel.MINIMAL: "#10b981",
         }
         return colors.get(self, "#6b7280")
-    
+
     @property
     def score_range(self) -> Tuple[float, float]:
         """Get score range for risk level."""
@@ -130,18 +130,18 @@ class RiskLevel(Enum):
 @dataclass
 class RiskScore:
     """Risk assessment score."""
-    
+
     score: float  # 0-10 scale
     level: RiskLevel
     factors: List[str] = field(default_factory=list)
     trend: str = "stable"  # improving, stable, degrading
-    
+
     @classmethod
     def calculate(cls, findings: List[Dict[str, Any]]) -> "RiskScore":
         """Calculate risk score from findings."""
         if not findings:
             return cls(score=0.0, level=RiskLevel.MINIMAL)
-        
+
         # Weight by severity
         severity_weights = {
             "critical": 10.0,
@@ -150,24 +150,29 @@ class RiskScore:
             "low": 1.5,
             "info": 0.5,
         }
-        
+
         total_weight = 0.0
         factors = []
-        
+
         for finding in findings:
             severity = _resolve_severity(finding)
             weight = severity_weights.get(severity, 0.5)
             total_weight += weight
-            
+
             # Track significant factors
             if severity in ("critical", "high"):
-                title = finding.get("title") or finding.get("description") or _resolve_finding_type(finding)
+                title = (
+                    finding.get("title")
+                    or finding.get("description")
+                    or _resolve_finding_type(finding)
+                )
                 factors.append(f"{severity.title()}: {title}")
-        
+
         # Normalize score (logarithmic scale to prevent extreme values)
         import math
+
         score = min(10.0, math.log1p(total_weight) * 2)
-        
+
         # Determine level
         level = RiskLevel.MINIMAL
         for risk_level in RiskLevel:
@@ -175,18 +180,18 @@ class RiskScore:
             if low <= score <= high:
                 level = risk_level
                 break
-        
+
         return cls(
             score=round(score, 1),
             level=level,
             factors=factors[:5],  # Top 5 factors
         )
-    
+
     @property
     def percentage(self) -> int:
         """Get score as percentage."""
         return int(self.score * 10)
-    
+
     @property
     def letter_grade(self) -> str:
         """Get letter grade for score."""
@@ -205,36 +210,42 @@ class RiskScore:
 @dataclass
 class KeyFinding:
     """Key finding for executive summary."""
-    
+
     title: str
     severity: str
     impact: str
     affected_assets: List[str] = field(default_factory=list)
     recommendation: str = ""
-    
+
     @classmethod
     def from_finding(cls, finding: Dict[str, Any]) -> "KeyFinding":
         """Create from raw finding."""
         return cls(
-            title=finding.get("title") or finding.get("description") or _resolve_finding_type(finding),
+            title=finding.get("title")
+            or finding.get("description")
+            or _resolve_finding_type(finding),
             severity=_resolve_severity(finding),
-            impact=finding.get("impact", finding.get("description", "No impact description")),
+            impact=finding.get(
+                "impact", finding.get("description", "No impact description")
+            ),
             affected_assets=[finding.get("host", finding.get("target", "Unknown"))],
-            recommendation=finding.get("remediation", finding.get("recommendation", "")),
+            recommendation=finding.get(
+                "remediation", finding.get("recommendation", "")
+            ),
         )
 
 
 @dataclass
 class Recommendation:
     """Security recommendation."""
-    
+
     priority: int  # 1-5, 1 being highest
     title: str
     description: str
     effort: str  # low, medium, high
     impact: str  # low, medium, high
     category: str = "general"
-    
+
     @property
     def priority_label(self) -> str:
         """Get human-readable priority label."""
@@ -245,41 +256,41 @@ class Recommendation:
 @dataclass
 class ExecutiveSummary:
     """Complete executive summary."""
-    
+
     # Metadata
     title: str
     generated_at: datetime
     scan_date: Optional[datetime]
     author: str
-    
+
     # Overview
     target_count: int
     finding_count: int
     host_count: int
     duration: Optional[str]
-    
+
     # Risk assessment
     risk_score: RiskScore
-    
+
     # Severity breakdown
     critical_count: int = 0
     high_count: int = 0
     medium_count: int = 0
     low_count: int = 0
     info_count: int = 0
-    
+
     # Key findings
     key_findings: List[KeyFinding] = field(default_factory=list)
-    
+
     # Recommendations
     recommendations: List[Recommendation] = field(default_factory=list)
-    
+
     # Trends (for comparison reports)
     trend_data: Dict[str, Any] = field(default_factory=dict)
-    
+
     # Custom sections
     custom_sections: Dict[str, str] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -327,7 +338,7 @@ class ExecutiveSummary:
                 for r in self.recommendations
             ],
         }
-    
+
     def to_text(self) -> str:
         """Generate plain text summary."""
         lines = [
@@ -359,33 +370,37 @@ class ExecutiveSummary:
             f"  Info:     {self.info_count}",
             "",
         ]
-        
+
         if self.key_findings:
-            lines.extend([
-                "KEY FINDINGS",
-                "-" * 40,
-            ])
+            lines.extend(
+                [
+                    "KEY FINDINGS",
+                    "-" * 40,
+                ]
+            )
             for i, kf in enumerate(self.key_findings[:5], 1):
                 lines.append(f"  {i}. [{kf.severity.upper()}] {kf.title}")
             lines.append("")
-        
+
         if self.recommendations:
-            lines.extend([
-                "RECOMMENDATIONS",
-                "-" * 40,
-            ])
+            lines.extend(
+                [
+                    "RECOMMENDATIONS",
+                    "-" * 40,
+                ]
+            )
             for i, rec in enumerate(self.recommendations[:5], 1):
                 lines.append(f"  {i}. [P{rec.priority}] {rec.title}")
             lines.append("")
-        
+
         lines.append("=" * 60)
-        
+
         return "\n".join(lines)
-    
+
     def to_html(self) -> str:
         """Generate HTML summary."""
         risk_color = self.risk_score.level.color
-        
+
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -432,14 +447,18 @@ class ExecutiveSummary:
     <div class="container">
         <div class="header">
             <h1>📊 {escape_html_text(self.title)}</h1>
-            <p class="meta">Generated: {self.generated_at.strftime('%Y-%m-%d %H:%M:%S')} | Author: {escape_html_text(self.author)}</p>
+            <p class="meta">Generated: {
+            self.generated_at.strftime("%Y-%m-%d %H:%M:%S")
+        } | Author: {escape_html_text(self.author)}</p>
         </div>
         
         <div class="grid">
             <div class="card risk-card">
                 <h3>Risk Assessment</h3>
                 <div class="grade">{self.risk_score.letter_grade}</div>
-                <p>{self.risk_score.score}/10 - {self.risk_score.level.value.upper()}</p>
+                <p>{self.risk_score.score}/10 - {
+            self.risk_score.level.value.upper()
+        }</p>
             </div>
             <div class="card">
                 <h3>Targets Scanned</h3>
@@ -484,32 +503,42 @@ class ExecutiveSummary:
         <div class="card" style="margin-top: 20px;">
             <h3>🔍 Key Findings</h3>
             <div class="findings-list">
-                {''.join(f'''
+                {
+            "".join(
+                f'''
                 <div class="finding {kf.severity}">
                     <h4>{escape_html_text(kf.title)}</h4>
                     <span class="badge">{escape_html_text(kf.severity)}</span>
                     <p>{escape_html_text(kf.impact[:200] + ('...' if kf.impact else ''))}</p>
                 </div>
-                ''' for kf in self.key_findings[:5])}
+                '''
+                for kf in self.key_findings[:5]
+            )
+        }
             </div>
         </div>
         
         <div class="card recommendations" style="margin-top: 20px;">
             <h3>💡 Recommendations</h3>
             <ol>
-                {''.join(f'<li><strong>{escape_html_text(rec.title)}</strong>: {escape_html_text(rec.description)}</li>' for rec in self.recommendations[:5])}
+                {
+            "".join(
+                f"<li><strong>{escape_html_text(rec.title)}</strong>: {escape_html_text(rec.description)}</li>"
+                for rec in self.recommendations[:5]
+            )
+        }
             </ol>
         </div>
     </div>
 </body>
 </html>"""
-        
+
         return html
 
 
 class ExecutiveSummaryGenerator:
     """Generate executive summaries from scan data."""
-    
+
     def __init__(
         self,
         author: str = "ReconnV2",
@@ -517,7 +546,7 @@ class ExecutiveSummaryGenerator:
     ):
         self.author = author
         self.title_template = title_template
-    
+
     def generate(
         self,
         data: Dict[str, Any],
@@ -525,38 +554,42 @@ class ExecutiveSummaryGenerator:
     ) -> ExecutiveSummary:
         """Generate executive summary from scan data."""
         raw_findings = data.get("findings", [])
-        findings = [finding for finding in raw_findings if isinstance(finding, dict) and _is_finding_entry(finding)]
+        findings = [
+            finding
+            for finding in raw_findings
+            if isinstance(finding, dict) and _is_finding_entry(finding)
+        ]
         hosts = data.get("hosts", [])
         targets = data.get("targets", [])
-        
+
         # Calculate severity counts
         severity_counts: Dict[str, int] = defaultdict(int)
         for finding in findings:
             severity = _resolve_severity(finding)
             severity_counts[severity] += 1
-        
+
         # Calculate risk score
         risk_score = RiskScore.calculate(findings)
-        
+
         # Extract key findings (critical and high severity)
         key_findings = []
         for finding in findings:
             severity = _resolve_severity(finding)
             if severity in ("critical", "high"):
                 key_findings.append(KeyFinding.from_finding(finding))
-        
+
         # Sort by severity
         severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
         key_findings.sort(key=lambda f: severity_order.get(f.severity, 5))
-        
+
         # Generate recommendations
         recommendations = self._generate_recommendations(findings, hosts)
-        
+
         # Build title
         if not title:
             primary_target = targets[0] if targets else "Target"
             title = self.title_template.format(target=primary_target)
-        
+
         # Parse dates
         scan_date = None
         if "start_time" in data:
@@ -564,7 +597,7 @@ class ExecutiveSummaryGenerator:
                 scan_date = datetime.fromisoformat(data["start_time"])
             except (ValueError, TypeError):
                 pass
-        
+
         # Calculate duration
         duration = None
         if "start_time" in data and "end_time" in data:
@@ -574,7 +607,7 @@ class ExecutiveSummaryGenerator:
                 duration = str(end - start)
             except (ValueError, TypeError):
                 pass
-        
+
         return ExecutiveSummary(
             title=title,
             generated_at=datetime.now(),
@@ -593,7 +626,7 @@ class ExecutiveSummaryGenerator:
             key_findings=key_findings[:10],
             recommendations=recommendations,
         )
-    
+
     def _generate_recommendations(
         self,
         findings: List[Dict[str, Any]],
@@ -601,54 +634,62 @@ class ExecutiveSummaryGenerator:
     ) -> List[Recommendation]:
         """Generate recommendations based on findings."""
         recommendations = []
-        
+
         # Analyze finding types
         finding_types: Dict[str, int] = defaultdict(int)
         for finding in findings:
             finding_type = _resolve_finding_type(finding)
             finding_types[finding_type] += 1
-        
+
         # Generate recommendations based on patterns
         if finding_types.get("sql_injection", 0) > 0:
-            recommendations.append(Recommendation(
-                priority=1,
-                title="Address SQL Injection Vulnerabilities",
-                description="Implement parameterized queries and input validation across all database interactions.",
-                effort="medium",
-                impact="high",
-                category="application",
-            ))
-        
+            recommendations.append(
+                Recommendation(
+                    priority=1,
+                    title="Address SQL Injection Vulnerabilities",
+                    description="Implement parameterized queries and input validation across all database interactions.",
+                    effort="medium",
+                    impact="high",
+                    category="application",
+                )
+            )
+
         if finding_types.get("xss", 0) > 0:
-            recommendations.append(Recommendation(
-                priority=2,
-                title="Implement XSS Protection",
-                description="Add Content Security Policy headers and sanitize all user inputs.",
-                effort="medium",
-                impact="high",
-                category="application",
-            ))
-        
+            recommendations.append(
+                Recommendation(
+                    priority=2,
+                    title="Implement XSS Protection",
+                    description="Add Content Security Policy headers and sanitize all user inputs.",
+                    effort="medium",
+                    impact="high",
+                    category="application",
+                )
+            )
+
         if finding_types.get("subdomain_takeover", 0) > 0:
-            recommendations.append(Recommendation(
-                priority=1,
-                title="Resolve Subdomain Takeover Risks",
-                description="Remove or reclaim dangling DNS records pointing to unused services.",
-                effort="low",
-                impact="high",
-                category="infrastructure",
-            ))
-        
+            recommendations.append(
+                Recommendation(
+                    priority=1,
+                    title="Resolve Subdomain Takeover Risks",
+                    description="Remove or reclaim dangling DNS records pointing to unused services.",
+                    effort="low",
+                    impact="high",
+                    category="infrastructure",
+                )
+            )
+
         if finding_types.get("exposed_secret", 0) > 0:
-            recommendations.append(Recommendation(
-                priority=1,
-                title="Rotate Exposed Credentials",
-                description="Immediately rotate all exposed secrets and implement secrets management.",
-                effort="medium",
-                impact="high",
-                category="security",
-            ))
-        
+            recommendations.append(
+                Recommendation(
+                    priority=1,
+                    title="Rotate Exposed Credentials",
+                    description="Immediately rotate all exposed secrets and implement secrets management.",
+                    effort="medium",
+                    impact="high",
+                    category="security",
+                )
+            )
+
         # Check for open admin ports
         admin_ports = {22, 3389, 5900, 8080, 9090}
         exposed_admin = 0
@@ -656,42 +697,48 @@ class ExecutiveSummaryGenerator:
             open_ports = set(host.get("open_ports", []))
             if open_ports & admin_ports:
                 exposed_admin += 1
-        
+
         if exposed_admin > 0:
-            recommendations.append(Recommendation(
-                priority=2,
-                title="Restrict Administrative Access",
-                description=f"Found {exposed_admin} hosts with exposed admin ports. Implement network segmentation.",
-                effort="high",
-                impact="high",
-                category="infrastructure",
-            ))
-        
+            recommendations.append(
+                Recommendation(
+                    priority=2,
+                    title="Restrict Administrative Access",
+                    description=f"Found {exposed_admin} hosts with exposed admin ports. Implement network segmentation.",
+                    effort="high",
+                    impact="high",
+                    category="infrastructure",
+                )
+            )
+
         # Generic recommendations if few specific ones
         if len(recommendations) < 3:
-            recommendations.append(Recommendation(
-                priority=3,
-                title="Implement Regular Vulnerability Scanning",
-                description="Schedule automated vulnerability assessments on a weekly basis.",
-                effort="low",
-                impact="medium",
-                category="process",
-            ))
-            
-            recommendations.append(Recommendation(
-                priority=4,
-                title="Security Awareness Training",
-                description="Conduct security awareness training for development and operations teams.",
-                effort="medium",
-                impact="medium",
-                category="process",
-            ))
-        
+            recommendations.append(
+                Recommendation(
+                    priority=3,
+                    title="Implement Regular Vulnerability Scanning",
+                    description="Schedule automated vulnerability assessments on a weekly basis.",
+                    effort="low",
+                    impact="medium",
+                    category="process",
+                )
+            )
+
+            recommendations.append(
+                Recommendation(
+                    priority=4,
+                    title="Security Awareness Training",
+                    description="Conduct security awareness training for development and operations teams.",
+                    effort="medium",
+                    impact="medium",
+                    category="process",
+                )
+            )
+
         # Sort by priority
         recommendations.sort(key=lambda r: r.priority)
-        
+
         return recommendations[:10]
-    
+
     def compare(
         self,
         current: Dict[str, Any],
@@ -699,11 +746,11 @@ class ExecutiveSummaryGenerator:
     ) -> ExecutiveSummary:
         """Generate comparative executive summary."""
         summary = self.generate(current)
-        
+
         # Add trend data
         prev_findings = len(previous.get("findings", []))
         curr_findings = len(current.get("findings", []))
-        
+
         if curr_findings < prev_findings:
             trend = "improving"
             change = f"{prev_findings - curr_findings} fewer findings"
@@ -713,7 +760,7 @@ class ExecutiveSummaryGenerator:
         else:
             trend = "stable"
             change = "No change in finding count"
-        
+
         summary.risk_score.trend = trend
         summary.trend_data = {
             "previous_findings": prev_findings,
@@ -721,5 +768,5 @@ class ExecutiveSummaryGenerator:
             "change": change,
             "trend": trend,
         }
-        
+
         return summary

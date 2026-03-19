@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Pattern
+from typing import Dict, List, Optional, Pattern, Set, TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from recon_cli.utils.event_bus import PipelineEventBus
 import uuid
 import re
 
@@ -39,7 +42,9 @@ class PipelineContext:
     _simple_mode: bool = field(init=False, default=False)
     _data_store: Dict[str, object] = field(init=False, default_factory=dict)
     _rate_limiters: Dict[str, object] = field(init=False, default_factory=dict)
-    _host_errors: Dict[str, Dict[int, int]] = field(init=False, default_factory=lambda: defaultdict(lambda: defaultdict(int)))
+    _host_errors: Dict[str, Dict[int, int]] = field(
+        init=False, default_factory=lambda: defaultdict(lambda: defaultdict(int))
+    )
     _host_blocks: Dict[str, str] = field(init=False, default_factory=dict)
     _auth_manager: object = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
@@ -51,19 +56,31 @@ class PipelineContext:
     def __post_init__(self) -> None:
         from recon_cli.utils.pipeline_trace import current_trace_recorder
         from recon_cli.utils.event_bus import PipelineEventBus
+
         self.trace_recorder = current_trace_recorder()
         self.event_bus = PipelineEventBus()
-        
+
         # Initialize Global Rate Limiter
         from recon_cli.utils.rate_limiter import RateLimitConfig, RateLimiter
-        global_rps = float(getattr(self.runtime_config, "global_rps", 50.0) if hasattr(self, "runtime_config") else 50.0)
-        global_per_host = float(getattr(self.runtime_config, "global_per_host_rps", 10.0) if hasattr(self, "runtime_config") else 10.0)
-        self._global_limiter = RateLimiter(RateLimitConfig(
-            requests_per_second=global_rps,
-            per_host_limit=global_per_host,
-            burst_size=max(1, int(global_rps * 2))
-        ))
-        
+
+        global_rps = float(
+            getattr(self.runtime_config, "global_rps", 50.0)
+            if hasattr(self, "runtime_config")
+            else 50.0
+        )
+        global_per_host = float(
+            getattr(self.runtime_config, "global_per_host_rps", 10.0)
+            if hasattr(self, "runtime_config")
+            else 10.0
+        )
+        self._global_limiter = RateLimiter(
+            RateLimitConfig(
+                requests_per_second=global_rps,
+                per_host_limit=global_per_host,
+                burst_size=max(1, int(global_rps * 2)),
+            )
+        )
+
         if self.record is None:
             self._simple_mode = True
             if self.job_id is None:
@@ -77,7 +94,7 @@ class PipelineContext:
         if self.manager is None:
             self.manager = JobManager()
         spec = self.record.spec
-        overrides = getattr(spec, 'runtime_overrides', {}) or {}
+        overrides = getattr(spec, "runtime_overrides", {}) or {}
         base_config = config.RuntimeConfig()
         if getattr(spec, "insecure", False):
             overrides = {**overrides, "verify_tls": False}
@@ -126,7 +143,7 @@ class PipelineContext:
             self._auth_manager = None
 
         def _allow_payload(payload: Dict[str, object]) -> bool:
-            url_value = payload.get('url')
+            url_value = payload.get("url")
             if url_value:
                 if not self.url_allowed(str(url_value)):
                     return False
@@ -138,20 +155,20 @@ class PipelineContext:
             return True
 
         self.results = ResultsTracker(
-            self.record.paths.results_jsonl, 
+            self.record.paths.results_jsonl,
             allow=_allow_payload,
-            event_bus=self.event_bus
+            event_bus=self.event_bus,
         )
         self.stage_attempts: Dict[str, int] = dict(self.record.metadata.attempts)
         self.targets = [spec.target]
-        self.execution_profile = getattr(spec, 'execution_profile', None)
-        profile_stats = self.record.metadata.stats.setdefault('profiles', {})
+        self.execution_profile = getattr(spec, "execution_profile", None)
+        profile_stats = self.record.metadata.stats.setdefault("profiles", {})
         base_profile = spec.profile
         if self.execution_profile:
-            profile_stats.setdefault('execution', self.execution_profile)
+            profile_stats.setdefault("execution", self.execution_profile)
         else:
-            profile_stats.setdefault('execution', base_profile)
-        profile_stats.setdefault('base', base_profile)
+            profile_stats.setdefault("execution", base_profile)
+        profile_stats.setdefault("base", base_profile)
         self.manager.update_metadata(self.record)
 
     def set_data(self, key: str, value: object) -> None:
@@ -164,16 +181,24 @@ class PipelineContext:
         if not host:
             return
         self._host_errors[host][code] += 1
-        
+
         # Check for block triggers (WAF detection)
-        threshold = int(getattr(self.runtime_config, "host_circuit_breaker_threshold", 10))
+        threshold = int(
+            getattr(self.runtime_config, "host_circuit_breaker_threshold", 10)
+        )
         if code == 429 and self._host_errors[host][code] >= threshold:
             if host not in self._host_blocks:
-                self.logger.warning("Host circuit breaker OPEN for %s: Too many 429s (Rate Limited)", host)
+                self.logger.warning(
+                    "Host circuit breaker OPEN for %s: Too many 429s (Rate Limited)",
+                    host,
+                )
                 self._host_blocks[host] = "rate_limited"
         elif code == 403 and self._host_errors[host][code] >= threshold * 2:
             if host not in self._host_blocks:
-                self.logger.warning("Host circuit breaker OPEN for %s: Too many 403s (WAF Blocked?)", host)
+                self.logger.warning(
+                    "Host circuit breaker OPEN for %s: Too many 403s (WAF Blocked?)",
+                    host,
+                )
                 self._host_blocks[host] = "waf_blocked"
 
     def is_host_blocked(self, host: str) -> bool:
@@ -203,7 +228,11 @@ class PipelineContext:
             rps_value = max(per_host_value, 1.0)
         if per_host_value <= 0:
             per_host_value = max(rps_value, 1.0)
-        burst_size = int(burst) if burst and burst > 0 else max(1, int(max(rps_value, per_host_value) * 2))
+        burst_size = (
+            int(burst)
+            if burst and burst > 0
+            else max(1, int(max(rps_value, per_host_value) * 2))
+        )
         from recon_cli.utils.rate_limiter import RateLimitConfig, RateLimiter
 
         config = RateLimitConfig(
@@ -225,7 +254,7 @@ class PipelineContext:
         if not self._url_allow_pattern:
             return True
         try:
-            path = urlparse(url).path or ''
+            path = urlparse(url).path or ""
         except ValueError:
             return False
         return bool(self._url_allow_pattern.search(path))
@@ -238,7 +267,9 @@ class PipelineContext:
             candidate = candidate[2:]
         parsed = None
         if "://" in candidate or any(ch in candidate for ch in ("/", "?", "#")):
-            parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+            parsed = urlparse(
+                candidate if "://" in candidate else f"https://{candidate}"
+            )
         elif ":" in candidate and not validation.is_ip(candidate):
             parsed = urlparse(f"https://{candidate}")
         if parsed and parsed.hostname:
@@ -252,7 +283,9 @@ class PipelineContext:
             spec = self.record.spec
             if getattr(spec, "target", None):
                 raw_targets.append(str(spec.target))
-            raw_targets.extend(str(value) for value in getattr(spec, "targets", []) if value)
+            raw_targets.extend(
+                str(value) for value in getattr(spec, "targets", []) if value
+            )
         seen: set[str] = set()
         targets: List[str] = []
         for value in raw_targets:
@@ -308,7 +341,9 @@ class PipelineContext:
                 return None
         return None
 
-    def auth_cookies(self, default_domain: Optional[str] = None) -> List[Dict[str, object]]:
+    def auth_cookies(
+        self, default_domain: Optional[str] = None
+    ) -> List[Dict[str, object]]:
         if self._auth_manager:
             try:
                 return self._auth_manager.export_cookies(default_domain)
@@ -342,13 +377,15 @@ class PipelineContext:
         if target_type == "url":
             if not self.url_allowed(str(target)) or not self.url_in_scope(str(target)):
                 return ""
-        elif target_type in {"host", "hostname", "ip"} and not self.host_in_scope(str(target)):
+        elif target_type in {"host", "hostname", "ip"} and not self.host_in_scope(
+            str(target)
+        ):
             return ""
         if not hasattr(self, "results") or self.results is None:
             return ""
-        
+
         from recon_cli.db.schemas import SignalResult
-        
+
         signal_id = f"sig_{uuid.uuid4().hex[:10]}"
         signal = SignalResult(
             signal_id=signal_id,
@@ -361,7 +398,7 @@ class PipelineContext:
             evidence=evidence,
             metadata=metadata,
         )
-        
+
         self.results.append(signal.model_dump(exclude_none=False))
         self._data_store.pop("_signals", None)
         self._data_store.pop("_signal_index", None)
@@ -421,24 +458,46 @@ class PipelineContext:
     def get_cache_entry(self, url: str) -> Optional[Dict[str, str]]:
         return self._delta_cache.get(url)
 
-    def should_skip_due_to_cache(self, url: str, *, etag: Optional[str] = None, last_modified: Optional[str] = None, body_md5: Optional[str] = None) -> bool:
+    def should_skip_due_to_cache(
+        self,
+        url: str,
+        *,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None,
+        body_md5: Optional[str] = None,
+    ) -> bool:
         if self.force:
             return False
         previous = self._delta_cache.get(url)
         if not previous:
             return False
         comparisons = []
-        for key, value in (("etag", etag), ("last_modified", last_modified), ("body_md5", body_md5)):
+        for key, value in (
+            ("etag", etag),
+            ("last_modified", last_modified),
+            ("body_md5", body_md5),
+        ):
             if value:
                 comparisons.append(previous.get(key) == value)
             elif previous.get(key):
                 return False
         return bool(comparisons) and all(comparisons)
 
-    def update_cache(self, url: str, *, etag: Optional[str] = None, last_modified: Optional[str] = None, body_md5: Optional[str] = None) -> None:
+    def update_cache(
+        self,
+        url: str,
+        *,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None,
+        body_md5: Optional[str] = None,
+    ) -> None:
         entry = self._delta_cache.get(url, {}).copy()
         mutated = False
-        for key, value in (("etag", etag), ("last_modified", last_modified), ("body_md5", body_md5)):
+        for key, value in (
+            ("etag", etag),
+            ("last_modified", last_modified),
+            ("body_md5", body_md5),
+        ):
             if value:
                 if entry.get(key) != value:
                     entry[key] = str(value)

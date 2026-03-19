@@ -12,7 +12,16 @@ from recon_cli.utils.jsonl import read_jsonl
 class AuthDiscoveryStage(Stage):
     name = "auth_discovery"
 
-    AUTH_HINTS = ("login", "signin", "signup", "register", "forgot", "reset", "password", "auth")
+    AUTH_HINTS = (
+        "login",
+        "signin",
+        "signup",
+        "register",
+        "forgot",
+        "reset",
+        "password",
+        "auth",
+    )
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_auth_discovery", False))
@@ -39,11 +48,15 @@ class AuthDiscoveryStage(Stage):
                         "method": (attrs_dict.get("method") or "get").lower(),
                         "inputs": [],
                     }
-                elif tag in {"input", "textarea", "select"} and self._current is not None:
+                elif (
+                    tag in {"input", "textarea", "select"} and self._current is not None
+                ):
                     name = attrs_dict.get("name") or attrs_dict.get("id") or ""
                     input_type = attrs_dict.get("type") or tag
                     if name:
-                        self._current["inputs"].append({"name": name, "type": input_type})
+                        self._current["inputs"].append(
+                            {"name": name, "type": input_type}
+                        )
 
             def handle_endtag(self, tag):
                 if tag == "form" and self._current is not None:
@@ -63,7 +76,17 @@ class AuthDiscoveryStage(Stage):
             tags = set(entry.get("tags", []))
             path = urlparse(url).path.lower()
             has_hint = any(hint in path for hint in self.AUTH_HINTS)
-            if tags.intersection({"surface:login", "surface:register", "surface:password-reset", "surface:admin"}) or has_hint:
+            if (
+                tags.intersection(
+                    {
+                        "surface:login",
+                        "surface:register",
+                        "surface:password-reset",
+                        "surface:admin",
+                    }
+                )
+                or has_hint
+            ):
                 candidates.append(
                     {
                         "url": url,
@@ -118,7 +141,10 @@ class AuthDiscoveryStage(Stage):
             if limiter:
                 limiter.on_response(url, resp.status_code)
             content_type = resp.headers.get("Content-Type", "")
-            if "text/html" not in content_type and "<form" not in (resp.text or "").lower():
+            if (
+                "text/html" not in content_type
+                and "<form" not in (resp.text or "").lower()
+            ):
                 continue
             parser = FormParser()
             parser.feed(resp.text or "")
@@ -129,9 +155,15 @@ class AuthDiscoveryStage(Stage):
                 action_url = urljoin(url, action) if action else url
                 inputs = form.get("inputs") or []
                 tags = set(candidate.get("tags", []))
-                input_names = [item.get("name") for item in inputs if isinstance(item, dict)]
+                input_names = [
+                    item.get("name") for item in inputs if isinstance(item, dict)
+                ]
                 lower_action = str(action_url).lower()
-                if any(item.get("type") == "password" for item in inputs if isinstance(item, dict)):
+                if any(
+                    item.get("type") == "password"
+                    for item in inputs
+                    if isinstance(item, dict)
+                ):
                     tags.add("surface:login")
                 if "reset" in lower_action or "forgot" in lower_action:
                     tags.add("surface:password-reset")
@@ -166,7 +198,9 @@ class AuthDiscoveryStage(Stage):
                     artifacts.append(payload)
         if artifacts:
             artifact_path = context.record.paths.artifact("auth_forms.json")
-            artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+            artifact_path.write_text(
+                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+            )
             stats = context.record.metadata.stats.setdefault("auth_discovery", {})
             stats["forms"] = forms_found
             context.manager.update_metadata(context.record)

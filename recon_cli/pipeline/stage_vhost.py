@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+import requests
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
@@ -43,7 +44,9 @@ class VHostDiscoveryStage(Stage):
         max_probes = max(0, int(getattr(runtime, "vhost_max_probes", 1000)))
         max_duration = max(0, int(getattr(runtime, "vhost_max_duration", 1800)))
         progress_every = max(1, int(getattr(runtime, "vhost_progress_every", 100)))
-        max_response_bytes = max(4096, int(getattr(runtime, "vhost_max_response_bytes", 65536)))
+        max_response_bytes = max(
+            4096, int(getattr(runtime, "vhost_max_response_bytes", 65536))
+        )
         limiter = context.get_rate_limiter(
             "vhost_discovery",
             rps=float(getattr(runtime, "vhost_rps", 0)),
@@ -84,11 +87,15 @@ class VHostDiscoveryStage(Stage):
             elapsed = time.monotonic() - stage_started
             if max_duration and elapsed >= max_duration:
                 duration_cap_hit = True
-                context.logger.warning("VHost duration cap reached (%ss); stopping stage", max_duration)
+                context.logger.warning(
+                    "VHost duration cap reached (%ss); stopping stage", max_duration
+                )
                 break
             if max_probes and tested_probes >= max_probes:
                 probe_cap_hit = True
-                context.logger.warning("VHost probe cap reached (%d); stopping stage", max_probes)
+                context.logger.warning(
+                    "VHost probe cap reached (%d); stopping stage", max_probes
+                )
                 break
             checked_hosts += 1
             root = self._root_domain(host)
@@ -156,7 +163,11 @@ class VHostDiscoveryStage(Stage):
                         elapsed,
                         host,
                     )
-                headers = {"User-Agent": "recon-cli vhost", "Host": candidate, "X-Forwarded-Host": candidate}
+                headers = {
+                    "User-Agent": "recon-cli vhost",
+                    "Host": candidate,
+                    "X-Forwarded-Host": candidate,
+                }
                 if limiter and not limiter.wait_for_slot(base_url, timeout=timeout):
                     continue
                 response = self._fetch_sig(
@@ -233,10 +244,14 @@ class VHostDiscoveryStage(Stage):
                 host_discovered,
             )
             if probe_cap_hit:
-                context.logger.warning("VHost probe cap reached (%d); stopping stage", max_probes)
+                context.logger.warning(
+                    "VHost probe cap reached (%d); stopping stage", max_probes
+                )
                 break
             if duration_cap_hit:
-                context.logger.warning("VHost duration cap reached (%ss); stopping stage", max_duration)
+                context.logger.warning(
+                    "VHost duration cap reached (%ss); stopping stage", max_duration
+                )
                 break
 
         stats = context.record.metadata.stats.setdefault("vhost", {})
@@ -255,7 +270,9 @@ class VHostDiscoveryStage(Stage):
         )
         context.manager.update_metadata(context.record)
 
-    def _select_base_hosts(self, context: PipelineContext) -> List[Tuple[str, str, int]]:
+    def _select_base_hosts(
+        self, context: PipelineContext
+    ) -> List[Tuple[str, str, int]]:
         """Pick highest-scoring URL per host to use as vhost baseline."""
         best: Dict[str, Tuple[str, int]] = {}
         for entry in read_jsonl(context.record.paths.results_jsonl):
@@ -276,7 +293,11 @@ class VHostDiscoveryStage(Stage):
             current_url, current_score = current
             if score > current_score:
                 best[host] = (url, score)
-            elif score == current_score and url.startswith("https://") and not current_url.startswith("https://"):
+            elif (
+                score == current_score
+                and url.startswith("https://")
+                and not current_url.startswith("https://")
+            ):
                 best[host] = (url, score)
         return [(host, data[0], data[1]) for host, data in best.items()]
 
@@ -289,7 +310,9 @@ class VHostDiscoveryStage(Stage):
                 candidates.append(candidate)
         base = runtime.seclists_root
         candidates.append(base / "Discovery" / "Web-Content" / "vhost.txt")
-        candidates.append(base / "Discovery" / "DNS" / "subdomains-top1million-20000.txt")
+        candidates.append(
+            base / "Discovery" / "DNS" / "subdomains-top1million-20000.txt"
+        )
         for candidate in candidates:
             if candidate.exists():
                 return self._read_wordlist(candidate)

@@ -119,7 +119,9 @@ class NmapStage(Stage):
             try:
                 executor.run(cmd, check=False, timeout=timeout)
             except CommandError:
-                context.logger.warning("nmap failed for batch %s", idx // batch_size + 1)
+                context.logger.warning(
+                    "nmap failed for batch %s", idx // batch_size + 1
+                )
                 continue
             if not xml_path.exists():
                 continue
@@ -139,18 +141,35 @@ class NmapStage(Stage):
                     if address.get("addrtype") == "ipv4":
                         addr = address.get("addr")
                         break
-                hostnames = [hn.get("name") for hn in host_node.findall("hostnames/hostname") if hn.get("name")]
+                hostnames = [
+                    hn.get("name")
+                    for hn in host_node.findall("hostnames/hostname")
+                    if hn.get("name")
+                ]
                 hostname = hostnames[0] if hostnames else addr
                 for port_node in host_node.findall("ports/port"):
                     state = port_node.find("state")
-                    if state is None or state.get("state") not in {"open", "open|filtered"}:
+                    if state is None or state.get("state") not in {
+                        "open",
+                        "open|filtered",
+                    }:
                         continue
                     port_id = int(port_node.get("portid", "0"))
                     protocol = port_node.get("protocol") or "tcp"
                     service_node = port_node.find("service")
-                    service_name = service_node.get("name") if service_node is not None else None
-                    product = service_node.get("product") if service_node is not None else None
-                    version = service_node.get("version") if service_node is not None else None
+                    service_name = (
+                        service_node.get("name") if service_node is not None else None
+                    )
+                    product = (
+                        service_node.get("product")
+                        if service_node is not None
+                        else None
+                    )
+                    version = (
+                        service_node.get("version")
+                        if service_node is not None
+                        else None
+                    )
                     tags = {f"port:{port_id}", f"proto:{protocol}"}
                     if service_name:
                         tags.add(f"service:{service_name}")
@@ -245,15 +264,26 @@ class NmapStage(Stage):
                         if address.get("addrtype") == "ipv4":
                             addr = address.get("addr")
                             break
-                    hostnames = [hn.get("name") for hn in host_node.findall("hostnames/hostname") if hn.get("name")]
+                    hostnames = [
+                        hn.get("name")
+                        for hn in host_node.findall("hostnames/hostname")
+                        if hn.get("name")
+                    ]
                     hostname = hostnames[0] if hostnames else addr
                     for port_node in host_node.findall("ports/port"):
                         state = port_node.find("state")
-                        if state is None or state.get("state") not in {"open", "open|filtered"}:
+                        if state is None or state.get("state") not in {
+                            "open",
+                            "open|filtered",
+                        }:
                             continue
                         port_id = int(port_node.get("portid", "0"))
                         service_node = port_node.find("service")
-                        service_name = service_node.get("name") if service_node is not None else None
+                        service_name = (
+                            service_node.get("name")
+                            if service_node is not None
+                            else None
+                        )
                         payload = {
                             "type": "service",
                             "source": "nmap-udp",

@@ -15,7 +15,9 @@ class EnrichmentStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         items = read_jsonl(context.record.paths.results_jsonl)
-        assets = [entry for entry in items if entry.get("type") == "asset" and entry.get("ip")]
+        assets = [
+            entry for entry in items if entry.get("type") == "asset" and entry.get("ip")
+        ]
         if not assets:
             context.logger.info("No assets to enrich")
             return
@@ -25,7 +27,9 @@ class EnrichmentStage(Stage):
         artifacts_path = context.record.paths.artifact("ip_enrichment.json")
         appended = 0
         cache_path = config.RECON_HOME / "cache" / "enrich.json"
-        cache_data: Dict[str, dict] = fs.read_json(cache_path, default={}) if cache_path.exists() else {}
+        cache_data: Dict[str, dict] = (
+            fs.read_json(cache_path, default={}) if cache_path.exists() else {}
+        )
         for asset in assets:
             hostname = asset.get("hostname")
             ip = asset.get("ip")
@@ -45,7 +49,9 @@ class EnrichmentStage(Stage):
             try:
                 info = enrich_utils.enrich_asset(hostname, ip, client)
             except Exception as exc:  # pragma: no cover - defensive
-                context.logger.debug("Enrichment failed for %s (%s): %s", hostname, ip, exc)
+                context.logger.debug(
+                    "Enrichment failed for %s (%s): %s", hostname, ip, exc
+                )
                 continue
             payload = {
                 "type": "asset_enrichment",
@@ -71,11 +77,15 @@ class EnrichmentStage(Stage):
             for key, data in enrichment_store.items():
                 hostname = data["hostname"]
                 mapped.setdefault(hostname, []).append(data)
-            artifacts_path.write_text(json.dumps(mapped, indent=2, sort_keys=True), encoding="utf-8")
+            artifacts_path.write_text(
+                json.dumps(mapped, indent=2, sort_keys=True), encoding="utf-8"
+            )
             try:
                 fs.ensure_directory(cache_path.parent)
                 cache_data.update(enrichment_store)
-                cache_path.write_text(json.dumps(cache_data, indent=2, sort_keys=True), encoding="utf-8")
+                cache_path.write_text(
+                    json.dumps(cache_data, indent=2, sort_keys=True), encoding="utf-8"
+                )
             except Exception:
                 context.logger.debug("Failed to persist enrichment cache")
             context.record.metadata.stats["asset_enrichments"] = appended

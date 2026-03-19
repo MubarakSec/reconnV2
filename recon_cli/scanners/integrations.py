@@ -101,21 +101,35 @@ def run_nuclei(
 
         logger.info("Running nuclei against %s with %s", base_url, json_flag)
         try:
-            result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+            result = executor.run(
+                cmd, check=False, timeout=timeout, capture_output=True
+            )
         except CommandError as exc:  # pragma: no cover - runtime safety
             last_message = str(exc)
-            logger.warning("nuclei execution failed for %s (%s): %s", host, json_flag, exc)
-            return ScannerExecution([], artifact_path if artifact_path.exists() else None, {"timed_out": "timeout" in str(exc).lower()})
+            logger.warning(
+                "nuclei execution failed for %s (%s): %s", host, json_flag, exc
+            )
+            return ScannerExecution(
+                [],
+                artifact_path if artifact_path.exists() else None,
+                {"timed_out": "timeout" in str(exc).lower()},
+            )
         except Exception as exc:  # pragma: no cover - runtime safety
             last_message = str(exc)
-            logger.warning("nuclei execution failed for %s (%s): %s", host, json_flag, exc)
+            logger.warning(
+                "nuclei execution failed for %s (%s): %s", host, json_flag, exc
+            )
             continue
 
         if result.returncode == 0:
             run_success = True
             break
 
-        last_message = (result.stderr or result.stdout or "non-zero exit") if result else "non-zero exit"
+        last_message = (
+            (result.stderr or result.stdout or "non-zero exit")
+            if result
+            else "non-zero exit"
+        )
         logger.warning(
             "nuclei returned %s with %s for %s: %s",
             result.returncode if result else "?",
@@ -127,7 +141,9 @@ def run_nuclei(
     if not run_success:
         if last_message:
             logger.warning("nuclei execution failed for %s: %s", host, last_message)
-        return ScannerExecution([], artifact_path if artifact_path.exists() else None, {})
+        return ScannerExecution(
+            [], artifact_path if artifact_path.exists() else None, {}
+        )
 
     findings: List[ScannerFinding] = []
     if artifact_path.exists():
@@ -143,7 +159,11 @@ def run_nuclei(
                 severity = _severity(data.get("info", {}).get("severity"))
                 score = SEVERITY_TO_SCORE.get(severity, 10)
                 priority = SEVERITY_TO_PRIORITY.get(severity, "low")
-                description = data.get("info", {}).get("name") or data.get("templateID") or "nuclei finding"
+                description = (
+                    data.get("info", {}).get("name")
+                    or data.get("templateID")
+                    or "nuclei finding"
+                )
                 findings.append(
                     ScannerFinding(
                         {
@@ -163,7 +183,11 @@ def run_nuclei(
                         }
                     )
                 )
-    return ScannerExecution(findings, artifact_path if artifact_path.exists() else None, {"targets": 1, "findings": len(findings)})
+    return ScannerExecution(
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": 1, "findings": len(findings)},
+    )
 
 
 def run_nuclei_batch(
@@ -187,7 +211,10 @@ def run_nuclei_batch(
     if artifact_suffix is None:
         digest = hashlib.sha1("\n".join(targets).encode("utf-8")).hexdigest()[:10]
         artifact_suffix = digest
-    safe_suffix = "".join(ch for ch in str(artifact_suffix) if ch.isalnum() or ch in {"-", "_"}) or "batch"
+    safe_suffix = (
+        "".join(ch for ch in str(artifact_suffix) if ch.isalnum() or ch in {"-", "_"})
+        or "batch"
+    )
     artifact_path = artifact_dir / f"nuclei_batch_{len(targets)}_{safe_suffix}.json"
     targets_path = artifact_dir / f"nuclei_targets_{len(targets)}_{safe_suffix}.txt"
     targets_path.write_text("\n".join(targets) + "\n", encoding="utf-8")
@@ -207,7 +234,14 @@ def run_nuclei_batch(
                 resolved_templates = [str(candidate)]
                 break
 
-    cmd: List[str] = ["nuclei", "-l", str(targets_path), "-jsonl", "-o", str(artifact_path)]
+    cmd: List[str] = [
+        "nuclei",
+        "-l",
+        str(targets_path),
+        "-jsonl",
+        "-o",
+        str(artifact_path),
+    ]
     if resolved_templates:
         for template in resolved_templates:
             cmd.extend(["-t", template])
@@ -224,12 +258,28 @@ def run_nuclei_batch(
         result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
     except CommandError as exc:
         logger.warning("nuclei batch execution failed: %s", exc)
-        return ScannerExecution([], artifact_path if artifact_path.exists() else None, {"targets": len(targets), "timed_out": "timeout" in str(exc).lower()})
+        return ScannerExecution(
+            [],
+            artifact_path if artifact_path.exists() else None,
+            {"targets": len(targets), "timed_out": "timeout" in str(exc).lower()},
+        )
 
     if result.returncode != 0:
-        message = (result.stderr or result.stdout or "non-zero exit") if result else "non-zero exit"
-        logger.warning("nuclei batch returned %s: %s", result.returncode if result else "?", str(message).strip())
-        return ScannerExecution([], artifact_path if artifact_path.exists() else None, {"targets": len(targets), "returncode": result.returncode})
+        message = (
+            (result.stderr or result.stdout or "non-zero exit")
+            if result
+            else "non-zero exit"
+        )
+        logger.warning(
+            "nuclei batch returned %s: %s",
+            result.returncode if result else "?",
+            str(message).strip(),
+        )
+        return ScannerExecution(
+            [],
+            artifact_path if artifact_path.exists() else None,
+            {"targets": len(targets), "returncode": result.returncode},
+        )
 
     findings: List[ScannerFinding] = []
     if artifact_path.exists():
@@ -245,7 +295,11 @@ def run_nuclei_batch(
                 severity = _severity(data.get("info", {}).get("severity"))
                 score = SEVERITY_TO_SCORE.get(severity, 10)
                 priority = SEVERITY_TO_PRIORITY.get(severity, "low")
-                description = data.get("info", {}).get("name") or data.get("templateID") or "nuclei finding"
+                description = (
+                    data.get("info", {}).get("name")
+                    or data.get("templateID")
+                    or "nuclei finding"
+                )
                 findings.append(
                     ScannerFinding(
                         {
@@ -265,7 +319,11 @@ def run_nuclei_batch(
                         }
                     )
                 )
-    return ScannerExecution(findings, artifact_path if artifact_path.exists() else None, {"targets": len(targets), "findings": len(findings)})
+    return ScannerExecution(
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": len(targets), "findings": len(findings)},
+    )
 
 
 def run_wpscan(
@@ -313,7 +371,9 @@ def run_wpscan(
         executor.run(cmd, check=False, timeout=timeout)
     except Exception as exc:  # pragma: no cover
         logger.warning("wpscan execution failed for %s: %s", host, exc)
-        return ScannerExecution([], artifact_path if artifact_path.exists() else None, {})
+        return ScannerExecution(
+            [], artifact_path if artifact_path.exists() else None, {}
+        )
 
     findings: List[ScannerFinding] = []
     if artifact_path.exists():
@@ -332,7 +392,9 @@ def run_wpscan(
                         "type": "finding",
                         "source": "scanner-wpscan",
                         "hostname": host,
-                        "description": vuln.get("title") or vuln.get("name") or "wpscan finding",
+                        "description": vuln.get("title")
+                        or vuln.get("name")
+                        or "wpscan finding",
                         "details": vuln,
                         "tags": ["scanner", "wpscan", severity],
                         "score": score,
@@ -340,7 +402,11 @@ def run_wpscan(
                     }
                 )
             )
-    return ScannerExecution(findings, artifact_path if artifact_path.exists() else None, {"targets": 1, "findings": len(findings)})
+    return ScannerExecution(
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": 1, "findings": len(findings)},
+    )
 
 
 SCANNER_REGISTRY = {
@@ -357,6 +423,7 @@ def available_scanners() -> List[str]:
 # New Tool Integrations
 # ============================================================================
 
+
 def run_ffuf(
     executor: CommandExecutor,
     logger,
@@ -372,27 +439,36 @@ def run_ffuf(
         return ScannerExecution([], None, {})
 
     artifact_path = artifact_dir / f"ffuf_{host}.json"
-    
+
     # Use default wordlist if not specified
     if not wordlist:
         from recon_cli import config
 
-        wordlist = str(config.DEFAULT_SECLISTS_ROOT / "Discovery" / "Web-Content" / "common.txt")
+        wordlist = str(
+            config.DEFAULT_SECLISTS_ROOT / "Discovery" / "Web-Content" / "common.txt"
+        )
         if not Path(wordlist).exists():
             wordlist = "/usr/share/wordlists/dirb/common.txt"
-    
+
     cmd: List[str] = [
         "ffuf",
-        "-u", f"{base_url}/FUZZ",
-        "-w", wordlist,
-        "-o", str(artifact_path),
-        "-of", "json",
-        "-mc", "200,201,204,301,302,307,401,403,405",
-        "-t", "50",
-        "-timeout", "10",
+        "-u",
+        f"{base_url}/FUZZ",
+        "-w",
+        wordlist,
+        "-o",
+        str(artifact_path),
+        "-of",
+        "json",
+        "-mc",
+        "200,201,204,301,302,307,401,403,405",
+        "-t",
+        "50",
+        "-timeout",
+        "10",
         "-s",  # Silent mode
     ]
-    
+
     logger.info("Running ffuf against %s", base_url)
     try:
         executor.run(cmd, check=False, timeout=timeout)
@@ -407,25 +483,27 @@ def run_ffuf(
             results = data.get("results", [])
             for result in results:
                 findings.append(
-                    ScannerFinding({
-                        "type": "url",
-                        "source": "ffuf",
-                        "hostname": host,
-                        "url": result.get("url"),
-                        "status_code": result.get("status"),
-                        "content_length": result.get("length"),
-                        "words": result.get("words"),
-                        "lines": result.get("lines"),
-                        "tags": ["fuzzing", "directory"],
-                    })
+                    ScannerFinding(
+                        {
+                            "type": "url",
+                            "source": "ffuf",
+                            "hostname": host,
+                            "url": result.get("url"),
+                            "status_code": result.get("status"),
+                            "content_length": result.get("length"),
+                            "words": result.get("words"),
+                            "lines": result.get("lines"),
+                            "tags": ["fuzzing", "directory"],
+                        }
+                    )
                 )
         except json.JSONDecodeError:
             pass
-    
+
     return ScannerExecution(
-        findings, 
-        artifact_path if artifact_path.exists() else None, 
-        {"targets": 1, "findings": len(findings)}
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": 1, "findings": len(findings)},
     )
 
 
@@ -444,18 +522,22 @@ def run_katana(
         return ScannerExecution([], None, {})
 
     artifact_path = artifact_dir / f"katana_{host}.json"
-    
+
     cmd: List[str] = [
         "katana",
-        "-u", base_url,
-        "-d", str(depth),
+        "-u",
+        base_url,
+        "-d",
+        str(depth),
         "-jc",  # JavaScript crawl
-        "-kf", "all",  # Known files
-        "-o", str(artifact_path),
+        "-kf",
+        "all",  # Known files
+        "-o",
+        str(artifact_path),
         "-jsonl",
         "-silent",
     ]
-    
+
     logger.info("Running katana against %s", base_url)
     try:
         executor.run(cmd, check=False, timeout=timeout)
@@ -473,31 +555,36 @@ def run_katana(
                 try:
                     data = json.loads(line)
                     findings.append(
-                        ScannerFinding({
-                            "type": "url",
-                            "source": "katana",
-                            "hostname": host,
-                            "url": data.get("request", {}).get("endpoint") or data.get("url"),
-                            "method": data.get("request", {}).get("method", "GET"),
-                            "tags": ["crawl", "katana"],
-                        })
+                        ScannerFinding(
+                            {
+                                "type": "url",
+                                "source": "katana",
+                                "hostname": host,
+                                "url": data.get("request", {}).get("endpoint")
+                                or data.get("url"),
+                                "method": data.get("request", {}).get("method", "GET"),
+                                "tags": ["crawl", "katana"],
+                            }
+                        )
                     )
                 except json.JSONDecodeError:
                     # Plain URL format
                     findings.append(
-                        ScannerFinding({
-                            "type": "url",
-                            "source": "katana",
-                            "hostname": host,
-                            "url": line,
-                            "tags": ["crawl", "katana"],
-                        })
+                        ScannerFinding(
+                            {
+                                "type": "url",
+                                "source": "katana",
+                                "hostname": host,
+                                "url": line,
+                                "tags": ["crawl", "katana"],
+                            }
+                        )
                     )
-    
+
     return ScannerExecution(
-        findings, 
-        artifact_path if artifact_path.exists() else None, 
-        {"targets": 1, "findings": len(findings)}
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": 1, "findings": len(findings)},
     )
 
 
@@ -515,20 +602,27 @@ def run_dnsx(
 
     input_path = artifact_dir / "dnsx_input.txt"
     artifact_path = artifact_dir / "dnsx_output.json"
-    
+
     # Write hosts to input file
     input_path.write_text("\n".join(hosts), encoding="utf-8")
-    
+
     cmd: List[str] = [
         "dnsx",
-        "-l", str(input_path),
-        "-a", "-aaaa", "-cname", "-mx", "-txt", "-ns",
+        "-l",
+        str(input_path),
+        "-a",
+        "-aaaa",
+        "-cname",
+        "-mx",
+        "-txt",
+        "-ns",
         "-resp",
         "-json",
-        "-o", str(artifact_path),
+        "-o",
+        str(artifact_path),
         "-silent",
     ]
-    
+
     logger.info("Running dnsx for %d hosts", len(hosts))
     try:
         executor.run(cmd, check=False, timeout=timeout)
@@ -546,27 +640,29 @@ def run_dnsx(
                 try:
                     data = json.loads(line)
                     findings.append(
-                        ScannerFinding({
-                            "type": "dns",
-                            "source": "dnsx",
-                            "hostname": data.get("host"),
-                            "a": data.get("a"),
-                            "aaaa": data.get("aaaa"),
-                            "cname": data.get("cname"),
-                            "mx": data.get("mx"),
-                            "ns": data.get("ns"),
-                            "txt": data.get("txt"),
-                            "resolver": data.get("resolver"),
-                            "tags": ["dns", "enumeration"],
-                        })
+                        ScannerFinding(
+                            {
+                                "type": "dns",
+                                "source": "dnsx",
+                                "hostname": data.get("host"),
+                                "a": data.get("a"),
+                                "aaaa": data.get("aaaa"),
+                                "cname": data.get("cname"),
+                                "mx": data.get("mx"),
+                                "ns": data.get("ns"),
+                                "txt": data.get("txt"),
+                                "resolver": data.get("resolver"),
+                                "tags": ["dns", "enumeration"],
+                            }
+                        )
                     )
                 except json.JSONDecodeError:
                     continue
-    
+
     return ScannerExecution(
-        findings, 
-        artifact_path if artifact_path.exists() else None, 
-        {"targets": len(hosts), "findings": len(findings)}
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": len(hosts), "findings": len(findings)},
     )
 
 
@@ -584,19 +680,25 @@ def run_tlsx(
 
     input_path = artifact_dir / "tlsx_input.txt"
     artifact_path = artifact_dir / "tlsx_output.json"
-    
+
     # Write hosts to input file
     input_path.write_text("\n".join(hosts), encoding="utf-8")
-    
+
     cmd: List[str] = [
         "tlsx",
-        "-l", str(input_path),
-        "-san", "-cn", "-so", "-tv", "-ve",
+        "-l",
+        str(input_path),
+        "-san",
+        "-cn",
+        "-so",
+        "-tv",
+        "-ve",
         "-json",
-        "-o", str(artifact_path),
+        "-o",
+        str(artifact_path),
         "-silent",
     ]
-    
+
     logger.info("Running tlsx for %d hosts", len(hosts))
     try:
         executor.run(cmd, check=False, timeout=timeout)
@@ -613,7 +715,7 @@ def run_tlsx(
                     continue
                 try:
                     data = json.loads(line)
-                    
+
                     # Check for vulnerabilities
                     vulns = []
                     if data.get("version_error"):
@@ -624,33 +726,35 @@ def run_tlsx(
                         vulns.append("self_signed")
                     if data.get("mismatched"):
                         vulns.append("hostname_mismatch")
-                    
+
                     findings.append(
-                        ScannerFinding({
-                            "type": "tls",
-                            "source": "tlsx",
-                            "hostname": data.get("host"),
-                            "port": data.get("port", 443),
-                            "tls_version": data.get("tls_version"),
-                            "cipher": data.get("cipher"),
-                            "subject_cn": data.get("subject_cn"),
-                            "subject_an": data.get("subject_an"),
-                            "issuer_cn": data.get("issuer_cn"),
-                            "not_before": data.get("not_before"),
-                            "not_after": data.get("not_after"),
-                            "expired": data.get("expired"),
-                            "self_signed": data.get("self_signed"),
-                            "vulnerabilities": vulns,
-                            "tags": ["tls", "ssl", "certificate"],
-                        })
+                        ScannerFinding(
+                            {
+                                "type": "tls",
+                                "source": "tlsx",
+                                "hostname": data.get("host"),
+                                "port": data.get("port", 443),
+                                "tls_version": data.get("tls_version"),
+                                "cipher": data.get("cipher"),
+                                "subject_cn": data.get("subject_cn"),
+                                "subject_an": data.get("subject_an"),
+                                "issuer_cn": data.get("issuer_cn"),
+                                "not_before": data.get("not_before"),
+                                "not_after": data.get("not_after"),
+                                "expired": data.get("expired"),
+                                "self_signed": data.get("self_signed"),
+                                "vulnerabilities": vulns,
+                                "tags": ["tls", "ssl", "certificate"],
+                            }
+                        )
                     )
                 except json.JSONDecodeError:
                     continue
-    
+
     return ScannerExecution(
-        findings, 
-        artifact_path if artifact_path.exists() else None, 
-        {"targets": len(hosts), "findings": len(findings)}
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": len(hosts), "findings": len(findings)},
     )
 
 
@@ -668,19 +772,26 @@ def run_httpx_extended(
 
     input_path = artifact_dir / "httpx_input.txt"
     artifact_path = artifact_dir / "httpx_extended.json"
-    
+
     input_path.write_text("\n".join(hosts), encoding="utf-8")
-    
+
     cmd: List[str] = [
         "httpx",
-        "-l", str(input_path),
-        "-title", "-tech-detect", "-status-code", "-content-length",
-        "-web-server", "-cdn", "-favicon",
+        "-l",
+        str(input_path),
+        "-title",
+        "-tech-detect",
+        "-status-code",
+        "-content-length",
+        "-web-server",
+        "-cdn",
+        "-favicon",
         "-json",
-        "-o", str(artifact_path),
+        "-o",
+        str(artifact_path),
         "-silent",
     ]
-    
+
     logger.info("Running httpx extended for %d hosts", len(hosts))
     try:
         executor.run(cmd, check=False, timeout=timeout)
@@ -698,36 +809,40 @@ def run_httpx_extended(
                 try:
                     data = json.loads(line)
                     findings.append(
-                        ScannerFinding({
-                            "type": "url",
-                            "source": "httpx-extended",
-                            "hostname": data.get("host"),
-                            "url": data.get("url"),
-                            "status_code": data.get("status_code"),
-                            "title": data.get("title"),
-                            "webserver": data.get("webserver"),
-                            "technologies": data.get("tech"),
-                            "cdn": data.get("cdn"),
-                            "content_length": data.get("content_length"),
-                            "favicon_hash": data.get("favicon_hash"),
-                            "tags": ["http", "probe", "tech-detect"],
-                        })
+                        ScannerFinding(
+                            {
+                                "type": "url",
+                                "source": "httpx-extended",
+                                "hostname": data.get("host"),
+                                "url": data.get("url"),
+                                "status_code": data.get("status_code"),
+                                "title": data.get("title"),
+                                "webserver": data.get("webserver"),
+                                "technologies": data.get("tech"),
+                                "cdn": data.get("cdn"),
+                                "content_length": data.get("content_length"),
+                                "favicon_hash": data.get("favicon_hash"),
+                                "tags": ["http", "probe", "tech-detect"],
+                            }
+                        )
                     )
                 except json.JSONDecodeError:
                     continue
-    
+
     return ScannerExecution(
-        findings, 
-        artifact_path if artifact_path.exists() else None, 
-        {"targets": len(hosts), "findings": len(findings)}
+        findings,
+        artifact_path if artifact_path.exists() else None,
+        {"targets": len(hosts), "findings": len(findings)},
     )
 
 
 # Update scanner registry with new tools
-SCANNER_REGISTRY.update({
-    "ffuf": run_ffuf,
-    "katana": run_katana,
-    "dnsx": run_dnsx,
-    "tlsx": run_tlsx,
-    "httpx-extended": run_httpx_extended,
-})
+SCANNER_REGISTRY.update(
+    {
+        "ffuf": run_ffuf,
+        "katana": run_katana,
+        "dnsx": run_dnsx,
+        "tlsx": run_tlsx,
+        "httpx-extended": run_httpx_extended,
+    }
+)

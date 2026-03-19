@@ -14,7 +14,9 @@ DOMAIN_RE = re.compile(
     re.IGNORECASE,
 )
 SERVER_RE = re.compile(r"(?:server|host)[:=]\\s*([a-z0-9.-]+)", re.IGNORECASE)
-CLIENT_RE = re.compile(r"(?:client id|client-id|identifier)[:=]\\s*([a-z0-9-]+)", re.IGNORECASE)
+CLIENT_RE = re.compile(
+    r"(?:client id|client-id|identifier)[:=]\\s*([a-z0-9-]+)", re.IGNORECASE
+)
 
 
 @dataclass
@@ -50,13 +52,23 @@ class InteractshSession:
         if self.domain_override:
             self.base_domain = self.domain_override
             return True
-        self.payload_file = self.output_path.with_name(self.output_path.name + ".payload")
+        self.payload_file = self.output_path.with_name(
+            self.output_path.name + ".payload"
+        )
         if self.payload_file.exists():
             try:
                 self.payload_file.unlink()
             except Exception:
                 pass
-        cmd = ["interactsh-client", "-json", "-o", str(self.output_path), "-ps", "-psf", str(self.payload_file)]
+        cmd = [
+            "interactsh-client",
+            "-json",
+            "-o",
+            str(self.output_path),
+            "-ps",
+            "-psf",
+            str(self.payload_file),
+        ]
         try:
             self.process = subprocess.Popen(
                 cmd,
@@ -69,7 +81,9 @@ class InteractshSession:
             return False
         ready = self._wait_for_domain()
         if not ready and self.logger:
-            self.logger.warning("Interactsh domain not discovered (check interactsh-client output)")
+            self.logger.warning(
+                "Interactsh domain not discovered (check interactsh-client output)"
+            )
         return ready
 
     def _wait_for_domain(self) -> bool:
@@ -81,7 +95,7 @@ class InteractshSession:
         while time.time() < deadline:
             if self.process.poll() is not None:
                 break
-            if getattr(self, 'payload_file', None) and self.payload_file.exists():
+            if getattr(self, "payload_file", None) and self.payload_file.exists():
                 content = self.payload_file.read_text().strip()
                 if content:
                     self.base_domain = content
@@ -176,7 +190,9 @@ class InteractshSession:
                 for key in ("data", "interactions", "items"):
                     value = data.get(key)
                     if isinstance(value, list):
-                        entries.extend([item for item in value if isinstance(item, dict)])
+                        entries.extend(
+                            [item for item in value if isinstance(item, dict)]
+                        )
             if entries:
                 return entries
         except json.JSONDecodeError:

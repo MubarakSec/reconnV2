@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Optional, Sequence, Set, List, Dict, Any
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from recon_cli.jobs import summary
@@ -16,7 +15,12 @@ from recon_cli.pipeline.parallel import DependencyResolver
 from recon_cli.utils.notify import send_pipeline_notification
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.error_taxonomy import classify_exception
-from recon_cli.utils.pipeline_trace import PipelineTraceRecorder, PipelineTraceSpan, bind_trace_scope
+from recon_cli.utils.pipeline_trace import (
+    PipelineTraceRecorder,
+    PipelineTraceSpan,
+    bind_trace_scope,
+)
+
 # Stage plugin loader lives on the plugins package to avoid name collisions.
 import recon_cli.plugins as plugins_module
 from recon_cli import metrics
@@ -25,7 +29,7 @@ import os
 
 @dataclass
 class StageExecutionOutcome:
-    result: Optional[bool] = None
+    result: Optional[Any] = None
     error: Optional[Exception] = None
     span: Optional[PipelineTraceSpan] = None
 
@@ -45,7 +49,9 @@ class PipelineRunner:
         self.stages.append(stage)
 
     @staticmethod
-    def _record_error_event(context: PipelineContext, exc: Exception, *, stage: Optional[str] = None) -> dict[str, object]:
+    def _record_error_event(
+        context: PipelineContext, exc: Exception, *, stage: Optional[str] = None
+    ) -> dict[str, object]:
         classification = classify_exception(exc)
         stats = context.record.metadata.stats.setdefault("error_taxonomy", {})
         events = stats.setdefault("events", [])
@@ -81,7 +87,9 @@ class PipelineRunner:
             partial["failure_message"] = str(error)
             context.manager.update_metadata(context.record)
         except Exception as summary_exc:  # pragma: no cover - defensive path
-            context.logger.warning("Failed to generate partial summary: %s", summary_exc)
+            context.logger.warning(
+                "Failed to generate partial summary: %s", summary_exc
+            )
 
     def _resolve_stages(self, stage_names: Optional[Sequence[str]]) -> list[Stage]:
         if not stage_names:
@@ -195,7 +203,11 @@ class PipelineRunner:
             entry = progress_map.get(stage_name)
         else:
             progress = context.record.metadata.stats.get("stage_progress", [])
-            entry = progress[-1] if progress and progress[-1].get("stage") == stage_name else None
+            entry = (
+                progress[-1]
+                if progress and progress[-1].get("stage") == stage_name
+                else None
+            )
 
         if entry is None:
             return
@@ -293,9 +305,10 @@ class PipelineRunner:
         stages: Sequence[Stage],
     ) -> list[list[str]]:
         dependency_map = {
-            name: set(deps) for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()
+            name: set(deps)
+            for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()
         }
-        
+
         resolver = DependencyResolver(dependency_map)
         execution_order = resolver.resolve(list(stages))
         context.record.metadata.stats["parallel_groups"] = len(execution_order)
@@ -303,7 +316,9 @@ class PipelineRunner:
         return execution_order
 
     def _get_max_parallel(self, context: PipelineContext) -> int:
-        max_parallel = int(getattr(context.runtime_config, "max_parallel_stages", 4) or 4)
+        max_parallel = int(
+            getattr(context.runtime_config, "max_parallel_stages", 4) or 4
+        )
         return max(1, max_parallel)
 
     @staticmethod
@@ -322,7 +337,9 @@ class PipelineRunner:
             "attempts": int(context.record.metadata.attempts.get(stage.name, 0)),
         }
         if status == "skipped":
-            skip_entry = context.record.metadata.stats.get("stage_skips", {}).get(stage.name, {})
+            skip_entry = context.record.metadata.stats.get("stage_skips", {}).get(
+                stage.name, {}
+            )
             if skip_entry.get("reason"):
                 attributes["skip_reason"] = skip_entry.get("reason")
                 span.add_event("stage.skipped", {"reason": skip_entry.get("reason")})
@@ -331,7 +348,10 @@ class PipelineRunner:
                 attributes["error_code"] = classification.get("code")
             if classification.get("category"):
                 attributes["error_category"] = classification.get("category")
-            span.add_event("stage.error", {k: v for k, v in classification.items() if v is not None})
+            span.add_event(
+                "stage.error",
+                {k: v for k, v in classification.items() if v is not None},
+            )
         span.finish(status=status, error=error, attributes=attributes)
 
     async def _run_one_stage(
@@ -342,7 +362,7 @@ class PipelineRunner:
         span: Optional[PipelineTraceSpan] = None,
     ) -> StageExecutionOutcome:
         timeout = int(os.environ.get("RECON_STAGE_TIMEOUT", 3600))
-        # The bind_trace_scope must be INSIDE the async block 
+        # The bind_trace_scope must be INSIDE the async block
         # because contextvars are local to the coroutine/task
         with bind_trace_scope(trace, span.span_id if span else None):
             try:
@@ -357,12 +377,16 @@ class PipelineRunner:
                             result = await result
                 return StageExecutionOutcome(result=result, span=span)
             except (TimeoutError, asyncio.TimeoutError) as exc:
-                context.logger.error("Stage '%s' timed out after %ds", stage.name, timeout)
+                context.logger.error(
+                    "Stage '%s' timed out after %ds", stage.name, timeout
+                )
                 return StageExecutionOutcome(error=exc, span=span)
             except Exception as exc:
                 return StageExecutionOutcome(error=exc, span=span)
 
-    async def run(self, context: PipelineContext, stages: Optional[Sequence[str]] = None):
+    async def run(
+        self, context: PipelineContext, stages: Optional[Sequence[str]] = None
+    ):
         if getattr(context, "_simple_mode", False):
             results: list[StageResult] = []
             for stage in self._resolve_stages(stages):
@@ -376,7 +400,7 @@ class PipelineRunner:
                         result = StageResult(success=bool(outcome.result))
                 except Exception as exc:  # pragma: no cover - runtime path
                     result = StageResult(success=False, error=str(exc))
-                
+
                 results.append(result)
                 if not result.success and not self.continue_on_error:
                     break
@@ -388,13 +412,19 @@ class PipelineRunner:
         error_recorded = False
         trace: Optional[PipelineTraceRecorder] = None
         try:
-            use_parallel = bool(getattr(context.runtime_config, "parallel_stages", False))
+            use_parallel = bool(
+                getattr(context.runtime_config, "parallel_stages", False)
+            )
             if use_parallel:
                 stage_names = [stage.name for stage in selected_stages]
                 if len(set(stage_names)) != len(stage_names):
-                    context.logger.warning("Duplicate stage names detected; running sequentially")
+                    context.logger.warning(
+                        "Duplicate stage names detected; running sequentially"
+                    )
                     use_parallel = False
-            trace = self._start_trace(context, selected_stages, parallel_enabled=use_parallel)
+            trace = self._start_trace(
+                context, selected_stages, parallel_enabled=use_parallel
+            )
             if use_parallel:
                 await self._run_parallel(context, selected_stages, trace=trace)
                 return
@@ -403,30 +433,60 @@ class PipelineRunner:
             for stage in selected_stages:
                 started_at = time_utils.iso_now()
                 self._update_stage_progress(
-                    context, stage.name, "running", started_at=started_at, progress_map=progress_map
+                    context,
+                    stage.name,
+                    "running",
+                    started_at=started_at,
+                    progress_map=progress_map,
                 )
 
                 span = self._start_stage_span(context, stage, trace)
                 outcome = await self._run_one_stage(stage, context, trace, span)
-                
+
                 finished_at = time_utils.iso_now()
                 if outcome.error:
                     error_recorded = True
-                    self._handle_stage_failure(context, stage, span, outcome.error, progress_map=progress_map, finished_at=finished_at)
+                    self._handle_stage_failure(
+                        context,
+                        stage,
+                        span,
+                        outcome.error,
+                        progress_map=progress_map,
+                        finished_at=finished_at,
+                    )
                     error = outcome.error
                     if not self.continue_on_error:
                         raise error
                 else:
-                    success = outcome.result.success if isinstance(outcome.result, StageResult) else bool(outcome.result)
-                    self._handle_stage_success(
-                        context, stage, span, success, progress_map=progress_map, finished_at=finished_at
+                    success = (
+                        outcome.result.success
+                        if isinstance(outcome.result, StageResult)
+                        else bool(outcome.result)
                     )
+                    self._handle_stage_success(
+                        context,
+                        stage,
+                        span,
+                        success,
+                        progress_map=progress_map,
+                        finished_at=finished_at,
+                    )
+
+                self._update_stage_progress(
+                    context,
+                    stage.name,
+                    str(progress_map[stage.name]["status"]),
+                    finished_at=time_utils.iso_now(),
+                    progress_map=progress_map,
+                )
             context.mark_finished()
             summary.generate_summary(context)
         except Exception as exc:
             error = error or exc
             if not error_recorded:
-                self._record_error_event(context, error, stage=context.record.metadata.stage)
+                self._record_error_event(
+                    context, error, stage=context.record.metadata.stage
+                )
             self._generate_partial_summary(context, error)
             raise
         finally:
@@ -446,11 +506,11 @@ class PipelineRunner:
         stage_list = list(stages)
         stage_map = {stage.name: stage for stage in stage_list}
         progress_map = self._initialize_progress(context, stage_list, parallel=True)
-        
+
         # Build dependency graph
         deps = {stage.name: set() for stage in stage_list}
         rev_deps = {stage.name: set() for stage in stage_list}
-        
+
         known_deps = DependencyResolver.STAGE_DEPENDENCIES
         for stage in stage_list:
             s_deps = known_deps.get(stage.name, set())
@@ -462,35 +522,52 @@ class PipelineRunner:
         completed: Set[str] = set()
         running: Set[str] = set()
         ready: List[str] = [s.name for s in stage_list if not deps[s.name]]
-        
+
         max_parallel = self._get_max_parallel(context)
         tasks: Dict[str, asyncio.Task] = {}
-        
+
         first_error: Optional[Exception] = None
-        
+
         async def _run_stage_wrapper(name: str):
             stage = stage_map[name]
             span = self._start_stage_span(context, stage, trace)
             started_at = time_utils.iso_now()
             self._update_stage_progress(
-                context, name, "running", started_at=started_at, progress_map=progress_map
+                context,
+                name,
+                "running",
+                started_at=started_at,
+                progress_map=progress_map,
             )
-            
-            # Check if this stage can handle streaming (future enhancement)
-            # For now, we signal 'all_upstream_done' when all DEPS are in completed.
-            
+
             outcome = await self._run_one_stage(stage, context, trace, span)
             finished_at = time_utils.iso_now()
-            
+
             if outcome.error:
                 nonlocal first_error
                 if not first_error:
                     first_error = outcome.error
-                self._handle_stage_failure(context, stage, span, outcome.error, progress_map=progress_map, finished_at=finished_at)
+                self._handle_stage_failure(
+                    context,
+                    stage,
+                    span,
+                    outcome.error,
+                    progress_map=progress_map,
+                    finished_at=finished_at,
+                )
             else:
-                success = outcome.result.success if isinstance(outcome.result, StageResult) else bool(outcome.result)
+                success = (
+                    outcome.result.success
+                    if isinstance(outcome.result, StageResult)
+                    else bool(outcome.result)
+                )
                 self._handle_stage_success(
-                    context, stage, span, success, progress_map=progress_map, finished_at=finished_at
+                    context,
+                    stage,
+                    span,
+                    success,
+                    progress_map=progress_map,
+                    finished_at=finished_at,
                 )
             return name
 
@@ -500,27 +577,29 @@ class PipelineRunner:
                 name = ready.pop(0)
                 running.add(name)
                 tasks[name] = asyncio.create_task(_run_stage_wrapper(name))
-            
+
             if not tasks:
                 break
-                
+
             # Wait for any task to finish
-            done, _ = await asyncio.wait(tasks.values(), return_when=asyncio.FIRST_COMPLETED)
-            
+            done, _ = await asyncio.wait(
+                tasks.values(), return_when=asyncio.FIRST_COMPLETED
+            )
+
             for task in done:
                 name = task.result()
                 del tasks[name]
                 running.remove(name)
                 completed.add(name)
                 context.finished_stages.add(name)
-                
+
                 # Check for new ready stages
                 for dependent in rev_deps[name]:
                     if dependent not in completed and dependent not in running:
                         if deps[dependent].issubset(completed):
                             if dependent not in ready:
                                 ready.append(dependent)
-            
+
             if first_error and not self.continue_on_error:
                 # Stop launching new things, but wait for current ones to finish
                 ready.clear()
@@ -541,10 +620,12 @@ def run_pipeline(
     context = PipelineContext(record=record, manager=manager, force=force)
     plugin_stages = plugins_module.load_stage_plugins(logger=context.logger)
     runner = PipelineRunner(list(PIPELINE_STAGES) + plugin_stages)
-    
+
     try:
         loop = asyncio.get_running_loop()
-        asyncio.run_coroutine_threadsafe(runner.run(context, stages=stages), loop).result()
+        asyncio.run_coroutine_threadsafe(
+            runner.run(context, stages=stages), loop
+        ).result()
     except RuntimeError:
         asyncio.run(runner.run(context, stages=stages))
 

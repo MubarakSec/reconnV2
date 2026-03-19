@@ -19,7 +19,9 @@ class ActiveIntelligenceStage(Stage):
         return bool(getattr(context.runtime_config, "auto_active_modules", True))
 
     def execute(self, context: PipelineContext) -> None:
-        modules = list(dict.fromkeys(m.lower() for m in context.record.spec.active_modules))
+        modules = list(
+            dict.fromkeys(m.lower() for m in context.record.spec.active_modules)
+        )
         if not modules and getattr(context.runtime_config, "auto_active_modules", True):
             modules = active_modules.available_modules()
         if not modules:
@@ -45,10 +47,22 @@ class ActiveIntelligenceStage(Stage):
                 continue
             score = int(entry.get("score", 0))
             host_scores[host] = max(host_scores.get(host, 0), score)
-        ranked_hosts = [host for host, _ in sorted(host_scores.items(), key=lambda item: item[1], reverse=True)]
+        ranked_hosts = [
+            host
+            for host, _ in sorted(
+                host_scores.items(), key=lambda item: item[1], reverse=True
+            )
+        ]
 
-        apply_auth = bool(getattr(context.runtime_config, "auth_apply_active_modules", False)) and context.auth_enabled()
-        headers = context.auth_headers({"User-Agent": active_modules.USER_AGENT}) if apply_auth else {"User-Agent": active_modules.USER_AGENT}
+        apply_auth = (
+            bool(getattr(context.runtime_config, "auth_apply_active_modules", False))
+            and context.auth_enabled()
+        )
+        headers = (
+            context.auth_headers({"User-Agent": active_modules.USER_AGENT})
+            if apply_auth
+            else {"User-Agent": active_modules.USER_AGENT}
+        )
         auth_session = context.auth_session() if apply_auth else None
         cookies = auth_session.cookies.get_dict() if auth_session else None
         session = active_modules.create_session(
@@ -75,10 +89,13 @@ class ActiveIntelligenceStage(Stage):
                 artifact_path = artifact_dir / result.artifact_name
                 try:
                     artifact_path.write_text(
-                        json.dumps(result.artifact_data, indent=2, sort_keys=True), encoding="utf-8"
+                        json.dumps(result.artifact_data, indent=2, sort_keys=True),
+                        encoding="utf-8",
                     )
                 except TypeError:
-                    artifact_path.write_text(json.dumps(result.artifact_data), encoding="utf-8")
+                    artifact_path.write_text(
+                        json.dumps(result.artifact_data), encoding="utf-8"
+                    )
         if stats:
             context.record.metadata.stats.setdefault("active_modules", {}).update(stats)
             context.manager.update_metadata(context.record)

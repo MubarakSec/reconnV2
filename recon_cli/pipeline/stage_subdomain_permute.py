@@ -128,7 +128,9 @@ class SubdomainPermuteStage(Stage):
             if etype == "hostname":
                 host = entry.get("hostname")
             elif etype == "url":
-                host = entry.get("hostname") or (entry.get("url") and urlparse(entry.get("url")).hostname)
+                host = entry.get("hostname") or (
+                    entry.get("url") and urlparse(entry.get("url")).hostname
+                )
             else:
                 host = None
             if isinstance(host, str) and host:

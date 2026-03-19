@@ -50,7 +50,5 @@ def iter_jsonl(path: Path):
                 continue
 
 
-
-
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return list(iter_jsonl(path))

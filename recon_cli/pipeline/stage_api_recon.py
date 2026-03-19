@@ -52,8 +52,20 @@ class APIReconStage(Stage):
         "/api/graphql",
         "/grpc.health.v1.Health/Check",
     ]
-    SPEC_INDICATORS = ("openapi", "swagger", "\"openapi\"", "\"swagger\"", "swagger-ui", "redoc")
-    GRAPHQL_ERROR_INDICATORS = ("must provide query", "query not provided", "graphql missing", "no query found")
+    SPEC_INDICATORS = (
+        "openapi",
+        "swagger",
+        '"openapi"',
+        '"swagger"',
+        "swagger-ui",
+        "redoc",
+    )
+    GRAPHQL_ERROR_INDICATORS = (
+        "must provide query",
+        "query not provided",
+        "graphql missing",
+        "no query found",
+    )
     LOGIN_HINTS = ("login", "signin", "sign-in", "auth", "sso", "oauth")
     TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
@@ -65,7 +77,9 @@ class APIReconStage(Stage):
             return False
 
         if not AsyncHTTPClient:
-            context.logger.warning("AsyncHTTPClient unavailable. Skipping async api recon.")
+            context.logger.warning(
+                "AsyncHTTPClient unavailable. Skipping async api recon."
+            )
             return False
 
         host_info = self._collect_hosts(context)
@@ -95,8 +109,10 @@ class APIReconStage(Stage):
             parsed_base = urlparse(base_url)
             scheme = parsed_base.scheme or "https"
             base = f"{scheme}://{host}"
-            
-            host_probe_paths = list(dict.fromkeys(self.PROBE_PATHS + enriched_paths.get(host, [])))
+
+            host_probe_paths = list(
+                dict.fromkeys(self.PROBE_PATHS + enriched_paths.get(host, []))
+            )
             for path in host_probe_paths:
                 probe_attempts += 1
                 if path not in self.PROBE_PATHS:
@@ -113,7 +129,7 @@ class APIReconStage(Stage):
             total_timeout=timeout,
             verify_ssl=context.runtime_config.verify_tls,
         )
-        
+
         headers = context.auth_headers(
             {"User-Agent": "recon-cli api-recon", "Accept": "application/json"}
         )
@@ -136,7 +152,7 @@ class APIReconStage(Stage):
 
                 if isinstance(resp, Exception) or resp.status == 0:
                     continue
-                
+
                 status_code = resp.status
                 context.record_host_error(host, status_code)
                 if context.is_host_blocked(host):
@@ -145,7 +161,7 @@ class APIReconStage(Stage):
                 content_type = resp.headers.get("Content-Type", "").lower()
                 text = resp.body or ""
                 meta = self._response_meta(resp, text)
-                
+
                 if status_code >= 500:
                     continue
 
@@ -155,11 +171,14 @@ class APIReconStage(Stage):
                     if "graphql" in lowered_text:
                         is_candidate = True
                     elif status_code in {200, 400}:
-                        if any(hint in lowered_text for hint in self.GRAPHQL_ERROR_INDICATORS):
+                        if any(
+                            hint in lowered_text
+                            for hint in self.GRAPHQL_ERROR_INDICATORS
+                        ):
                             is_candidate = True
                         elif "errors" in lowered_text and "query" in lowered_text:
                             is_candidate = True
-                    
+
                     if is_candidate:
                         graphql_candidates.append((host, url))
                     elif status_code in {401, 403, 302}:
@@ -170,7 +189,10 @@ class APIReconStage(Stage):
                             confidence=0.4,
                             source="api-recon",
                             tags=["api:graphql"],
-                            evidence={"status_code": status_code, "location": meta.get("location")},
+                            evidence={
+                                "status_code": status_code,
+                                "location": meta.get("location"),
+                            },
                         )
                     continue
 
@@ -201,7 +223,10 @@ class APIReconStage(Stage):
                         confidence=0.5,
                         source="api-recon",
                         tags=["api:openapi"],
-                        evidence={"status_code": status_code, "location": meta.get("location")},
+                        evidence={
+                            "status_code": status_code,
+                            "location": meta.get("location"),
+                        },
                     )
                     if host not in signaled_hosts:
                         context.emit_signal(
@@ -221,7 +246,9 @@ class APIReconStage(Stage):
                     paths_obj = data.get("paths") or {}
                     if isinstance(paths_obj, dict):
                         for api_path in list(paths_obj.keys())[:200]:
-                            full_url = urljoin(f"{urlparse(url).scheme}://{host}", api_path)
+                            full_url = urljoin(
+                                f"{urlparse(url).scheme}://{host}", api_path
+                            )
                             if not context.url_allowed(full_url):
                                 continue
                             payload = {
@@ -265,10 +292,17 @@ class APIReconStage(Stage):
                 # Active GraphQL probing: POST {"query": "{__typename}"}
                 # Must be 200 OK and contain {"data": {"__typename": ...}}
                 probe_tasks = [
-                    client.post(url, json={"query": "{__typename}"}, headers=headers, follow_redirects=True)
+                    client.post(
+                        url,
+                        json={"query": "{__typename}"},
+                        headers=headers,
+                        follow_redirects=True,
+                    )
                     for _, url in graphql_candidates
                 ]
-                probe_responses = await asyncio.gather(*probe_tasks, return_exceptions=True)
+                probe_responses = await asyncio.gather(
+                    *probe_tasks, return_exceptions=True
+                )
 
                 for (host, url), p_resp in zip(graphql_candidates, probe_responses):
                     if isinstance(p_resp, Exception) or p_resp.status != 200:
@@ -283,7 +317,7 @@ class APIReconStage(Stage):
                             evidence={"reason": "active probe failed or not 200"},
                         )
                         continue
-                    
+
                     p_body = p_resp.body or ""
                     # Check for honest proof: {"data": {"__typename": ...}}
                     if '"data"' in p_body and '"__typename"' in p_body:
@@ -309,14 +343,16 @@ class APIReconStage(Stage):
                             )
                             signaled_hosts.add(host)
                     else:
-                         context.emit_signal(
+                        context.emit_signal(
                             "graphql_candidate",
                             "url",
                             url,
                             confidence=0.4,
                             source="api-recon",
                             tags=["api:graphql"],
-                            evidence={"reason": "active probe response missing expected data"},
+                            evidence={
+                                "reason": "active probe response missing expected data"
+                            },
                         )
 
         stats = context.record.metadata.stats.setdefault("api_recon", {})
@@ -329,6 +365,7 @@ class APIReconStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         import asyncio
+
         asyncio.run(self.run_async(context))
 
     def _collect_hosts(self, context: PipelineContext) -> Dict[str, Dict[str, object]]:
@@ -407,10 +444,16 @@ class APIReconStage(Stage):
                 per_host[host].add("/graphiql")
             if "grpc" in norm:
                 per_host[host].add("/grpc.health.v1.Health/Check")
-        max_enriched = max(0, int(getattr(context.runtime_config, "api_recon_max_enriched_paths", 40)))
+        max_enriched = max(
+            0, int(getattr(context.runtime_config, "api_recon_max_enriched_paths", 40))
+        )
         if max_enriched <= 0:
             return {}
-        return {host: sorted(paths)[:max_enriched] for host, paths in per_host.items() if paths}
+        return {
+            host: sorted(paths)[:max_enriched]
+            for host, paths in per_host.items()
+            if paths
+        }
 
     def _normalize_probe_path(self, path: str) -> str:
         value = str(path or "").strip()
@@ -423,7 +466,10 @@ class APIReconStage(Stage):
         if value in {"/", "/index.html"}:
             return ""
         lowered = value.lower()
-        if any(token in lowered for token in ("swagger", "openapi", "api-docs", "graphql", "grpc", "/api/")):
+        if any(
+            token in lowered
+            for token in ("swagger", "openapi", "api-docs", "graphql", "grpc", "/api/")
+        ):
             return value
         return ""
 
@@ -448,7 +494,9 @@ class APIReconStage(Stage):
         return [host for host, _ in scored]
 
     @staticmethod
-    def _parse_spec(text: str, content_type: str) -> Tuple[Dict[str, object], Optional[str]]:
+    def _parse_spec(
+        text: str, content_type: str
+    ) -> Tuple[Dict[str, object], Optional[str]]:
         if not text:
             return {}, None
         lowered = (content_type or "").lower()
@@ -460,7 +508,12 @@ class APIReconStage(Stage):
                 data = {}
             if isinstance(data, dict) and ("openapi" in data or "swagger" in data):
                 return data, "json"
-        if "yaml" in lowered or "yml" in lowered or "openapi:" in text or "swagger:" in text:
+        if (
+            "yaml" in lowered
+            or "yml" in lowered
+            or "openapi:" in text
+            or "swagger:" in text
+        ):
             try:
                 import yaml  # type: ignore
             except Exception:

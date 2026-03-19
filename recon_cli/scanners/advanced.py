@@ -32,9 +32,11 @@ logger = logging.getLogger(__name__)
 #                     Base Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 @dataclass
 class ScanResult:
     """نتيجة فحص"""
+
     target: str
     scanner: str
     findings: List[Dict[str, Any]] = field(default_factory=list)
@@ -42,15 +44,15 @@ class ScanResult:
     exit_code: int = 0
     duration: float = 0.0
     error: Optional[str] = None
-    
+
     @property
     def count(self) -> int:
         return len(self.findings)
-    
+
     @property
     def has_findings(self) -> bool:
         return self.count > 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "target": self.target,
@@ -64,10 +66,10 @@ class ScanResult:
 
 class BaseScanner(ABC):
     """Base class لجميع الماسحات"""
-    
+
     name: str = "base"
     tool_name: str = "tool"
-    
+
     def __init__(
         self,
         timeout: float = 300.0,
@@ -78,7 +80,7 @@ class BaseScanner(ABC):
         self.threads = threads
         self.extra_args = extra_args or []
         self.executor = CommandExecutor()
-    
+
     @abstractmethod
     def build_command(
         self,
@@ -87,12 +89,12 @@ class BaseScanner(ABC):
     ) -> List[str]:
         """بناء الأمر"""
         pass
-    
+
     @abstractmethod
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
         """تحليل المخرجات"""
         pass
-    
+
     async def scan(
         self,
         targets: List[str],
@@ -100,40 +102,38 @@ class BaseScanner(ABC):
     ) -> ScanResult:
         """
         تنفيذ الفحص.
-        
+
         Args:
             targets: قائمة الأهداف
-            
+
         Returns:
             ScanResult
         """
         import time
+
         start = time.time()
-        
+
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
             delete=False,
         ) as output_file:
             output_path = Path(output_file.name)
-        
+
         try:
             command = self.build_command(targets, output_path)
-            
-            logger.info(
-                "Running %s on %d targets",
-                self.name, len(targets)
-            )
-            
+
+            logger.info("Running %s on %d targets", self.name, len(targets))
+
             result = await self.executor.run_async(
                 command,
                 timeout=self.timeout,
             )
-            
+
             findings = []
             if output_path.exists():
                 findings = self.parse_output(output_path)
-            
+
             return ScanResult(
                 target=targets[0] if len(targets) == 1 else f"{len(targets)} targets",
                 scanner=self.name,
@@ -142,7 +142,7 @@ class BaseScanner(ABC):
                 exit_code=result.returncode,
                 duration=time.time() - start,
             )
-            
+
         except asyncio.TimeoutError:
             return ScanResult(
                 target=targets[0] if len(targets) == 1 else f"{len(targets)} targets",
@@ -166,25 +166,33 @@ class BaseScanner(ABC):
 #                     Uncover Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 class UncoverScanner(BaseScanner):
     """
     Uncover - اكتشاف سلبي للأصول.
-    
+
     يستخدم APIs متعددة: Shodan, Censys, Fofa, etc.
-    
+
     Example:
         >>> scanner = UncoverScanner(engines=["shodan", "censys"])
         >>> result = await scanner.scan(["example.com"])
     """
-    
+
     name = "uncover"
     tool_name = "uncover"
-    
+
     SUPPORTED_ENGINES = [
-        "shodan", "censys", "fofa", "quake", "hunter",
-        "zoomeye", "netlas", "criminalip", "publicwww",
+        "shodan",
+        "censys",
+        "fofa",
+        "quake",
+        "hunter",
+        "zoomeye",
+        "netlas",
+        "criminalip",
+        "publicwww",
     ]
-    
+
     def __init__(
         self,
         engines: Optional[List[str]] = None,
@@ -194,7 +202,7 @@ class UncoverScanner(BaseScanner):
         super().__init__(**kwargs)
         self.engines = engines or ["shodan", "censys"]
         self.limit = limit
-    
+
     def build_command(
         self,
         targets: List[str],
@@ -202,22 +210,25 @@ class UncoverScanner(BaseScanner):
     ) -> List[str]:
         cmd = [
             self.tool_name,
-            "-q", ",".join(targets),
-            "-o", str(output_file),
+            "-q",
+            ",".join(targets),
+            "-o",
+            str(output_file),
             "-json",
-            "-limit", str(self.limit),
+            "-limit",
+            str(self.limit),
         ]
-        
+
         for engine in self.engines:
             if engine in self.SUPPORTED_ENGINES:
                 cmd.extend(["-e", engine])
-        
+
         cmd.extend(self.extra_args)
         return cmd
-    
+
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
         findings = []
-        
+
         with open(output_file, "r") as f:
             for line in f:
                 line = line.strip()
@@ -225,17 +236,19 @@ class UncoverScanner(BaseScanner):
                     continue
                 try:
                     data = json.loads(line)
-                    findings.append({
-                        "type": "asset",
-                        "host": data.get("host", ""),
-                        "ip": data.get("ip", ""),
-                        "port": data.get("port", 0),
-                        "source": data.get("source", ""),
-                        "url": data.get("url", ""),
-                    })
+                    findings.append(
+                        {
+                            "type": "asset",
+                            "host": data.get("host", ""),
+                            "ip": data.get("ip", ""),
+                            "port": data.get("port", 0),
+                            "source": data.get("source", ""),
+                            "url": data.get("url", ""),
+                        }
+                    )
                 except json.JSONDecodeError:
                     continue
-        
+
         return findings
 
 
@@ -243,18 +256,19 @@ class UncoverScanner(BaseScanner):
 #                     Naabu Port Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 class NaabuScanner(BaseScanner):
     """
     Naabu - ماسح منافذ سريع.
-    
+
     Example:
         >>> scanner = NaabuScanner(ports="top-100")
         >>> result = await scanner.scan(["192.168.1.1"])
     """
-    
+
     name = "naabu"
     tool_name = "naabu"
-    
+
     def __init__(
         self,
         ports: str = "top-100",
@@ -264,7 +278,7 @@ class NaabuScanner(BaseScanner):
         super().__init__(**kwargs)
         self.ports = ports
         self.rate = rate
-    
+
     def build_command(
         self,
         targets: List[str],
@@ -274,27 +288,32 @@ class NaabuScanner(BaseScanner):
         targets_file = output_file.with_suffix(".targets.txt")
         with open(targets_file, "w") as f:
             f.write("\n".join(targets))
-        
+
         cmd = [
             self.tool_name,
-            "-l", str(targets_file),
-            "-o", str(output_file),
+            "-l",
+            str(targets_file),
+            "-o",
+            str(output_file),
             "-json",
-            "-p", self.ports,
-            "-rate", str(self.rate),
-            "-c", str(self.threads),
+            "-p",
+            self.ports,
+            "-rate",
+            str(self.rate),
+            "-c",
+            str(self.threads),
             "-silent",
         ]
-        
+
         cmd.extend(self.extra_args)
         return cmd
-    
+
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
         findings = []
-        
+
         if not output_file.exists():
             return findings
-        
+
         with open(output_file, "r") as f:
             for line in f:
                 line = line.strip()
@@ -302,24 +321,28 @@ class NaabuScanner(BaseScanner):
                     continue
                 try:
                     data = json.loads(line)
-                    findings.append({
-                        "type": "open_port",
-                        "host": data.get("host", ""),
-                        "ip": data.get("ip", ""),
-                        "port": data.get("port", 0),
-                        "protocol": data.get("protocol", "tcp"),
-                    })
+                    findings.append(
+                        {
+                            "type": "open_port",
+                            "host": data.get("host", ""),
+                            "ip": data.get("ip", ""),
+                            "port": data.get("port", 0),
+                            "protocol": data.get("protocol", "tcp"),
+                        }
+                    )
                 except json.JSONDecodeError:
                     # Plain text format: host:port
                     if ":" in line:
                         host, port = line.rsplit(":", 1)
-                        findings.append({
-                            "type": "open_port",
-                            "host": host,
-                            "port": int(port),
-                            "protocol": "tcp",
-                        })
-        
+                        findings.append(
+                            {
+                                "type": "open_port",
+                                "host": host,
+                                "port": int(port),
+                                "protocol": "tcp",
+                            }
+                        )
+
         return findings
 
 
@@ -327,20 +350,21 @@ class NaabuScanner(BaseScanner):
 #                     Dalfox XSS Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 class DalfoxScanner(BaseScanner):
     """
     Dalfox - ماسح XSS.
-    
+
     Example:
         >>> scanner = DalfoxScanner()
         >>> result = await scanner.scan_urls([
         ...     "https://example.com/search?q=test"
         ... ])
     """
-    
+
     name = "dalfox"
     tool_name = "dalfox"
-    
+
     def __init__(
         self,
         blind_url: Optional[str] = None,
@@ -352,7 +376,7 @@ class DalfoxScanner(BaseScanner):
         self.blind_url = blind_url
         self.custom_payload = custom_payload
         self.waf_evasion = waf_evasion
-    
+
     def build_command(
         self,
         targets: List[str],
@@ -362,48 +386,54 @@ class DalfoxScanner(BaseScanner):
         urls_file = output_file.with_suffix(".urls.txt")
         with open(urls_file, "w") as f:
             f.write("\n".join(targets))
-        
+
         cmd = [
             self.tool_name,
-            "file", str(urls_file),
-            "-o", str(output_file),
-            "--format", "json",
-            "-w", str(self.threads),
+            "file",
+            str(urls_file),
+            "-o",
+            str(output_file),
+            "--format",
+            "json",
+            "-w",
+            str(self.threads),
             "--silence",
         ]
-        
+
         if self.blind_url:
             cmd.extend(["--blind", self.blind_url])
-        
+
         if self.custom_payload:
             cmd.extend(["--custom-payload", self.custom_payload])
-        
+
         if self.waf_evasion:
             cmd.append("--waf-evasion")
-        
+
         cmd.extend(self.extra_args)
         return cmd
-    
+
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
         findings = []
-        
+
         if not output_file.exists():
             return findings
-        
+
         try:
             with open(output_file, "r") as f:
                 data = json.load(f)
-            
+
             for vuln in data.get("pocs", []):
-                findings.append({
-                    "type": "xss",
-                    "severity": "high",
-                    "url": vuln.get("url", ""),
-                    "parameter": vuln.get("param", ""),
-                    "payload": vuln.get("payload", ""),
-                    "method": vuln.get("method", "GET"),
-                    "evidence": vuln.get("evidence", ""),
-                })
+                findings.append(
+                    {
+                        "type": "xss",
+                        "severity": "high",
+                        "url": vuln.get("url", ""),
+                        "parameter": vuln.get("param", ""),
+                        "payload": vuln.get("payload", ""),
+                        "method": vuln.get("method", "GET"),
+                        "evidence": vuln.get("evidence", ""),
+                    }
+                )
         except (json.JSONDecodeError, KeyError):
             # Try line-by-line JSON
             with open(output_file, "r") as f:
@@ -413,18 +443,20 @@ class DalfoxScanner(BaseScanner):
                         continue
                     try:
                         data = json.loads(line)
-                        findings.append({
-                            "type": "xss",
-                            "severity": "high",
-                            "url": data.get("url", ""),
-                            "parameter": data.get("param", ""),
-                            "payload": data.get("payload", ""),
-                        })
+                        findings.append(
+                            {
+                                "type": "xss",
+                                "severity": "high",
+                                "url": data.get("url", ""),
+                                "parameter": data.get("param", ""),
+                                "payload": data.get("payload", ""),
+                            }
+                        )
                     except json.JSONDecodeError:
                         continue
-        
+
         return findings
-    
+
     async def scan_urls(
         self,
         urls: List[str],
@@ -438,20 +470,21 @@ class DalfoxScanner(BaseScanner):
 #                     SQLMap Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 class SQLMapScanner(BaseScanner):
     """
     SQLMap - ماسح SQL Injection.
-    
+
     Example:
         >>> scanner = SQLMapScanner(level=3, risk=2)
         >>> result = await scanner.scan_url(
         ...     "https://example.com/item?id=1"
         ... )
     """
-    
+
     name = "sqlmap"
     tool_name = "sqlmap"
-    
+
     def __init__(
         self,
         level: int = 1,
@@ -467,7 +500,7 @@ class SQLMapScanner(BaseScanner):
         self.dbms = dbms
         self.technique = technique
         self.tamper = tamper or []
-    
+
     def build_command(
         self,
         targets: List[str],
@@ -475,68 +508,76 @@ class SQLMapScanner(BaseScanner):
     ) -> List[str]:
         # SQLMap works on single URL
         url = targets[0]
-        
+
         output_dir = output_file.parent / "sqlmap_output"
         output_dir.mkdir(exist_ok=True)
-        
+
         cmd = [
             self.tool_name,
-            "-u", url,
+            "-u",
+            url,
             "--batch",
-            "--output-dir", str(output_dir),
-            "--level", str(self.level),
-            "--risk", str(self.risk),
-            "--technique", self.technique,
-            "--threads", str(self.threads),
+            "--output-dir",
+            str(output_dir),
+            "--level",
+            str(self.level),
+            "--risk",
+            str(self.risk),
+            "--technique",
+            self.technique,
+            "--threads",
+            str(self.threads),
             "--forms",
             "--crawl=2",
         ]
-        
+
         if self.dbms:
             cmd.extend(["--dbms", self.dbms])
-        
+
         for t in self.tamper:
             cmd.extend(["--tamper", t])
-        
+
         cmd.extend(self.extra_args)
         return cmd
-    
+
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
         findings = []
-        
+
         output_dir = output_file.parent / "sqlmap_output"
         if not output_dir.exists():
             return findings
-        
+
         # Parse SQLMap log files
         for log_file in output_dir.rglob("log"):
             if not log_file.exists():
                 continue
-            
+
             with open(log_file, "r") as f:
                 content = f.read()
-            
+
             # Look for injection points
             if "is vulnerable" in content.lower():
                 # Extract vulnerable parameters
                 import re
-                
+
                 param_matches = re.findall(
                     r"Parameter: (\w+) \((.*?)\)",
                     content,
                 )
-                
+
                 for param, injection_type in param_matches:
-                    findings.append({
-                        "type": "sqli",
-                        "severity": "critical",
-                        "parameter": param,
-                        "injection_type": injection_type,
-                        "evidence": content[:500],
-                    })
-        
+                    findings.append(
+                        {
+                            "type": "sqli",
+                            "severity": "critical",
+                            "parameter": param,
+                            "injection_type": injection_type,
+                            "evidence": content[:500],
+                        }
+                    )
+
         return findings
-    
+
     async def scan_url(
         self,
         url: str,
@@ -550,10 +591,11 @@ class SQLMapScanner(BaseScanner):
 #                     Nuclei Enhanced Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 class NucleiScanner(BaseScanner):
     """
     Nuclei - ماسح ثغرات متقدم.
-    
+
     Example:
         >>> scanner = NucleiScanner(
         ...     severity=["critical", "high"],
@@ -561,10 +603,10 @@ class NucleiScanner(BaseScanner):
         ... )
         >>> result = await scanner.scan(["https://example.com"])
     """
-    
+
     name = "nuclei"
     tool_name = "nuclei"
-    
+
     def __init__(
         self,
         severity: Optional[List[str]] = None,
@@ -582,7 +624,7 @@ class NucleiScanner(BaseScanner):
         self.templates = templates
         self.rate_limit = rate_limit
         self.bulk_size = bulk_size
-    
+
     def build_command(
         self,
         targets: List[str],
@@ -592,40 +634,45 @@ class NucleiScanner(BaseScanner):
         targets_file = output_file.with_suffix(".targets.txt")
         with open(targets_file, "w") as f:
             f.write("\n".join(targets))
-        
+
         cmd = [
             self.tool_name,
-            "-l", str(targets_file),
-            "-o", str(output_file),
+            "-l",
+            str(targets_file),
+            "-o",
+            str(output_file),
             "-jsonl",
-            "-c", str(self.threads),
-            "-rl", str(self.rate_limit),
-            "-bs", str(self.bulk_size),
+            "-c",
+            str(self.threads),
+            "-rl",
+            str(self.rate_limit),
+            "-bs",
+            str(self.bulk_size),
             "-silent",
         ]
-        
+
         if self.severity:
             cmd.extend(["-s", ",".join(self.severity)])
-        
+
         if self.tags:
             cmd.extend(["-tags", ",".join(self.tags)])
-        
+
         if self.exclude_tags:
             cmd.extend(["-etags", ",".join(self.exclude_tags)])
-        
+
         if self.templates:
             for template in self.templates:
                 cmd.extend(["-t", template])
-        
+
         cmd.extend(self.extra_args)
         return cmd
-    
+
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
         findings = []
-        
+
         if not output_file.exists():
             return findings
-        
+
         with open(output_file, "r") as f:
             for line in f:
                 line = line.strip()
@@ -634,21 +681,23 @@ class NucleiScanner(BaseScanner):
                 try:
                     data = json.loads(line)
                     info = data.get("info", {})
-                    findings.append({
-                        "type": "vulnerability",
-                        "template_id": data.get("template-id", ""),
-                        "name": info.get("name", ""),
-                        "severity": info.get("severity", "info"),
-                        "host": data.get("host", ""),
-                        "matched_at": data.get("matched-at", ""),
-                        "description": info.get("description", ""),
-                        "tags": info.get("tags", []),
-                        "reference": info.get("reference", []),
-                        "curl_command": data.get("curl-command", ""),
-                    })
+                    findings.append(
+                        {
+                            "type": "vulnerability",
+                            "template_id": data.get("template-id", ""),
+                            "name": info.get("name", ""),
+                            "severity": info.get("severity", "info"),
+                            "host": data.get("host", ""),
+                            "matched_at": data.get("matched-at", ""),
+                            "description": info.get("description", ""),
+                            "tags": info.get("tags", []),
+                            "reference": info.get("reference", []),
+                            "curl_command": data.get("curl-command", ""),
+                        }
+                    )
                 except json.JSONDecodeError:
                     continue
-        
+
         return findings
 
 
@@ -656,16 +705,17 @@ class NucleiScanner(BaseScanner):
 #                     Scanner Factory
 # ═══════════════════════════════════════════════════════════
 
+
 class ScannerFactory:
     """
     مصنع الماسحات.
-    
+
     Example:
         >>> factory = ScannerFactory()
         >>> scanner = factory.create("naabu", ports="1-1000")
         >>> result = await scanner.scan(["example.com"])
     """
-    
+
     SCANNERS = {
         "uncover": UncoverScanner,
         "naabu": NaabuScanner,
@@ -673,15 +723,17 @@ class ScannerFactory:
         "sqlmap": SQLMapScanner,
         "nuclei": NucleiScanner,
     }
-    
+
     @classmethod
     def create(cls, name: str, **kwargs) -> BaseScanner:
         """إنشاء ماسح"""
         if name not in cls.SCANNERS:
-            raise ValueError(f"Unknown scanner: {name}. Available: {list(cls.SCANNERS.keys())}")
-        
+            raise ValueError(
+                f"Unknown scanner: {name}. Available: {list(cls.SCANNERS.keys())}"
+            )
+
         return cls.SCANNERS[name](**kwargs)
-    
+
     @classmethod
     def available(cls) -> List[str]:
         """الماسحات المتاحة"""
@@ -692,15 +744,16 @@ class ScannerFactory:
 #                     Multi-Scanner
 # ═══════════════════════════════════════════════════════════
 
+
 class MultiScanner:
     """
     تشغيل ماسحات متعددة.
-    
+
     Example:
         >>> multi = MultiScanner(["naabu", "nuclei"])
         >>> results = await multi.scan(["example.com"])
     """
-    
+
     def __init__(
         self,
         scanners: List[str],
@@ -714,7 +767,7 @@ class MultiScanner:
             )
             for name in scanners
         ]
-    
+
     async def scan(
         self,
         targets: List[str],
@@ -722,23 +775,20 @@ class MultiScanner:
     ) -> Dict[str, ScanResult]:
         """
         تشغيل جميع الماسحات.
-        
+
         Args:
             targets: الأهداف
             parallel: تشغيل بالتوازي
-            
+
         Returns:
             Dict من النتائج
         """
         results = {}
-        
+
         if parallel:
-            tasks = [
-                scanner.scan(targets)
-                for scanner in self.scanners
-            ]
+            tasks = [scanner.scan(targets) for scanner in self.scanners]
             scan_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for scanner, result in zip(self.scanners, scan_results):
                 if isinstance(result, Exception):
                     results[scanner.name] = ScanResult(
@@ -758,9 +808,9 @@ class MultiScanner:
                         scanner=scanner.name,
                         error=str(e),
                     )
-        
+
         return results
-    
+
     def summary(self, results: Dict[str, ScanResult]) -> Dict[str, Any]:
         """ملخص النتائج"""
         return {

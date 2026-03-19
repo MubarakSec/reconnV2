@@ -51,7 +51,9 @@ class TLSHygieneStage(Stage):
             if current is None or score > current[0]:
                 best_by_host[host] = (score, url)
 
-        candidates = sorted(best_by_host.values(), key=lambda item: item[0], reverse=True)
+        candidates = sorted(
+            best_by_host.values(), key=lambda item: item[0], reverse=True
+        )
         if max_hosts > 0:
             candidates = candidates[:max_hosts]
         if not candidates:
@@ -145,7 +147,9 @@ class TLSHygieneStage(Stage):
             stats["findings"] = findings
             context.manager.update_metadata(context.record)
 
-    def _probe_host(self, host: str, port: int, timeout: int, verify_tls: bool) -> Optional[Dict[str, object]]:
+    def _probe_host(
+        self, host: str, port: int, timeout: int, verify_tls: bool
+    ) -> Optional[Dict[str, object]]:
         result: Dict[str, object] = {}
         context = ssl.create_default_context()
         if not verify_tls:
@@ -163,7 +167,9 @@ class TLSHygieneStage(Stage):
                     if expiry:
                         now = datetime.now(timezone.utc)
                         delta = expiry - now
-                        result["cert_days_remaining"] = int(delta.total_seconds() // 86400)
+                        result["cert_days_remaining"] = int(
+                            delta.total_seconds() // 86400
+                        )
 
         legacy = self._check_legacy_protocols(host, port, timeout, verify_tls)
         if legacy:
@@ -181,11 +187,16 @@ class TLSHygieneStage(Stage):
                 continue
         return None
 
-    def _check_legacy_protocols(self, host: str, port: int, timeout: int, verify_tls: bool) -> List[str]:
+    def _check_legacy_protocols(
+        self, host: str, port: int, timeout: int, verify_tls: bool
+    ) -> List[str]:
         supported: List[str] = []
         tls_version = getattr(ssl, "TLSVersion", None)
         if tls_version:
-            for name, version in (("TLSv1", tls_version.TLSv1), ("TLSv1.1", tls_version.TLSv1_1)):
+            for name, version in (
+                ("TLSv1", tls_version.TLSv1),
+                ("TLSv1.1", tls_version.TLSv1_1),
+            ):
                 if self._try_version(host, port, timeout, verify_tls, version):
                     supported.append(name)
             return supported

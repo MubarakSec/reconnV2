@@ -80,7 +80,9 @@ class CTPivotStage(Stage):
             if not isinstance(entries, list):
                 continue
             for entry in entries:
-                name_value = entry.get("name_value") if isinstance(entry, dict) else None
+                name_value = (
+                    entry.get("name_value") if isinstance(entry, dict) else None
+                )
                 if not isinstance(name_value, str):
                     continue
                 for raw_name in name_value.splitlines():
@@ -164,7 +166,11 @@ class CTPivotStage(Stage):
                 limiter.on_response(url, resp.status_code)
             if resp.status_code >= 400:
                 continue
-            data = resp.json() if resp.headers.get("Content-Type", "").startswith("application/json") else {}
+            data = (
+                resp.json()
+                if resp.headers.get("Content-Type", "").startswith("application/json")
+                else {}
+            )
             prefixes = []
             if isinstance(data, dict):
                 payload = data.get("data") if isinstance(data.get("data"), dict) else {}

@@ -18,4 +18,3 @@ __all__ = [
     # Async Scanner
     "AsyncSecretsScanner",
 ]
-

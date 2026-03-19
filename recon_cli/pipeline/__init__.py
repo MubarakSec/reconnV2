@@ -14,11 +14,14 @@ from .stage_base import Stage, StageError
 from .parallel import ParallelStageExecutor, DependencyResolver
 from .progress import ProgressLogger
 
+
 # Lazy import for PipelineRunner to avoid circular import with plugins
 def get_pipeline_runner():
     """Get PipelineRunner class (lazy import to avoid circular deps)."""
     from .runner import PipelineRunner
+
     return PipelineRunner
+
 
 __all__ = [
     # Context
@@ -34,4 +37,3 @@ __all__ = [
     # Runner (lazy)
     "get_pipeline_runner",
 ]
-

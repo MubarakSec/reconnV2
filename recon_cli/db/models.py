@@ -6,13 +6,13 @@ This module provides a simple SQLite-based storage for:
 - Host/URL discovery tracking
 - Vulnerability findings
 """
+
 from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Literal, List
+from typing import Any, Dict, Optional, Literal
 from contextlib import contextmanager
 
 from recon_cli import config
@@ -50,7 +50,7 @@ def init_db():
     """Initialize database schema."""
     with get_connection() as conn:
         cursor = conn.cursor()
-        
+
         # Jobs table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -68,7 +68,7 @@ def init_db():
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         # Hosts table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS hosts (
@@ -84,7 +84,7 @@ def init_db():
                 UNIQUE(job_id, hostname)
             )
         """)
-        
+
         # URLs table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS urls (
@@ -102,7 +102,7 @@ def init_db():
                 UNIQUE(job_id, url)
             )
         """)
-        
+
         # Vulnerabilities table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS vulnerabilities (
@@ -121,7 +121,7 @@ def init_db():
                 FOREIGN KEY (job_id) REFERENCES jobs(id)
             )
         """)
-        
+
         # Secrets table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS secrets (
@@ -137,20 +137,27 @@ def init_db():
                 FOREIGN KEY (job_id) REFERENCES jobs(id)
             )
         """)
-        
+
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_target ON jobs(target)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_hosts_job ON hosts(job_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_hosts_hostname ON hosts(hostname)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_hosts_hostname ON hosts(hostname)"
+        )
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_urls_job ON urls(job_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_vulns_job ON vulnerabilities(job_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vulns_job ON vulnerabilities(job_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vulns_severity ON vulnerabilities(severity)"
+        )
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_secrets_job ON secrets(job_id)")
 
 
 class JobModel(BaseModel):
     """Job database model."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -163,10 +170,10 @@ class JobModel(BaseModel):
     finished_at: Optional[str] = None
     error: Optional[str] = None
     stats: Dict[str, Any] = Field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
-    
+
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "JobModel":
         data = dict(row)
@@ -180,6 +187,7 @@ class JobModel(BaseModel):
 
 class HostModel(BaseModel):
     """Host database model."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = None
@@ -193,6 +201,7 @@ class HostModel(BaseModel):
 
 class URLModel(BaseModel):
     """URL database model."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = None
@@ -208,13 +217,16 @@ class URLModel(BaseModel):
 
 class VulnerabilityModel(BaseModel):
     """Vulnerability database model."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = None
     job_id: str = ""
     template_id: Optional[str] = None
     name: Optional[str] = None
-    severity: Literal["info", "low", "medium", "high", "critical", "unknown", "noise"] = "info"
+    severity: Literal[
+        "info", "low", "medium", "high", "critical", "unknown", "noise"
+    ] = "info"
     host: Optional[str] = None
     url: Optional[str] = None
     matched_at: Optional[str] = None
@@ -225,6 +237,7 @@ class VulnerabilityModel(BaseModel):
 
 class SecretModel(BaseModel):
     """Secret database model."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = None

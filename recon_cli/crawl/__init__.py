@@ -21,4 +21,3 @@ __all__ = [
     "dom_artifact_name",
     "save_results",
 ]
-

@@ -20,9 +20,11 @@ class PipelineTraceScope:
     parent_span_id: Optional[str]
 
 
-CURRENT_TRACE_SCOPE: contextvars.ContextVar[Optional[PipelineTraceScope]] = contextvars.ContextVar(
-    "recon_pipeline_trace_scope",
-    default=None,
+CURRENT_TRACE_SCOPE: contextvars.ContextVar[Optional[PipelineTraceScope]] = (
+    contextvars.ContextVar(
+        "recon_pipeline_trace_scope",
+        default=None,
+    )
 )
 
 
@@ -56,7 +58,9 @@ class PipelineTraceSpan:
         error: Optional[Exception | str] = None,
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
-        self.recorder.finish_span(self, status=status, error=error, attributes=attributes)
+        self.recorder.finish_span(
+            self, status=status, error=error, attributes=attributes
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -90,7 +94,9 @@ class PipelineTraceProcessor:
 class SynchronousMultiTraceProcessor(PipelineTraceProcessor):
     """Fan out trace events/snapshots to multiple processors."""
 
-    def __init__(self, processors: Optional[List[PipelineTraceProcessor]] = None) -> None:
+    def __init__(
+        self, processors: Optional[List[PipelineTraceProcessor]] = None
+    ) -> None:
         self._processors: tuple = tuple(processors or [])
         self._lock = threading.Lock()
 
@@ -204,7 +210,9 @@ class PipelineTraceRecorder:
         }
         if execution_profile:
             self.attributes["execution_profile"] = execution_profile
-        self._processor = processor or ExporterTraceProcessor(ArtifactTraceExporter(trace_path, events_path))
+        self._processor = processor or ExporterTraceProcessor(
+            ArtifactTraceExporter(trace_path, events_path)
+        )
         self.emit(
             "trace.started",
             {
@@ -292,7 +300,9 @@ class PipelineTraceRecorder:
                 span.error = str(error)
             span.status = str(status)
             span.finished_at = time_utils.iso_now()
-            span.duration_ms = round((time.monotonic() - span._started_monotonic) * 1000, 3)
+            span.duration_ms = round(
+                (time.monotonic() - span._started_monotonic) * 1000, 3
+            )
             span._finished = True
             self._emit_locked(
                 "span.finished",
@@ -312,7 +322,9 @@ class PipelineTraceRecorder:
         with self._lock:
             self._emit_locked(name, attributes or {})
 
-    def close(self, *, status: str, error: Optional[Exception | str] = None) -> Dict[str, Any]:
+    def close(
+        self, *, status: str, error: Optional[Exception | str] = None
+    ) -> Dict[str, Any]:
         with self._lock:
             if self.finished_at is not None:
                 return self.to_dict()
@@ -336,7 +348,11 @@ class PipelineTraceRecorder:
 
     @property
     def duration_ms(self) -> float:
-        end = self._finished_monotonic_value if self._finished_monotonic_value is not None else time.monotonic()
+        end = (
+            self._finished_monotonic_value
+            if self._finished_monotonic_value is not None
+            else time.monotonic()
+        )
         return round((end - self._started_monotonic) * 1000, 3)
 
     def stats(self) -> Dict[str, Any]:
@@ -419,7 +435,9 @@ def bind_trace_scope(
     token = CURRENT_TRACE_SCOPE.set(
         PipelineTraceScope(
             recorder=recorder,
-            parent_span_id=parent_span_id if parent_span_id is not None else recorder.root_span_id,
+            parent_span_id=parent_span_id
+            if parent_span_id is not None
+            else recorder.root_span_id,
         )
     )
     try:

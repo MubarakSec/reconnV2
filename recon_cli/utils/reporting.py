@@ -148,7 +148,12 @@ def confidence_to_score(label: str) -> float:
 
 def build_finding_fingerprint(entry: Dict[str, object]) -> str:
     finding_type = resolve_finding_type(entry)
-    template = str(entry.get("template_id") or entry.get("template") or entry.get("templateID") or "")
+    template = str(
+        entry.get("template_id")
+        or entry.get("template")
+        or entry.get("templateID")
+        or ""
+    )
     host = _extract_host(entry).lower()
     url_value = str(entry.get("url") or entry.get("matched_at") or "")
     path = ""
@@ -157,7 +162,9 @@ def build_finding_fingerprint(entry: Dict[str, object]) -> str:
         try:
             parsed = urlparse(url_value)
             path = parsed.path or ""
-            params = sorted(name for name, _ in parse_qsl(parsed.query, keep_blank_values=True))
+            params = sorted(
+                name for name, _ in parse_qsl(parsed.query, keep_blank_values=True)
+            )
         except ValueError:
             path = ""
             params = []
@@ -189,7 +196,9 @@ def build_finding_fingerprint(entry: Dict[str, object]) -> str:
 
 
 def _recency_score(entry: Dict[str, object]) -> int:
-    raw_value = entry.get("timestamp") or entry.get("detected_at") or entry.get("created_at")
+    raw_value = (
+        entry.get("timestamp") or entry.get("detected_at") or entry.get("created_at")
+    )
     if not isinstance(raw_value, str) or not raw_value.strip():
         return 0
     value = raw_value.strip()
@@ -233,9 +242,7 @@ def compute_risk_score(entry: Dict[str, object]) -> int:
         exploitability_score += 6
 
     tokens = {
-        str(tag).lower()
-        for tag in (entry.get("tags") or [])
-        if isinstance(tag, str)
+        str(tag).lower() for tag in (entry.get("tags") or []) if isinstance(tag, str)
     }
     context_blob = " ".join(
         [
@@ -251,7 +258,9 @@ def compute_risk_score(entry: Dict[str, object]) -> int:
     business_score = min(15, business_hits * 4)
     recency = _recency_score(entry)
 
-    total = severity_base + exposure_score + exploitability_score + business_score + recency
+    total = (
+        severity_base + exposure_score + exploitability_score + business_score + recency
+    )
     return int(max(0, min(100, total)))
 
 
@@ -313,7 +322,11 @@ def resolve_confidence_label(entry: Dict[str, object]) -> str:
             if not isinstance(tag, str):
                 continue
             lower = tag.lower()
-            if lower == "confirmed" or lower == "verified:live" or lower.endswith(":confirmed"):
+            if (
+                lower == "confirmed"
+                or lower == "verified:live"
+                or lower.endswith(":confirmed")
+            ):
                 return "verified"
 
     source = str(entry.get("source") or "").lower()
@@ -389,7 +402,9 @@ def rank_findings(
             _priority_rank(priority),
         )
 
-    ranked = sorted([entry for entry in items if isinstance(entry, dict)], key=_key, reverse=True)
+    ranked = sorted(
+        [entry for entry in items if isinstance(entry, dict)], key=_key, reverse=True
+    )
     if limit is not None:
         return ranked[:limit]
     return ranked
@@ -447,7 +462,9 @@ def build_submission_summary(entry: Dict[str, object]) -> str:
     finding_label = finding_type.replace("_", " ")
     target = entry.get("url") or entry.get("hostname") or entry.get("host") or "target"
     confidence = resolve_confidence_label(entry)
-    impact = IMPACT_HINTS.get(finding_type, "can expose additional attack surface and business risk")
+    impact = IMPACT_HINTS.get(
+        finding_type, "can expose additional attack surface and business risk"
+    )
     title = str(entry.get("title") or entry.get("name") or "").strip()
     title_fragment = f"{title}: " if title else ""
     return (
@@ -474,15 +491,24 @@ def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, ob
     severity = resolve_severity(entry)
     source = str(entry.get("source") or "")
     target = str(entry.get("url") or entry.get("hostname") or entry.get("host") or "")
-    title = str(entry.get("title") or entry.get("name") or entry.get("description") or finding_type)
+    title = str(
+        entry.get("title")
+        or entry.get("name")
+        or entry.get("description")
+        or finding_type
+    )
     confidence = resolve_confidence_label(entry)
     proof = _proof_text(entry)
-    repro_cmd = str(entry.get("repro_cmd") or "").strip() or build_finding_rerun_command(job_id, entry)
+    repro_cmd = str(
+        entry.get("repro_cmd") or ""
+    ).strip() or build_finding_rerun_command(job_id, entry)
     hostname = str(entry.get("hostname") or entry.get("host") or "")
     endpoint = str(entry.get("url") or "")
     auth_requirement = _infer_auth_requirement(entry)
     environment = _infer_environment(hostname, endpoint)
-    impact_hypothesis = IMPACT_HINTS.get(finding_type, "can expose additional attack surface and business risk")
+    impact_hypothesis = IMPACT_HINTS.get(
+        finding_type, "can expose additional attack surface and business risk"
+    )
     raw_id = "|".join(
         [
             str(job_id),
@@ -538,7 +564,10 @@ def _infer_auth_requirement(entry: Dict[str, object]) -> str:
     if any(token in tags for token in {"auth", "authenticated", "admin", "privileged"}):
         return "likely_required"
     url = str(entry.get("url") or "").lower()
-    if any(token in url for token in ("/admin", "/account", "/settings", "/profile", "/api/private")):
+    if any(
+        token in url
+        for token in ("/admin", "/account", "/settings", "/profile", "/api/private")
+    ):
         return "likely_required"
     if any(token in tags for token in {"public", "unauthenticated"}):
         return "public"

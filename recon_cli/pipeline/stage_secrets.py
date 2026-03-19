@@ -35,7 +35,16 @@ class SecretsDetectionStage(Stage):
                 continue
             parsed = urlparse(url)
             ext = parsed.path.split(".")[-1].lower() if "." in parsed.path else ""
-            if ext not in {"js", "json", "env", "config", "txt", "properties", "yml", "yaml"}:
+            if ext not in {
+                "js",
+                "json",
+                "env",
+                "config",
+                "txt",
+                "properties",
+                "yml",
+                "yaml",
+            }:
                 continue
             score = int(entry.get("score", 0))
             host = entry.get("hostname") or parsed.hostname or ""
@@ -73,7 +82,9 @@ class SecretsDetectionStage(Stage):
             ]
             for url, matches in results.items()
         }
-        artifact_path.write_text(json.dumps(serialised, indent=2, sort_keys=True), encoding="utf-8")
+        artifact_path.write_text(
+            json.dumps(serialised, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
         pattern_counter: Counter[str] = Counter()
         total_matches = 0
@@ -122,8 +133,12 @@ class SecretsDetectionStage(Stage):
                         tags = set(entry.get("tags", []))
                         tags.update({"secret", "secret-hit"})
                         entry["tags"] = sorted(tags)
-                        entry["score"] = max(int(entry.get("score", 0)), boosted_urls[entry_url])
-                        entry["priority"] = enrich_utils.classify_priority(entry["score"])
+                        entry["score"] = max(
+                            int(entry.get("score", 0)), boosted_urls[entry_url]
+                        )
+                        entry["priority"] = enrich_utils.classify_priority(
+                            entry["score"]
+                        )
                 updated_entries.append(entry)
             context.results.replace_all(updated_entries)
 
@@ -137,7 +152,11 @@ class SecretsDetectionStage(Stage):
             }
         )
         context.manager.update_metadata(context.record)
-        context.logger.info("Secrets detection found %s matches across %s URLs", total_matches, len(results))
+        context.logger.info(
+            "Secrets detection found %s matches across %s URLs",
+            total_matches,
+            len(results),
+        )
 
     @staticmethod
     def _score_priority(confidence: str) -> tuple[int, str]:

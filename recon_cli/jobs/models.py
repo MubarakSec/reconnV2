@@ -198,4 +198,3 @@ class JobMetadata:
     def record_error(self, message: str) -> None:
         self.error = message
         self.status = "failed"
-

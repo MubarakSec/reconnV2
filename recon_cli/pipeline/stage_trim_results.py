@@ -36,7 +36,9 @@ class TrimResultsStage(Stage):
 
         order = 0
         url_best: Dict[str, tuple[int, int, Dict[str, object], str]] = {}
-        finding_buckets: Dict[str, List[tuple[int, int, Dict[str, object], str]]] = defaultdict(list)
+        finding_buckets: Dict[str, List[tuple[int, int, Dict[str, object], str]]] = (
+            defaultdict(list)
+        )
         low_priority_handle = None
         other_entries: List[tuple[int, Dict[str, object]]] = []
 
@@ -71,7 +73,9 @@ class TrimResultsStage(Stage):
                 host_key = host or ""
                 if existing:
                     prev_score, prev_order, _, _ = existing
-                    if score > prev_score or (score == prev_score and order < prev_order):
+                    if score > prev_score or (
+                        score == prev_score and order < prev_order
+                    ):
                         url_best[url_value] = (score, order, cloned, host_key)
                 else:
                     url_best[url_value] = (score, order, cloned, host_key)
@@ -83,8 +87,15 @@ class TrimResultsStage(Stage):
                     if low_priority_handle is None:
                         trim_dir = context.record.paths.ensure_subdir("trim")
                         low_priority_path = trim_dir / "low_priority_findings.jsonl"
-                        low_priority_handle = low_priority_path.open("w", encoding="utf-8")
-                    json.dump(entry, low_priority_handle, separators=(",", ":"), ensure_ascii=True)
+                        low_priority_handle = low_priority_path.open(
+                            "w", encoding="utf-8"
+                        )
+                    json.dump(
+                        entry,
+                        low_priority_handle,
+                        separators=(",", ":"),
+                        ensure_ascii=True,
+                    )
                     low_priority_handle.write("\n")
                     stats["findings_low_priority"] += 1
                     continue
@@ -107,7 +118,9 @@ class TrimResultsStage(Stage):
                 continue
             other_entries.append((order, self._clone_entry(entry)))
 
-        per_host_urls: Dict[str, List[tuple[int, int, Dict[str, object]]]] = defaultdict(list)
+        per_host_urls: Dict[str, List[tuple[int, int, Dict[str, object]]]] = (
+            defaultdict(list)
+        )
         for score, order_idx, entry_data, host in url_best.values():
             bucket = host or "__unknown__"
             per_host_urls[bucket].append((score, order_idx, entry_data))
@@ -188,7 +201,9 @@ class TrimResultsStage(Stage):
         return ""
 
     @staticmethod
-    def _apply_tag_limit(entry: Dict[str, object], host: str, tracker: Dict[str, Counter], limit: int) -> None:
+    def _apply_tag_limit(
+        entry: Dict[str, object], host: str, tracker: Dict[str, Counter], limit: int
+    ) -> None:
         if limit <= 0:
             return
         tags = entry.get("tags")

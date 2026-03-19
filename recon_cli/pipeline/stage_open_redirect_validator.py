@@ -15,21 +15,37 @@ from recon_cli.utils.jsonl import iter_jsonl
 class OpenRedirectValidatorStage(Stage):
     name = "open_redirect_validator"
     REDIRECT_STATUS = {301, 302, 303, 307, 308}
-    REDIRECT_PARAMS = {"next", "redirect", "return", "url", "dest", "callback", "continue", "to", "target"}
+    REDIRECT_PARAMS = {
+        "next",
+        "redirect",
+        "return",
+        "url",
+        "dest",
+        "callback",
+        "continue",
+        "to",
+        "target",
+    }
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(getattr(context.runtime_config, "enable_open_redirect_validator", True))
+        return bool(
+            getattr(context.runtime_config, "enable_open_redirect_validator", True)
+        )
 
     def execute(self, context: PipelineContext) -> None:
         try:
             import requests
         except Exception:
-            context.logger.warning("open redirect validator requires requests; skipping")
+            context.logger.warning(
+                "open redirect validator requires requests; skipping"
+            )
             return
 
         runtime = context.runtime_config
         max_urls = max(1, int(getattr(runtime, "open_redirect_validator_max_urls", 30)))
-        max_per_host = max(1, int(getattr(runtime, "open_redirect_validator_max_per_host", 6)))
+        max_per_host = max(
+            1, int(getattr(runtime, "open_redirect_validator_max_per_host", 6))
+        )
         min_score = int(getattr(runtime, "open_redirect_validator_min_score", 40))
         timeout = max(1, int(getattr(runtime, "open_redirect_validator_timeout", 10)))
         verify_tls = bool(getattr(runtime, "verify_tls", True))
@@ -39,9 +55,13 @@ class OpenRedirectValidatorStage(Stage):
             per_host=float(getattr(runtime, "open_redirect_validator_per_host_rps", 0)),
         )
 
-        candidates = self._collect_candidates(context, min_score=min_score, max_urls=max_urls, max_per_host=max_per_host)
+        candidates = self._collect_candidates(
+            context, min_score=min_score, max_urls=max_urls, max_per_host=max_per_host
+        )
         if not candidates:
-            stats = context.record.metadata.stats.setdefault("open_redirect_validator", {})
+            stats = context.record.metadata.stats.setdefault(
+                "open_redirect_validator", {}
+            )
             stats.update({"attempted": 0, "confirmed": 0, "failed": 0, "skipped": 0})
             context.manager.update_metadata(context.record)
             context.logger.info("No open redirect candidates found")
@@ -67,7 +87,9 @@ class OpenRedirectValidatorStage(Stage):
                 if limiter and not limiter.wait_for_slot(test_url, timeout=timeout):
                     skipped += 1
                     continue
-                headers = context.auth_headers({"User-Agent": "recon-cli open-redirect-validator"})
+                headers = context.auth_headers(
+                    {"User-Agent": "recon-cli open-redirect-validator"}
+                )
                 session = context.auth_session(test_url)
                 try:
                     if session:
@@ -100,14 +122,20 @@ class OpenRedirectValidatorStage(Stage):
                 if limiter:
                     limiter.on_response(test_url, status_code)
 
-                if status_code in self.REDIRECT_STATUS and self._is_external_redirect(url, location, payload):
+                if status_code in self.REDIRECT_STATUS and self._is_external_redirect(
+                    url, location, payload
+                ):
                     signal_id = context.emit_signal(
                         "open_redirect_confirmed",
                         "url",
                         test_url,
                         confidence=1.0,
                         source="open-redirect-validator",
-                        evidence={"status_code": status_code, "location": location, "parameter": param},
+                        evidence={
+                            "status_code": status_code,
+                            "location": location,
+                            "parameter": param,
+                        },
                         tags=["redirect", "confirmed"],
                     )
                     finding = {
@@ -145,7 +173,9 @@ class OpenRedirectValidatorStage(Stage):
                 continue
 
         artifact_path = context.record.paths.artifact("open_redirect_validator.json")
-        artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+        artifact_path.write_text(
+            json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+        )
         stats = context.record.metadata.stats.setdefault("open_redirect_validator", {})
         stats.update(
             {

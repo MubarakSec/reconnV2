@@ -47,7 +47,7 @@ __all__ = [
 
 class ReportFormat(Enum):
     """Supported report formats."""
-    
+
     HTML = "html"
     PDF = "pdf"
     JSON = "json"
@@ -61,7 +61,7 @@ class ReportFormat(Enum):
 @dataclass
 class ReportConfig:
     """Report configuration options."""
-    
+
     title: str = "Reconnaissance Report"
     subtitle: str = ""
     author: str = "ReconnV2"
@@ -79,7 +79,7 @@ class ReportConfig:
     theme: str = "default"  # default, dark, corporate
     custom_css: Optional[str] = None
     page_size: str = "A4"  # For PDF
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
@@ -88,7 +88,7 @@ class ReportConfig:
 @dataclass
 class ReportSection:
     """A section of the report."""
-    
+
     id: str
     title: str
     content: str = ""
@@ -96,7 +96,7 @@ class ReportSection:
     visible: bool = True
     subsections: List["ReportSection"] = field(default_factory=list)
     data: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -113,7 +113,7 @@ class ReportSection:
 @dataclass
 class ReportData:
     """Collected data for report generation."""
-    
+
     job_id: str
     job_name: str = ""
     targets: List[str] = field(default_factory=list)
@@ -123,10 +123,11 @@ class ReportData:
     hosts: List[Dict[str, Any]] = field(default_factory=list)
     stages: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     @classmethod
     def from_job(cls, job_data: Dict[str, Any]) -> "ReportData":
         """Create from job data."""
+
         def _parse_dt(value: Optional[str]) -> Optional[datetime]:
             if not value:
                 return None
@@ -148,7 +149,7 @@ class ReportData:
             stages=job_data.get("stages", {}),
             metadata=job_data.get("metadata", {}),
         )
-    
+
     @property
     def duration(self) -> Optional[str]:
         """Get formatted duration."""
@@ -156,7 +157,7 @@ class ReportData:
             delta = self.end_time - self.start_time
             return str(delta)
         return None
-    
+
     @property
     def finding_counts(self) -> Dict[str, int]:
         """Get finding counts by severity."""
@@ -165,7 +166,7 @@ class ReportData:
             severity = resolve_severity(finding)
             counts[severity] += 1
         return dict(counts)
-    
+
     @property
     def total_findings(self) -> int:
         """Get total finding count."""
@@ -174,7 +175,7 @@ class ReportData:
 
 class ReportGenerator:
     """Main report generator."""
-    
+
     def __init__(self, config: Optional[ReportConfig] = None):
         self.config = config or ReportConfig()
         self._generators = {
@@ -184,7 +185,7 @@ class ReportGenerator:
             ReportFormat.MARKDOWN: MarkdownReportGenerator,
             ReportFormat.XML: XMLExporter,
         }
-    
+
     async def generate(
         self,
         data: Union[Dict[str, Any], ReportData],
@@ -194,85 +195,100 @@ class ReportGenerator:
         """Generate a report."""
         if isinstance(data, dict):
             data = ReportData.from_job(data)
-        
+
         # Filter findings if configured
         if self.config.severity_filter:
             data.findings = [
-                f for f in data.findings
+                f
+                for f in data.findings
                 if resolve_severity(f) in self.config.severity_filter
             ]
-        
+
         if self.config.max_findings:
-            data.findings = data.findings[:self.config.max_findings]
-        
+            data.findings = data.findings[: self.config.max_findings]
+
         # Get generator
         generator_class = self._generators.get(format)
         if generator_class is None:
             raise ValueError(f"Unsupported format: {format}")
-        
+
         generator = generator_class(self.config)
         content = generator.generate(data)
-        
+
         # Write to file if path provided
         if output_path:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            if format in (ReportFormat.JSON, ReportFormat.HTML, ReportFormat.MARKDOWN, ReportFormat.XML, ReportFormat.CSV):
+            if format in (
+                ReportFormat.JSON,
+                ReportFormat.HTML,
+                ReportFormat.MARKDOWN,
+                ReportFormat.XML,
+                ReportFormat.CSV,
+            ):
                 output_path.write_text(content)
             else:
-                output_path.write_bytes(content.encode() if isinstance(content, str) else content)
+                output_path.write_bytes(
+                    content.encode() if isinstance(content, str) else content
+                )
             update_last_report_pointer(output_path)
-        
+
         return content
-    
+
     def build_sections(self, data: ReportData) -> List[ReportSection]:
         """Build report sections."""
         sections = []
-        
+
         # Summary section
         if self.config.include_summary:
-            sections.append(ReportSection(
-                id="summary",
-                title="Executive Summary",
-                order=1,
-                data={
-                    "total_targets": len(data.targets),
-                    "total_findings": data.total_findings,
-                    "finding_counts": data.finding_counts,
-                    "duration": data.duration,
-                },
-            ))
-        
+            sections.append(
+                ReportSection(
+                    id="summary",
+                    title="Executive Summary",
+                    order=1,
+                    data={
+                        "total_targets": len(data.targets),
+                        "total_findings": data.total_findings,
+                        "finding_counts": data.finding_counts,
+                        "duration": data.duration,
+                    },
+                )
+            )
+
         # Findings section
         if self.config.include_findings:
             # Group findings
             grouped = self._group_findings(data.findings, self.config.group_by)
-            
+
             findings_section = ReportSection(
                 id="findings",
                 title="Findings",
                 order=2,
             )
-            
+
             for group_name, findings in grouped.items():
-                findings_section.subsections.append(ReportSection(
-                    id=f"findings-{group_name}",
-                    title=group_name.title(),
-                    data={"findings": findings},
-                ))
-            
+                findings_section.subsections.append(
+                    ReportSection(
+                        id=f"findings-{group_name}",
+                        title=group_name.title(),
+                        data={"findings": findings},
+                    )
+                )
+
             sections.append(findings_section)
-        
+
         # Hosts section
         if self.config.include_hosts and data.hosts:
-            sections.append(ReportSection(
-                id="hosts",
-                title="Discovered Hosts",
-                order=3,
-                data={"hosts": data.hosts},
-            ))
-        
+            sections.append(
+                ReportSection(
+                    id="hosts",
+                    title="Discovered Hosts",
+                    order=3,
+                    data={"hosts": data.hosts},
+                )
+            )
+
         return sections
-    
+
     def _group_findings(
         self,
         findings: List[Dict[str, Any]],
@@ -280,7 +296,7 @@ class ReportGenerator:
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Group findings by specified field."""
         grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        
+
         for finding in findings:
             if group_by == "severity":
                 key = resolve_severity(finding)
@@ -291,40 +307,34 @@ class ReportGenerator:
             if isinstance(key, list):
                 key = key[0] if key else "other"
             grouped[str(key)].append(finding)
-        
+
         # Sort by severity order if grouping by severity
         if group_by == "severity":
             severity_order = ["critical", "high", "medium", "low", "info"]
             return {k: grouped[k] for k in severity_order if k in grouped}
-        
+
         return dict(grouped)
 
 
 class HTMLReportGenerator:
     """Generate HTML reports."""
-    
+
     def __init__(self, config: ReportConfig):
         self.config = config
-    
+
     def generate(self, data: ReportData) -> str:
         """Generate HTML report."""
         sections = self._build_sections_html(data)
-        charts_html = self._build_charts_html(data) if self.config.include_charts else ""
-        
-        severity_colors = {
-            "critical": "#dc2626",
-            "high": "#ea580c",
-            "medium": "#eab308",
-            "low": "#3b82f6",
-            "info": "#6b7280",
-        }
-        
+        charts_html = (
+            self._build_charts_html(data) if self.config.include_charts else ""
+        )
+
         # Build findings table
         findings_html = self._build_findings_table(data.findings)
-        
+
         # Build hosts table
         hosts_html = self._build_hosts_table(data.hosts) if data.hosts else ""
-        
+
         custom_css = sanitize_text(self.config.custom_css or "")
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -487,9 +497,9 @@ class HTMLReportGenerator:
 <body>
     <header>
         <h1>{escape_html_text(self.config.title)}</h1>
-        {f'<p class="subtitle">{escape_html_text(self.config.subtitle)}</p>' if self.config.subtitle else ''}
+        {f'<p class="subtitle">{escape_html_text(self.config.subtitle)}</p>' if self.config.subtitle else ""}
         <p class="meta">
-            Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} |
+            Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} |
             Job: {escape_html_text(data.job_id)} |
             By: {escape_html_text(self.config.author)}
         </p>
@@ -503,7 +513,7 @@ class HTMLReportGenerator:
         <h2>📋 Findings ({data.total_findings})</h2>
         {findings_html}
         
-        {f'<h2>🖥️ Discovered Hosts ({len(data.hosts)})</h2>{hosts_html}' if data.hosts else ''}
+        {f"<h2>🖥️ Discovered Hosts ({len(data.hosts)})</h2>{hosts_html}" if data.hosts else ""}
         
         {sections}
     </main>
@@ -514,13 +524,13 @@ class HTMLReportGenerator:
     </footer>
 </body>
 </html>"""
-        
+
         return html
-    
+
     def _build_summary_section(self, data: ReportData) -> str:
         """Build summary section HTML."""
         counts = data.finding_counts
-        
+
         return f"""
         <section id="summary">
             <h2>📊 Executive Summary</h2>
@@ -534,35 +544,39 @@ class HTMLReportGenerator:
                     <div class="label">Total Findings</div>
                 </div>
                 <div class="summary-card" style="border-left: 4px solid #dc2626;">
-                    <div class="value" style="color: #dc2626;">{counts.get('critical', 0)}</div>
+                    <div class="value" style="color: #dc2626;">{counts.get("critical", 0)}</div>
                     <div class="label">Critical</div>
                 </div>
                 <div class="summary-card" style="border-left: 4px solid #ea580c;">
-                    <div class="value" style="color: #ea580c;">{counts.get('high', 0)}</div>
+                    <div class="value" style="color: #ea580c;">{counts.get("high", 0)}</div>
                     <div class="label">High</div>
                 </div>
                 <div class="summary-card" style="border-left: 4px solid #eab308;">
-                    <div class="value" style="color: #eab308;">{counts.get('medium', 0)}</div>
+                    <div class="value" style="color: #eab308;">{counts.get("medium", 0)}</div>
                     <div class="label">Medium</div>
                 </div>
                 <div class="summary-card" style="border-left: 4px solid #3b82f6;">
-                    <div class="value" style="color: #3b82f6;">{counts.get('low', 0)}</div>
+                    <div class="value" style="color: #3b82f6;">{counts.get("low", 0)}</div>
                     <div class="label">Low</div>
                 </div>
             </div>
-            <p><strong>Duration:</strong> {escape_html_text(data.duration or 'N/A')}</p>
+            <p><strong>Duration:</strong> {escape_html_text(data.duration or "N/A")}</p>
         </section>
 """
-    
+
     def _build_findings_table(self, findings: List[Dict[str, Any]]) -> str:
         """Build findings table HTML."""
         if not findings:
             return "<p>No findings to display.</p>"
-        
+
         rows = []
         for finding in findings:
             severity = resolve_severity(finding)
-            title = finding.get("title") or finding.get("description") or resolve_finding_type(finding)
+            title = (
+                finding.get("title")
+                or finding.get("description")
+                or resolve_finding_type(finding)
+            )
             host = (
                 finding.get("host")
                 or finding.get("hostname")
@@ -576,10 +590,10 @@ class HTMLReportGenerator:
                 <td><span class="severity-badge severity-{severity}">{severity}</span></td>
                 <td>{escape_html_text(title)}</td>
                 <td>{escape_html_text(host)}</td>
-                <td>{escape_html_text(description[:100] + ('...' if description else ''))}</td>
+                <td>{escape_html_text(description[:100] + ("..." if description else ""))}</td>
             </tr>
 """)
-        
+
         return f"""
         <table>
             <thead>
@@ -591,16 +605,16 @@ class HTMLReportGenerator:
                 </tr>
             </thead>
             <tbody>
-                {''.join(rows)}
+                {"".join(rows)}
             </tbody>
         </table>
 """
-    
+
     def _build_hosts_table(self, hosts: List[Dict[str, Any]]) -> str:
         """Build hosts table HTML."""
         if not hosts:
             return ""
-        
+
         rows = []
         for host in hosts:
             ip = host.get("ip", "N/A")
@@ -608,16 +622,16 @@ class HTMLReportGenerator:
             ports = ", ".join(str(p) for p in host.get("open_ports", [])[:5])
             if len(host.get("open_ports", [])) > 5:
                 ports += "..."
-            
+
             rows.append(f"""
             <tr>
                 <td>{escape_html_text(ip)}</td>
                 <td>{escape_html_text(hostname)}</td>
-                <td>{escape_html_text(ports or 'N/A')}</td>
-                <td>{escape_html_text(host.get('status', 'unknown'))}</td>
+                <td>{escape_html_text(ports or "N/A")}</td>
+                <td>{escape_html_text(host.get("status", "unknown"))}</td>
             </tr>
 """)
-        
+
         return f"""
         <table>
             <thead>
@@ -629,15 +643,15 @@ class HTMLReportGenerator:
                 </tr>
             </thead>
             <tbody>
-                {''.join(rows)}
+                {"".join(rows)}
             </tbody>
         </table>
 """
-    
+
     def _build_charts_html(self, data: ReportData) -> str:
         """Build charts section HTML."""
         counts = data.finding_counts
-        
+
         return f"""
         <section id="charts" class="charts-container">
             <div class="chart">
@@ -659,7 +673,7 @@ class HTMLReportGenerator:
             }});
         </script>
 """
-    
+
     def _build_sections_html(self, data: ReportData) -> str:
         """Build custom sections HTML."""
         return ""
@@ -667,10 +681,10 @@ class HTMLReportGenerator:
 
 class JSONReportGenerator:
     """Generate JSON reports."""
-    
+
     def __init__(self, config: ReportConfig):
         self.config = config
-    
+
     def generate(self, data: ReportData) -> str:
         """Generate JSON report."""
         report = {
@@ -695,25 +709,25 @@ class JSONReportGenerator:
             "findings": data.findings,
             "hosts": data.hosts,
         }
-        
+
         return json.dumps(report, indent=2, default=str)
 
 
 class MarkdownReportGenerator:
     """Generate Markdown reports."""
-    
+
     def __init__(self, config: ReportConfig):
         self.config = config
-    
+
     def generate(self, data: ReportData) -> str:
         """Generate Markdown report."""
         counts = data.finding_counts
-        
+
         md = f"""# {self.config.title}
 
 {self.config.subtitle}
 
-**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
 **Job ID:** {data.job_id}  
 **Author:** {self.config.author}
 
@@ -725,34 +739,38 @@ class MarkdownReportGenerator:
 |--------|-------|
 | Targets Scanned | {len(data.targets)} |
 | Total Findings | {data.total_findings} |
-| Critical | {counts.get('critical', 0)} |
-| High | {counts.get('high', 0)} |
-| Medium | {counts.get('medium', 0)} |
-| Low | {counts.get('low', 0)} |
-| Duration | {data.duration or 'N/A'} |
+| Critical | {counts.get("critical", 0)} |
+| High | {counts.get("high", 0)} |
+| Medium | {counts.get("medium", 0)} |
+| Low | {counts.get("low", 0)} |
+| Duration | {data.duration or "N/A"} |
 
 ---
 
 ## 📋 Findings
 
 """
-        
+
         # Group by severity
         severity_order = ["critical", "high", "medium", "low", "info"]
         grouped: Dict[str, List[Dict]] = defaultdict(list)
-        
+
         for finding in data.findings:
             severity = resolve_severity(finding)
             grouped[severity].append(finding)
-        
+
         for severity in severity_order:
             if severity not in grouped:
                 continue
-            
+
             md += f"\n### {severity.upper()} ({len(grouped[severity])})\n\n"
-            
+
             for finding in grouped[severity]:
-                title = finding.get("title") or finding.get("description") or resolve_finding_type(finding)
+                title = (
+                    finding.get("title")
+                    or finding.get("description")
+                    or resolve_finding_type(finding)
+                )
                 host = (
                     finding.get("host")
                     or finding.get("hostname")
@@ -761,93 +779,96 @@ class MarkdownReportGenerator:
                     or "N/A"
                 )
                 desc = finding.get("description", "No description")
-                
+
                 md += f"""#### {title}
 
 - **Host:** {host}
 - **Description:** {desc}
 
 """
-        
+
         # Hosts section
         if data.hosts:
             md += "\n---\n\n## 🖥️ Discovered Hosts\n\n"
             md += "| IP | Hostname | Open Ports | Status |\n"
             md += "|----|---------|-----------|---------|\n"
-            
+
             for host in data.hosts:
                 ip = host.get("ip", "N/A")
                 hostname = host.get("hostname", "N/A")
                 ports = ", ".join(str(p) for p in host.get("open_ports", [])[:5])
                 status = host.get("status", "unknown")
                 md += f"| {ip} | {hostname} | {ports} | {status} |\n"
-        
+
         md += f"""
 
 ---
 
 *Generated by {self.config.author}*
 """
-        
+
         return md
 
 
 class CSVExporter:
     """Export findings to CSV."""
-    
+
     def __init__(self, config: ReportConfig):
         self.config = config
-    
+
     def generate(self, data: ReportData) -> str:
         """Generate CSV export."""
         output = io.StringIO()
-        
+
         if not data.findings:
             return ""
-        
+
         # Determine columns
         columns = ["severity", "title", "type", "host", "target", "description"]
-        
+
         writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
-        
+
         for finding in data.findings:
             row = dict(finding)
             row["severity"] = resolve_severity(finding)
             row["type"] = resolve_finding_type(finding)
             row.setdefault("title", finding.get("description") or row["type"])
-            row.setdefault("host", finding.get("hostname") or finding.get("url") or finding.get("target"))
+            row.setdefault(
+                "host",
+                finding.get("hostname") or finding.get("url") or finding.get("target"),
+            )
             writer.writerow(row)
-        
+
         return output.getvalue()
 
 
 class XMLExporter:
     """Export to XML format."""
-    
+
     def __init__(self, config: ReportConfig):
         self.config = config
-    
+
     def generate(self, data: ReportData) -> str:
         """Generate XML export."""
         root = ET.Element("report")
-        
+
         # Metadata
         meta = ET.SubElement(root, "metadata")
         ET.SubElement(meta, "title").text = self.config.title
         ET.SubElement(meta, "author").text = self.config.author
         ET.SubElement(meta, "generated").text = datetime.now().isoformat()
         ET.SubElement(meta, "job_id").text = data.job_id
-        
+
         # Summary
         summary = ET.SubElement(root, "summary")
         ET.SubElement(summary, "total_targets").text = str(len(data.targets))
         ET.SubElement(summary, "total_findings").text = str(data.total_findings)
-        
+
         counts = ET.SubElement(summary, "severity_counts")
         for sev, count in data.finding_counts.items():
             ET.SubElement(counts, sev).text = str(count)
-        
+
         # Findings
         findings_elem = ET.SubElement(root, "findings")
         for finding in data.findings:
@@ -857,7 +878,7 @@ class XMLExporter:
                     value = json.dumps(value)
                 elem = ET.SubElement(finding_elem, key)
                 elem.text = str(value) if value else ""
-        
+
         # Hosts
         hosts_elem = ET.SubElement(root, "hosts")
         for host in data.hosts:
@@ -867,25 +888,26 @@ class XMLExporter:
                     value = json.dumps(value)
                 elem = ET.SubElement(host_elem, key)
                 elem.text = str(value) if value else ""
-        
+
         return ET.tostring(root, encoding="unicode", method="xml")
 
 
 class PDFReportGenerator:
     """Generate PDF reports (requires additional dependencies)."""
-    
+
     def __init__(self, config: ReportConfig):
         self.config = config
-    
+
     def generate(self, data: ReportData) -> bytes:
         """Generate PDF report."""
         # First generate HTML
         html_gen = HTMLReportGenerator(self.config)
         html = html_gen.generate(data)
-        
+
         # Try to convert to PDF
         try:
             import weasyprint
+
             pdf = weasyprint.HTML(string=html).write_pdf()
             return pdf
         except ImportError:

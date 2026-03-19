@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field, field_validator, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from recon_cli.utils import time as time_utils
 
 
 class BaseResult(BaseModel):
     """Base model for all results in results.jsonl."""
+
     model_config = ConfigDict(extra="allow")
-    
+
     type: str
     timestamp: str = Field(default_factory=time_utils.iso_now)
     source: Optional[str] = None
@@ -18,12 +18,14 @@ class BaseResult(BaseModel):
 
 class MetaResult(BaseResult):
     """Schema version and metadata."""
+
     type: Literal["meta"] = "meta"
     schema_version: str = "1.0.0"
 
 
 class HostResult(BaseResult):
     """Host discovery result."""
+
     type: Literal["hostname", "host", "asset"] = "hostname"
     hostname: str
     ip: Optional[str] = None
@@ -33,6 +35,7 @@ class HostResult(BaseResult):
 
 class URLResult(BaseResult):
     """URL discovery result."""
+
     type: Literal["url"] = "url"
     url: str
     hostname: Optional[str] = None
@@ -45,9 +48,12 @@ class URLResult(BaseResult):
 
 class FindingResult(BaseResult):
     """Security finding or vulnerability."""
+
     type: Literal["finding"] = "finding"
     finding_type: str
-    severity: Literal["info", "low", "medium", "high", "critical", "unknown", "noise"] = "info"
+    severity: Literal[
+        "info", "low", "medium", "high", "critical", "unknown", "noise"
+    ] = "info"
     confidence: float = 0.5
     confidence_label: Optional[str] = None
     confidence_score: Optional[float] = None
@@ -67,6 +73,7 @@ class FindingResult(BaseResult):
 
 class SignalResult(BaseResult):
     """Pipeline internal signal."""
+
     type: Literal["signal"] = "signal"
     signal_id: str
     signal_type: str
@@ -79,6 +86,7 @@ class SignalResult(BaseResult):
 
 class SecretResult(BaseResult):
     """Exposed secret or credential."""
+
     type: Literal["secret", "credential"] = "secret"
     secret_type: Optional[str] = None
     file_path: Optional[str] = None
@@ -90,6 +98,7 @@ class SecretResult(BaseResult):
 
 class APIResult(BaseResult):
     """API discovery result."""
+
     type: Literal["api", "api_spec"] = "api"
     url: str
     hostname: Optional[str] = None
@@ -99,6 +108,7 @@ class APIResult(BaseResult):
 
 class FormResult(BaseResult):
     """HTML form discovery result."""
+
     type: Literal["form", "auth_form"] = "form"
     url: str
     action: Optional[str] = None
@@ -108,6 +118,7 @@ class FormResult(BaseResult):
 
 class ParameterResult(BaseResult):
     """Discovered HTTP parameter."""
+
     type: Literal["parameter"] = "parameter"
     name: str
     source: Optional[str] = None
@@ -115,6 +126,7 @@ class ParameterResult(BaseResult):
 
 class ParamMutationResult(BaseResult):
     """Parameter mutation discovery."""
+
     type: Literal["param_mutation"] = "param_mutation"
     name: str
     category: Optional[str] = None
@@ -123,6 +135,7 @@ class ParamMutationResult(BaseResult):
 
 class CMSResult(BaseResult):
     """CMS discovery result."""
+
     type: Literal["cms"] = "cms"
     hostname: str
     cms: str
@@ -131,6 +144,7 @@ class CMSResult(BaseResult):
 
 class ScreenshotResult(BaseResult):
     """URL screenshot metadata."""
+
     type: Literal["screenshot"] = "screenshot"
     screenshot_path: str
     url: Optional[str] = None
@@ -139,6 +153,7 @@ class ScreenshotResult(BaseResult):
 
 class RuntimeCrawlResult(BaseResult):
     """Runtime crawl discovery."""
+
     type: Literal["runtime_crawl", "runtime_crawl_profile"] = "runtime_crawl"
     url: str
     auth_profile: Optional[str] = None
@@ -146,6 +161,7 @@ class RuntimeCrawlResult(BaseResult):
 
 class IDORSuspectResult(BaseResult):
     """Suspected IDOR vulnerability."""
+
     type: Literal["idor_suspect"] = "idor_suspect"
     url: str
     auth: Optional[str] = None
@@ -154,6 +170,7 @@ class IDORSuspectResult(BaseResult):
 
 class AssetEnrichmentResult(BaseResult):
     """Enriched asset data."""
+
     type: Literal["asset_enrichment"] = "asset_enrichment"
     hostname: str
     ip: Optional[str] = None
@@ -161,12 +178,14 @@ class AssetEnrichmentResult(BaseResult):
 
 class LearningPredictionResult(BaseResult):
     """ML-based discovery prediction."""
+
     type: Literal["learning_prediction"] = "learning_prediction"
     hostname: str
 
 
 class IPPrefixResult(BaseResult):
     """IP prefix discovery."""
+
     type: Literal["ip_prefix"] = "ip_prefix"
     prefix: str
     asn: Optional[str] = None
@@ -175,6 +194,7 @@ class IPPrefixResult(BaseResult):
 
 class AttackPathResult(BaseResult):
     """Vulnerability attack path discovery."""
+
     type: Literal["attack_path"] = "attack_path"
     entry_url: str
     sink_url: str
