@@ -363,7 +363,7 @@ class PipelineRunner:
                         result = await loop.run_in_executor(None, stage.run, context)
                         if asyncio.iscoroutine(result):
                             result = await result
-                return StageExecutionOutcome(result=bool(result), span=span)
+                return StageExecutionOutcome(result=result, span=span)
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 context.logger.error("Stage '%s' timed out after %ds", stage.name, timeout)
                 return StageExecutionOutcome(error=exc, span=span)
@@ -375,11 +375,13 @@ class PipelineRunner:
             results: list[StageResult] = []
             for stage in self._resolve_stages(stages):
                 try:
-                    result_obj = await self._run_one_stage(stage, context)
-                    if result_obj.error:
-                        result = StageResult(success=False, error=str(result_obj.error))
+                    outcome = await self._run_one_stage(stage, context)
+                    if outcome.error:
+                        result = StageResult(success=False, error=str(outcome.error))
+                    elif isinstance(outcome.result, StageResult):
+                        result = outcome.result
                     else:
-                        result = StageResult(success=bool(result_obj.result))
+                        result = StageResult(success=bool(outcome.result))
                 except Exception as exc:  # pragma: no cover - runtime path
                     result = StageResult(success=False, error=str(exc))
                 
@@ -423,8 +425,9 @@ class PipelineRunner:
                     if not self.continue_on_error:
                         raise error
                 else:
+                    success = outcome.result.success if isinstance(outcome.result, StageResult) else bool(outcome.result)
                     self._handle_stage_success(
-                        context, stage, span, bool(outcome.result), progress_map=progress_map, finished_at=finished_at
+                        context, stage, span, success, progress_map=progress_map, finished_at=finished_at
                     )
             context.mark_finished()
             summary.generate_summary(context)
@@ -502,11 +505,12 @@ class PipelineRunner:
                             first_failure_code = str(classification.get("code") or "")
                         errors.append(outcome)
                     else:
+                        success = outcome.result.success if isinstance(outcome.result, StageResult) else (outcome.result if outcome.result is not None else False)
                         self._handle_stage_success(
                             context,
                             stage_map[name],
                             outcome.span,
-                            outcome.result if outcome.result is not None else False,
+                            bool(success),
                             progress_map=progress_map,
                             finished_at=finished_at,
                         )
