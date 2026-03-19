@@ -46,28 +46,35 @@ class VulnScanStage(Stage):
                 artifact.write_text(output, encoding="utf-8")
                 attempted += 1
                 tool_counts["dalfox"] += 1
-                if self._dalfox_confirmed(output):
+                
+                is_confirmed = self._dalfox_confirmed(output)
+                # Any output from dalfox usually means it found something, but we want to be honest
+                has_potential = "POC" in output or "VULN" in output or "parameter:" in output
+                
+                if is_confirmed or has_potential:
+                    score = 85 if is_confirmed else 40
+                    f_type = "xss" if is_confirmed else "vulnerability_candidate"
                     signal_id = context.emit_signal(
-                        "xss_candidate",
+                        "xss_confirmed" if is_confirmed else "xss_candidate",
                         "url",
                         url,
-                        confidence=0.7,
+                        confidence=0.9 if is_confirmed else 0.4,
                         source="dalfox",
                         tags=["xss", "dalfox"],
-                        evidence={"output_snippet": output[:400]},
+                        evidence={"output_snippet": output[:400], "confirmed": is_confirmed},
                     )
                     payload = {
                         "type": "finding",
-                        "finding_type": "xss",
+                        "finding_type": f_type,
                         "source": "dalfox",
                         "hostname": urlparse(url).hostname,
                         "url": url,
-                        "description": "Potential XSS detected by dalfox",
-                        "details": {"output_snippet": output[:1000]},
+                        "description": f"XSS detected by dalfox (Confirmed)" if is_confirmed else "Potential XSS candidate (Unconfirmed)",
+                        "details": {"output_snippet": output[:1000], "confirmed": is_confirmed},
                         "tags": ["xss", "dalfox"],
-                        "score": 80,
-                        "priority": "high",
-                        "severity": "high",
+                        "score": score,
+                        "priority": "high" if is_confirmed else "low",
+                        "severity": "high" if is_confirmed else "low",
                         "evidence_id": signal_id or None,
                     }
                     if context.results.append(payload):
@@ -105,28 +112,35 @@ class VulnScanStage(Stage):
                 artifact.write_text(output, encoding="utf-8")
                 attempted += 1
                 tool_counts["sqlmap"] += 1
-                if self._sqlmap_confirmed(output):
+                
+                is_confirmed = self._sqlmap_confirmed(output)
+                # Potential candidate: if sqlmap found something but not full confirmation
+                has_potential = "parameter" in output and "appears to be" in output
+                
+                if is_confirmed or has_potential:
+                    score = 90 if is_confirmed else 40
+                    f_type = "sql_injection" if is_confirmed else "vulnerability_candidate"
                     signal_id = context.emit_signal(
-                        "sqli_candidate",
+                        "sqli_confirmed" if is_confirmed else "sqli_candidate",
                         "url",
                         url,
-                        confidence=0.7,
+                        confidence=0.9 if is_confirmed else 0.4,
                         source="sqlmap",
                         tags=["sqli", "sqlmap"],
-                        evidence={"output_snippet": output[:400]},
+                        evidence={"output_snippet": output[:400], "confirmed": is_confirmed},
                     )
                     payload = {
                         "type": "finding",
-                        "finding_type": "sql_injection",
+                        "finding_type": f_type,
                         "source": "sqlmap",
                         "hostname": urlparse(url).hostname,
                         "url": url,
-                        "description": "Potential SQL injection detected by sqlmap",
-                        "details": {"output_snippet": output[:1200]},
+                        "description": f"SQL injection detected by sqlmap (Confirmed)" if is_confirmed else "Potential SQL injection candidate (Unconfirmed)",
+                        "details": {"output_snippet": output[:1200], "confirmed": is_confirmed},
                         "tags": ["sqli", "sqlmap"],
-                        "score": 85,
-                        "priority": "high",
-                        "severity": "critical",
+                        "score": score,
+                        "priority": "high" if is_confirmed else "low",
+                        "severity": "critical" if is_confirmed else "low",
                         "evidence_id": signal_id or None,
                     }
                     if context.results.append(payload):
@@ -162,6 +176,8 @@ class VulnScanStage(Stage):
         signals = context.signal_index()
         scored: List[Tuple[str, int]] = []
         for url in candidates:
+            if not context.url_in_scope(url) or not context.url_allowed(url):
+                continue
             score = url_scores.get(url, 0)
             tags = url_tags.get(url, set())
             status_code = url_status.get(url, 0)

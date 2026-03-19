@@ -73,95 +73,118 @@ class IDORValidatorStage(Stage):
                 continue
             seen.add(key)
 
-            token = self._resolve_token(auth_label, runtime)
-            if auth_label in {"token-a", "token-b"} and not token:
+            # Triple-Check Validation for Honesty:
+            # 1. Fetch victim data with Token A (should succeed)
+            # 2. Fetch victim data with Token B (if it succeeds and matches A, it's an IDOR)
+            # 3. Fetch victim data with Anon (if it succeeds and matches A, it's a Public Access/IDOR)
+
+            token_a = self._resolve_token("token-a", runtime)
+            token_b = self._resolve_token("token-b", runtime)
+            
+            if not token_a:
                 skipped += 1
                 continue
 
-            baseline_profile, baseline_state = self._fetch_profile(
-                context,
-                session,
-                helper,
-                baseline_url,
-                auth_label=auth_label,
-                token=token,
-                timeout=timeout,
-                verify_tls=verify_tls,
-                retries=retry_count,
-                backoff_base=retry_backoff_base,
-                backoff_factor=retry_backoff_factor,
-                limiter=limiter,
+            # Step 1: Baseline for User A (The legitimate owner)
+            profile_a, state_a = self._fetch_profile(
+                context, session, helper, baseline_url,
+                auth_label="token-a", token=token_a,
+                timeout=timeout, verify_tls=verify_tls,
+                retries=retry_count, backoff_base=retry_backoff_base,
+                backoff_factor=retry_backoff_factor, limiter=limiter
             )
-            attempted += 1
-            if baseline_profile is None:
-                if baseline_state == "failed":
-                    failed += 1
-                else:
-                    skipped += 1
+            if not profile_a or profile_a["status"] >= 400:
+                skipped += 1
                 continue
 
-            variant_profile, variant_state = self._fetch_profile(
-                context,
-                session,
-                helper,
-                variant_url,
-                auth_label=auth_label,
-                token=token,
-                timeout=timeout,
-                verify_tls=verify_tls,
-                retries=retry_count,
-                backoff_base=retry_backoff_base,
-                backoff_factor=retry_backoff_factor,
-                limiter=limiter,
+            # Step 2: Cross-check with User B (The attacker)
+            profile_b = None
+            if token_b:
+                profile_b, state_b = self._fetch_profile(
+                    context, session, helper, baseline_url,
+                    auth_label="token-b", token=token_b,
+                    timeout=timeout, verify_tls=verify_tls,
+                    retries=retry_count, backoff_base=retry_backoff_base,
+                    backoff_factor=retry_backoff_factor, limiter=limiter
+                )
+            
+            # Step 3: check with Anon
+            profile_anon, state_anon = self._fetch_profile(
+                context, session, helper, baseline_url,
+                auth_label="anon", token=None,
+                timeout=timeout, verify_tls=verify_tls,
+                retries=retry_count, backoff_base=retry_backoff_base,
+                backoff_factor=retry_backoff_factor, limiter=limiter
             )
-            attempted += 1
-            if variant_profile is None:
-                if variant_state == "failed":
-                    failed += 1
-                else:
-                    skipped += 1
+
+            # HONESTY CHECK: 
+            # If Token B or Anon gets the same data (MD5 + Status) as Token A, it's a confirmed IDOR.
+            # If they get 401/403 or different data, it's NOT a confirmed IDOR.
+            
+            is_confirmed = False
+            reasons = []
+            final_profile = None
+            final_auth = "none"
+
+            if profile_b and profile_b["status"] == profile_a["status"] and profile_b["body_md5"] == profile_a["body_md5"]:
+                is_confirmed = True
+                reasons.append("cross_user_access_confirmed")
+                final_profile = profile_b
+                final_auth = "token-b"
+            elif profile_anon and profile_anon["status"] == profile_a["status"] and profile_anon["body_md5"] == profile_a["body_md5"]:
+                is_confirmed = True
+                reasons.append("unauthenticated_access_confirmed")
+                final_profile = profile_anon
+                final_auth = "anon"
+            
+            if not is_confirmed:
+                # Still check semantic reasons if status changed from 403 to 200, 
+                # but be more conservative.
+                if profile_b:
+                    semantic = helper._semantic_reasons(profile_a, profile_b)
+                    if semantic:
+                        reasons.extend(semantic)
+                        final_profile = profile_b
+                        final_auth = "token-b"
+
+            if not final_profile or not reasons:
                 continue
 
-            reasons = helper._semantic_reasons(baseline_profile, variant_profile)
-            if not reasons:
-                continue
-
-            confidence_label = "verified" if any(
-                reason in reasons for reason in {"subject_identifier_changed", "auth_bypass_status_change"}
-            ) else "high"
-            severity = "critical" if confidence_label == "verified" else "high"
-            score_floor = 92 if confidence_label == "verified" else 86
+            confidence_label = "verified" if is_confirmed else "high"
+            severity = "critical" if is_confirmed else "high"
+            score_floor = 95 if is_confirmed else 85
+            
             signal_id = context.emit_signal(
                 "idor_confirmed",
                 "url",
-                variant_url,
-                confidence=1.0 if confidence_label == "verified" else 0.8,
+                baseline_url,
+                confidence=1.0 if is_confirmed else 0.8,
                 source="idor-validator",
-                tags=["idor", "confirmed"],
+                tags=["idor", "confirmed"] + (["cross-user"] if final_auth == "token-b" else []),
                 evidence={
                     "reasons": reasons,
-                    "baseline_status": baseline_profile["status"],
-                    "variant_status": variant_profile["status"],
+                    "baseline_status": profile_a["status"],
+                    "variant_status": final_profile["status"],
+                    "auth": final_auth
                 },
             )
+
             finding = {
                 "type": "finding",
                 "finding_type": "idor",
                 "source": "idor-validator",
-                "url": variant_url,
-                "hostname": urlparse(variant_url).hostname,
-                "description": "IDOR confirmed by dedicated validator replay",
+                "url": baseline_url,
+                "hostname": urlparse(baseline_url).hostname,
+                "description": f"IDOR confirmed via {final_auth} cross-check",
                 "details": {
                     "reasons": reasons,
-                    "auth": auth_label,
-                    "baseline_url": baseline_url,
-                    "variant_url": variant_url,
-                    "baseline_status": baseline_profile["status"],
-                    "variant_status": variant_profile["status"],
-                    "baseline_subject_ids": sorted(set(baseline_profile.get("subject_ids") or []))[:20],
-                    "variant_subject_ids": sorted(set(variant_profile.get("subject_ids") or []))[:20],
+                    "auth": final_auth,
+                    "baseline_status": profile_a["status"],
+                    "variant_status": final_profile["status"],
+                    "baseline_subject_ids": sorted(set(profile_a.get("subject_ids") or []))[:20],
+                    "variant_subject_ids": sorted(set(final_profile.get("subject_ids") or []))[:20],
                 },
-                "proof": self._safe_poc(variant_url, auth_label),
+                "proof": self._safe_poc(baseline_url, final_auth),
                 "tags": ["idor", "confirmed", "validator:idor", *reasons],
                 "score": max(score_floor, int(candidate.get("score", 0) or 0)),
                 "priority": "high",
@@ -178,8 +201,8 @@ class IDORValidatorStage(Stage):
                         "baseline_url": baseline_url,
                         "auth": auth_label,
                         "reasons": reasons,
-                        "baseline_status": baseline_profile["status"],
-                        "variant_status": variant_profile["status"],
+                        "baseline_status": profile_a["status"],
+                        "variant_status": final_profile["status"],
                     }
                 )
 

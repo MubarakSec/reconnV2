@@ -41,10 +41,14 @@ class VerifyFindingsStage(Stage):
         )
 
         candidates_by_host: Dict[str, List[Tuple[int, str, Dict[str, object]]]] = defaultdict(list)
+        trash_count = 0
         for entry in iter_jsonl(results_path):
             if not isinstance(entry, dict):
                 continue
             if not self._is_finding(entry):
+                continue
+            if self._is_trash_finding(entry):
+                trash_count += 1
                 continue
             score = int(entry.get("score", 0))
             if score < min_score:
@@ -153,11 +157,42 @@ class VerifyFindingsStage(Stage):
                 "verified": verified,
                 "failed": failed,
                 "skipped": skipped,
+                "trash_filtered": trash_count,
                 "status_codes": dict(status_counts),
                 "artifact": str(artifact_path),
             }
         )
         context.manager.update_metadata(context.record)
+
+    @staticmethod
+    def _is_trash_finding(entry: Dict[str, object]) -> bool:
+        """
+        An honesty filter to skip low-value or likely false-positive findings.
+        """
+        etype = str(entry.get("type") or "").lower()
+        source = str(entry.get("source") or "").lower()
+        
+        # IDOR suspects with no semantic reasons are usually just status code noise
+        if etype == "idor_suspect":
+            details = entry.get("details")
+            if isinstance(details, dict):
+                reasons = details.get("reasons", [])
+                if not reasons or (isinstance(reasons, list) and len(reasons) == 0):
+                    return True
+        
+        # Skip findings on common static/CDN hosts unless verified
+        url = str(entry.get("url") or "").lower()
+        static_noise = {"cloudfront.net", "s3.amazonaws.com", "storage.googleapis.com", "wp-content", "assets/"}
+        if any(noise in url for noise in static_noise):
+            tags = entry.get("tags", [])
+            if not isinstance(tags, list) or "confirmed" not in tags:
+                return True
+                
+        # Skip findings with very low scores that aren't verified
+        if int(entry.get("score", 0)) < 40:
+            return True
+
+        return False
 
     @staticmethod
     def _is_finding(entry: Dict[str, object]) -> bool:

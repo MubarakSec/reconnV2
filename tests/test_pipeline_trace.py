@@ -144,11 +144,13 @@ def test_pipeline_trace_records_tool_execution_spans(tmp_path: Path) -> None:
         def execute(self, context) -> None:
             true_cmd = which("true") or "/usr/bin/true"
             false_cmd = which("false") or "/usr/bin/false"
-            context.executor.run([true_cmd], check=False, capture_output=True)
-            context.executor.run([false_cmd], check=False, capture_output=True)
+            import uuid
+            uid = uuid.uuid4().hex
+            context.executor.run([true_cmd, f"--uid={uid}"], check=False, capture_output=True)
+            context.executor.run([false_cmd, f"--uid={uid}"], check=False, capture_output=True)
 
     record = _make_record(tmp_path, "job-trace-tools", {"retry_count": 0})
-    context = PipelineContext(record=record, manager=DummyManager(), force=False)
+    context = PipelineContext(record=record, manager=DummyManager(), force=True)
     runner = PipelineRunner(stages=[ToolStage()])
 
     runner.run(context)

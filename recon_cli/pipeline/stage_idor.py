@@ -124,53 +124,57 @@ class IDORStage(Stage):
             variants = self._generate_variants(candidate, other_id)
             if not variants:
                 continue
-            for auth_label, token in tokens:
-                baseline_url = candidate.url
-                baseline_key = (baseline_url, auth_label)
-                if baseline_key not in baseline_cache:
-                    baseline_data = self._fetch(
-                        session,
-                        context,
-                        baseline_url,
-                        auth_label,
-                        token,
-                        timeout,
-                        verify_tls,
-                        limiter,
-                    )
-                    if not baseline_data:
-                        continue
-                    baseline_cache[baseline_key] = baseline_data
+            
+            # Triple check logic:
+            # 1. Baseline (Token A) - Success
+            # 2. Variant (Token A) - Success (Different ID)
+            # 3. Variant (Token B) - Failure (Different User)
+            # 4. Variant (Anon) - Failure
+            
+            for variant_url, variant_meta in variants:
+                # 1. Test with Token A (legitimate user)
+                data_a = self._fetch(session, context, variant_url, "token-a", tokens[1][1] if len(tokens) > 1 else None, timeout, verify_tls, limiter)
+                if not data_a or data_a["status"] >= 400:
+                    continue
+                
+                # 2. Test with Token B (attacker/other user)
+                token_b = tokens[2][1] if len(tokens) > 2 else None
+                if not token_b:
+                    # If no Token B, we can't fully "confirm" IDOR honesty-style, 
+                    # but we can check vs Anon.
+                    data_b = self._fetch(session, context, variant_url, "anon", None, timeout, verify_tls, limiter)
                 else:
-                    baseline_data = baseline_cache[baseline_key]
-                for variant_url, variant_meta in variants:
+                    data_b = self._fetch(session, context, variant_url, "token-b", token_b, timeout, verify_tls, limiter)
+                
+                if not data_b:
+                    continue
+
+                reasons = self._semantic_reasons(data_a, data_b)
+                # If Token B gets same data as Token A, it's a potential IDOR
+                is_confirmed = False
+                if data_b["status"] == data_a["status"] and data_b["body_md5"] == data_a["body_md5"]:
+                    is_confirmed = True
+                
+                if is_confirmed or reasons:
                     stats["tests"] += 1
-                    data = self._fetch(
-                        session,
-                        context,
+                    finding = self._assemble_finding(
+                        candidate,
                         variant_url,
-                        auth_label,
-                        token,
-                        timeout,
-                        verify_tls,
-                        limiter,
+                        variant_meta,
+                        "token-b" if token_b else "anon",
+                        token_b,
+                        data_a,
+                        data_b,
+                        reasons if reasons else ["unauthorized_access_confirmed"]
                     )
-                    if not data:
-                        continue
-                    reasons = self._semantic_reasons(baseline_data, data)
-                    if reasons:
-                        finding = self._assemble_finding(
-                            candidate,
-                            variant_url,
-                            variant_meta,
-                            auth_label,
-                            token,
-                            baseline_data,
-                            data,
-                            reasons,
-                        )
-                        if context.results.append(finding):
-                            stats["suspects"] += 1
+                    if is_confirmed:
+                        finding["type"] = "finding"
+                        finding["finding_type"] = "idor"
+                        finding["confidence"] = "high"
+                        finding["tags"].append("confirmed")
+                    
+                    if context.results.append(finding):
+                        stats["suspects"] += 1
         context.manager.update_metadata(context.record)
 
     def _collect_candidates(self, context: PipelineContext, items: Iterable[Dict[str, object]]) -> List[Candidate]:

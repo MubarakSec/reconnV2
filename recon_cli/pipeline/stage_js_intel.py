@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Set
 from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -146,6 +147,8 @@ class JSIntelligenceStage(Stage):
                 url = entry.get("url")
                 if not url or not isinstance(url, str):
                     continue
+                if not context.url_in_scope(url):
+                    continue
                 if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
                     if entry.get("status_code") in {200, 302}:
                         direct_js_urls.append(url)
@@ -161,6 +164,8 @@ class JSIntelligenceStage(Stage):
                     if not isinstance(js_url, str) or not js_url:
                         continue
                     if js_url.startswith(("http://", "https://")):
+                        if not context.url_in_scope(js_url):
+                            continue
                         runtime_js_urls.append(js_url)
                         if js_url not in js_url_bases:
                             js_urls.append(js_url)
@@ -195,7 +200,7 @@ class JSIntelligenceStage(Stage):
         persisted_query_hints: set[str] = set()
         ws_endpoints: set[str] = set()
         high_value_strings: set[str] = set()
-        hidden_param_hints: set[str] = set()
+        hidden_param_hints: Dict[str, Set[str]] = defaultdict(set)
         for js_url in js_urls:
             surface_base_url = js_url_bases.get(js_url) or js_url
             session = context.auth_session(js_url)
@@ -234,7 +239,8 @@ class JSIntelligenceStage(Stage):
                 include_dynamic=include_dynamic,
             )
             if include_hidden:
-                hidden_param_hints.update(self._extract_param_hints(content))
+                for hint in self._extract_param_hints(content):
+                    hidden_param_hints[hint].add(js_url)
             source_map = None
             map_match = self.SOURCEMAP_PATTERN.search(content)
             if map_match:
@@ -278,7 +284,8 @@ class JSIntelligenceStage(Stage):
                                     )
                                 )
                                 if include_hidden:
-                                    hidden_param_hints.update(self._extract_param_hints(source_blob))
+                                    for hint in self._extract_param_hints(source_blob):
+                                        hidden_param_hints[hint].add(js_url)
                     except requests.exceptions.RequestException:
                         if limiter:
                             limiter.on_error(source_map)
@@ -287,6 +294,7 @@ class JSIntelligenceStage(Stage):
             graphql_candidates = set(self._normalize_candidates(extraction.graphql_endpoints))
             ws_candidates = set(self._normalize_candidates(extraction.ws_endpoints))
             combined_candidates = endpoints + [candidate for candidate in sorted(ws_candidates) if candidate not in endpoints]
+            combined_candidates = [candidate for candidate in combined_candidates if context.url_in_scope(candidate)]
             combined_candidates = combined_candidates[:max_urls]
             endpoint_set = set(combined_candidates)
             graphql_candidates &= endpoint_set
@@ -418,7 +426,9 @@ class JSIntelligenceStage(Stage):
             artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
             context.set_data("js_endpoints", discovered_urls)
             if hidden_param_hints:
-                context.set_data("js_param_hints", sorted(hidden_param_hints))
+                # Convert sets to lists for JSON serialization
+                serializable_hints = {k: sorted(v) for k, v in hidden_param_hints.items()}
+                context.set_data("js_param_hints", serializable_hints)
             if graphql_endpoints:
                 context.set_data("js_graphql_endpoints", sorted(graphql_endpoints))
             if graphql_operations:

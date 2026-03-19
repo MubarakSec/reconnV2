@@ -43,9 +43,19 @@ class ScannerStage(Stage):
             return
 
         items = read_jsonl(context.record.paths.results_jsonl)
-        url_entries = [entry for entry in items if entry.get("type") == "url"]
+        url_entries = []
+        for entry in items:
+            if entry.get("type") != "url":
+                continue
+            url_value = entry.get("url")
+            host_value = entry.get("hostname") or (url_value and urlparse(url_value).hostname)
+            if url_value and not context.url_in_scope(str(url_value)):
+                continue
+            if host_value and not context.host_in_scope(str(host_value)):
+                continue
+            url_entries.append(entry)
         if not url_entries:
-            context.logger.info("No URL entries available for scanner stage")
+            context.logger.info("No in-scope URL entries available for scanner stage")
             return
 
         host_info: Dict[str, Dict[str, object]] = {}

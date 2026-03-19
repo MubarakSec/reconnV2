@@ -12,10 +12,13 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal, List
 from contextlib import contextmanager
 
 from recon_cli import config
+
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # Database path
@@ -146,60 +149,39 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_secrets_job ON secrets(job_id)")
 
 
-@dataclass
-class JobModel:
+class JobModel(BaseModel):
     """Job database model."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     target: Optional[str] = None
     profile: str = "passive"
-    status: str = "queued"
+    status: Literal["queued", "running", "finished", "failed", "stopped"] = "queued"
     stage: Optional[str] = None
     queued_at: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     error: Optional[str] = None
-    stats: Dict[str, Any] = field(default_factory=dict)
+    stats: Dict[str, Any] = Field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "target": self.target,
-            "profile": self.profile,
-            "status": self.status,
-            "stage": self.stage,
-            "queued_at": self.queued_at,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "error": self.error,
-            "stats": self.stats,
-        }
+        return self.model_dump()
     
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "JobModel":
-        stats = {}
-        if row["stats"]:
+        data = dict(row)
+        if data.get("stats"):
             try:
-                stats = json.loads(row["stats"])
+                data["stats"] = json.loads(data["stats"])
             except json.JSONDecodeError:
-                pass
-        
-        return cls(
-            id=row["id"],
-            target=row["target"],
-            profile=row["profile"],
-            status=row["status"],
-            stage=row["stage"],
-            queued_at=row["queued_at"],
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
-            error=row["error"],
-            stats=stats,
-        )
+                data["stats"] = {}
+        return cls(**data)
 
 
-@dataclass
-class HostModel:
+class HostModel(BaseModel):
     """Host database model."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     job_id: str = ""
     hostname: str = ""
@@ -209,9 +191,10 @@ class HostModel:
     live: bool = False
 
 
-@dataclass
-class URLModel:
+class URLModel(BaseModel):
     """URL database model."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     job_id: str = ""
     url: str = ""
@@ -223,14 +206,15 @@ class URLModel:
     tls: bool = False
 
 
-@dataclass
-class VulnerabilityModel:
+class VulnerabilityModel(BaseModel):
     """Vulnerability database model."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     job_id: str = ""
     template_id: Optional[str] = None
     name: Optional[str] = None
-    severity: str = "info"
+    severity: Literal["info", "low", "medium", "high", "critical", "unknown", "noise"] = "info"
     host: Optional[str] = None
     url: Optional[str] = None
     matched_at: Optional[str] = None
@@ -239,9 +223,10 @@ class VulnerabilityModel:
     extracted: Optional[str] = None
 
 
-@dataclass
-class SecretModel:
+class SecretModel(BaseModel):
     """Secret database model."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     job_id: str = ""
     secret_type: Optional[str] = None

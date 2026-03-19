@@ -97,10 +97,11 @@ def test_js_intel_extracts_dynamic_routes_and_hidden_params(monkeypatch, tmp_pat
     urls = [entry.get("url") for entry in read_jsonl(record.paths.results_jsonl) if entry.get("source") == "js-intel"]
     assert any("/api/v1/users/1" in str(url) for url in urls)
     assert any("/graphql/v1" in str(url) for url in urls)
-    hints = context.get_data("js_param_hints", []) or []
+    hints = context.get_data("js_param_hints", {}) or {}
     assert "account_id" in hints
     assert "token" in hints
     assert "redirect_url" in hints
+    assert "https://cdn.example.com/app.js" in hints["token"]
 
 
 def test_js_intel_extracts_graphql_ws_and_persisted_hints(monkeypatch, tmp_path: Path):
@@ -211,7 +212,7 @@ def test_param_mining_generates_mutation_catalog_from_js_hints(tmp_path: Path):
         handle.write("\n")
 
     context = PipelineContext(record=record, manager=DummyManager())
-    context.set_data("js_param_hints", ["redirect_url", "user_id"])
+    context.set_data("js_param_hints", {"redirect_url": ["https://app.example.com/app.js"], "user_id": ["https://app.example.com/app.js"]})
     ParamMiningStage().run(context)
 
     mutations = [entry for entry in read_jsonl(record.paths.results_jsonl) if entry.get("type") == "param_mutation"]
@@ -336,7 +337,7 @@ def test_runtime_crawl_role_aware_profiles_emit_profile_records(monkeypatch, tmp
 
 
 def test_correlation_builds_attack_paths_and_surface_benchmark(tmp_path: Path):
-    record = _make_record(tmp_path, {"correlation_attack_path_limit": 5})
+    record = _make_record(tmp_path, {"enable_correlation": True, "correlation_attack_path_limit": 5})
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         rows = [
             {

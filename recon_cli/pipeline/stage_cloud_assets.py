@@ -113,8 +113,9 @@ class CloudAssetDiscoveryStage(Stage):
                 limiter.on_response(url, resp.status_code)
             status = int(resp.status_code or 0)
             body = (resp.text or "")[:1200]
+            headers = dict(getattr(resp, "headers", {}))
 
-            exists, public, reason = self._classify(provider, status, body)
+            exists, public, reason = self._classify(provider, status, body, headers)
             if not exists:
                 continue
             checks.append(CloudCheck(provider, url, bucket, exists, public, status, reason))
@@ -221,9 +222,23 @@ class CloudAssetDiscoveryStage(Stage):
             checks.append(("azure", f"https://{safe}.blob.core.windows.net/", safe))
         return checks
 
-    def _classify(self, provider: str, status: int, body: str) -> Tuple[bool, bool, str]:
+    def _classify(self, provider: str, status: int, body: str, headers: Dict[str, str]) -> Tuple[bool, bool, str]:
         if status in self.NOT_FOUND_STATUSES:
             return False, False, "not_found"
+
+        # Honesty check: verify genuine cloud headers to avoid parked domains
+        server = str(headers.get("Server", ""))
+        is_genuine = False
+        if provider == "s3" and ("AmazonS3" in server or "x-amz-request-id" in headers):
+            is_genuine = True
+        elif provider == "gcs" and ("UploadServer" in server or "x-guploader-uploadid" in headers):
+            is_genuine = True
+        elif provider == "azure" and ("Windows-Azure-Blob" in server or "x-ms-request-id" in headers):
+            is_genuine = True
+
+        if not is_genuine:
+            return False, False, "not_genuine_cloud"
+
         keywords = self._keywords_for(provider)
         if status in self.PUBLIC_STATUSES:
             if any(keyword.lower() in body.lower() for keyword in keywords):

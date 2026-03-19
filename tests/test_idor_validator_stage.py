@@ -73,6 +73,7 @@ def test_idor_validator_confirms_subject_change(monkeypatch, tmp_path: Path):
             "idor_validator_rps": 0,
             "idor_validator_per_host_rps": 0,
             "idor_token_a": "Bearer token-a",
+            "idor_token_b": "Bearer token-b",
         },
     )
     _write_idor_suspect(
@@ -96,12 +97,16 @@ def test_idor_validator_confirms_subject_change(monkeypatch, tmp_path: Path):
 
     def fake_get(_self, url, **kwargs):
         auth = str((kwargs.get("headers") or {}).get("Authorization") or "")
-        if auth != "Bearer token-a":
-            return _FakeResponse(403, text="forbidden")
+        # Successful cross-user access simulation
         if url.endswith("/users/1"):
-            return _FakeResponse(200, body={"id": "1", "email": "alice@example.com"})
+            # Both token-a and token-b can see users/1
+            if auth in {"Bearer token-a", "Bearer token-b"}:
+                return _FakeResponse(200, body={"id": "1", "email": "alice@example.com"})
+            return _FakeResponse(403, text="forbidden")
         if url.endswith("/users/2"):
-            return _FakeResponse(200, body={"id": "2", "email": "bob@example.com"})
+            if auth == "Bearer token-a":
+                return _FakeResponse(200, body={"id": "2", "email": "bob@example.com"})
+            return _FakeResponse(403, text="forbidden")
         return _FakeResponse(404, text="not found")
 
     import requests
@@ -118,7 +123,7 @@ def test_idor_validator_confirms_subject_change(monkeypatch, tmp_path: Path):
     ]
     assert len(findings) == 1
     reasons = (findings[0].get("details") or {}).get("reasons") or []
-    assert "subject_identifier_changed" in reasons
+    assert "cross_user_access_confirmed" in reasons
     assert findings[0].get("confidence_label") == "verified"
 
     stats = record.metadata.stats.get("idor_validator", {})

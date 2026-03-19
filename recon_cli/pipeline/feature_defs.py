@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from pydantic import BaseModel, Field
+
+class PipelineFeatures(BaseModel):
+    """Structured pipeline feature set for scoring and correlation."""
+    has_api: bool = False
+    has_login: bool = False
+    js_secrets_count: int = 0
+    url_count: int = 0
+    finding_count: int = 0
+    asn_score: float = 0.0
+    tag_entropy: float = 0.0
 
 FEATURE_KEYS = [
     "has_api",

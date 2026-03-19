@@ -12,7 +12,7 @@ from recon_cli import config
 from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.jobs.results import ResultsTracker
 from recon_cli.tools.executor import CommandExecutor, CommandCache
-from recon_cli.utils import fs, time as time_utils
+from recon_cli.utils import fs, time as time_utils, validation
 from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.logging import build_file_logger, silence_logger
 
@@ -107,7 +107,13 @@ class PipelineContext:
         def _allow_payload(payload: Dict[str, object]) -> bool:
             url_value = payload.get('url')
             if url_value:
-                return self.url_allowed(url_value)
+                if not self.url_allowed(str(url_value)):
+                    return False
+                if not self.url_in_scope(str(url_value)):
+                    return False
+            host_value = payload.get("hostname")
+            if host_value and not self.host_in_scope(str(host_value)):
+                return False
             return True
 
         self.results = ResultsTracker(self.record.paths.results_jsonl, allow=_allow_payload)
@@ -177,6 +183,65 @@ class PipelineContext:
             return False
         return bool(self._url_allow_pattern.search(path))
 
+    def _normalize_scope_value(self, value: str) -> str:
+        candidate = str(value or "").strip()
+        if not candidate:
+            return ""
+        if candidate.startswith("*."):
+            candidate = candidate[2:]
+        parsed = None
+        if "://" in candidate or any(ch in candidate for ch in ("/", "?", "#")):
+            parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+        elif ":" in candidate and not validation.is_ip(candidate):
+            parsed = urlparse(f"https://{candidate}")
+        if parsed and parsed.hostname:
+            candidate = parsed.hostname
+        return str(candidate).strip().rstrip(".").lower()
+
+    def scope_targets(self) -> List[str]:
+        raw_targets: List[str] = []
+        raw_targets.extend(str(value) for value in self.targets if value)
+        if getattr(self, "record", None):
+            spec = self.record.spec
+            if getattr(spec, "target", None):
+                raw_targets.append(str(spec.target))
+            raw_targets.extend(str(value) for value in getattr(spec, "targets", []) if value)
+        seen: set[str] = set()
+        targets: List[str] = []
+        for value in raw_targets:
+            normalized = self._normalize_scope_value(value)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            targets.append(normalized)
+        return targets
+
+    def host_in_scope(self, host: str) -> bool:
+        normalized_host = self._normalize_scope_value(host)
+        if not normalized_host:
+            return False
+        targets = self.scope_targets()
+        if not targets:
+            return True
+        for target in targets:
+            if validation.is_ip(normalized_host) or validation.is_ip(target):
+                if normalized_host == target:
+                    return True
+                continue
+            if normalized_host == target or normalized_host.endswith(f".{target}"):
+                return True
+        return False
+
+    def url_in_scope(self, url: str) -> bool:
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return False
+        host = parsed.hostname or self._normalize_scope_value(url)
+        return self.host_in_scope(host)
+
     def auth_enabled(self) -> bool:
         return bool(self._auth_manager)
 
@@ -227,25 +292,30 @@ class PipelineContext:
         """Append a structured signal record and return its signal_id."""
         if not signal_type or not target_type or not target:
             return ""
+        if target_type == "url":
+            if not self.url_allowed(str(target)) or not self.url_in_scope(str(target)):
+                return ""
+        elif target_type in {"host", "hostname", "ip"} and not self.host_in_scope(str(target)):
+            return ""
         if not hasattr(self, "results") or self.results is None:
             return ""
+        
+        from recon_cli.db.schemas import SignalResult
+        
         signal_id = f"sig_{uuid.uuid4().hex[:10]}"
-        payload: Dict[str, object] = {
-            "type": "signal",
-            "signal_id": signal_id,
-            "signal_type": str(signal_type),
-            "target_type": str(target_type),
-            "target": str(target),
-            "confidence": float(confidence),
-            "source": str(source),
-        }
-        if tags:
-            payload["tags"] = list(tags)
-        if evidence:
-            payload["evidence"] = evidence
-        if metadata:
-            payload["metadata"] = metadata
-        self.results.append(payload)
+        signal = SignalResult(
+            signal_id=signal_id,
+            signal_type=str(signal_type),
+            target_type=str(target_type),
+            target=str(target),
+            confidence=float(confidence),
+            source=str(source),
+            tags=list(tags) if tags else [],
+            evidence=evidence,
+            metadata=metadata,
+        )
+        
+        self.results.append(signal.model_dump(exclude_none=False))
         self._data_store.pop("_signals", None)
         self._data_store.pop("_signal_index", None)
         return signal_id

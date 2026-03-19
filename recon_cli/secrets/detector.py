@@ -37,26 +37,29 @@ import requests
 # الترتيب مهم: الأنماط الأكثر تحديداً أولاً
 
 SECRETS_PATTERNS = [
-    # AWS Access Key: يبدأ بـ AKIA متبوعاً بـ 16 حرف
+    # AWS Access Key: AKIA followed by 16 alphanumeric characters
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
     
-    # AWS Secret Key: عادة في assignment مع كلمة secret
+    # AWS Secret Key: typically 40 base64-like characters
     ("aws_secret_key", re.compile(r"(?i)aws(.{0,4})?secret(.{0,4})?=\s*['\"]([A-Za-z0-9/+]{40})['\"]")),
     
-    # Slack Token: يبدأ بـ xoxp/xoxb/xoxa/xoxo
+    # Slack Token
     ("slack_token", re.compile(r"xox[pboa]\-[A-Za-z0-9-]{10,48}")),
     
-    # Google API Key: يبدأ بـ AIza
+    # Google API Key
     ("google_api_key", re.compile(r"AIza[0-9A-Za-z\-_]{35}")),
+
+    # Google Cloud OAuth Client Secret
+    ("google_oauth_secret", re.compile(r"GOCSPX-[A-Za-z0-9\-_]{28}")),
     
-    # JWT Token: Base64 encoded JSON يبدأ بـ eyJ
-    ("jwt", re.compile(r"eyJ[A-Za-z0-9_=-]{10,}")),
+    # JWT Token: eye followed by a long base64 string, usually with dots
+    ("jwt", re.compile(r"eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*")),
     
-    # RSA Private Key: الهيدر المعروف
+    # RSA Private Key
     ("rsa_private", re.compile(r"-----BEGIN RSA PRIVATE KEY-----")),
     
-    # Generic Secret: أي متغير يحتوي api/secret/token/key مع قيمة طويلة
-    ("generic_secret", re.compile(r"(?i)(api|secret|token|key)[\w-]{0,10}\s*[:=]\s*['\"][A-Za-z0-9_\-/]{16,}['\"]")),
+    # Generic Secret: Must be high entropy and at least 20 chars long, excluding common False Positives
+    ("generic_secret", re.compile(r"(?i)(api[_-]?key|secret[_-]?key|token|auth[_-]?key)[\w-]{0,5}\s*[:=]\s*['\"]([A-Za-z0-9_\-/]{20,})['\"]")),
 ]
 
 # امتدادات الملفات النصية التي يُحتمل أن تحتوي أسرار
@@ -148,16 +151,17 @@ class SecretMatch:
     def confidence(self) -> str:
         """
         تحديد مستوى الثقة في أن هذا سر حقيقي.
-        
-        المستويات:
-        - high: أنماط مؤكدة (RSA keys, AWS keys)
-        - medium: entropy عالية (>= 3.5)
-        - low: مطابقة عامة بدون entropy عالية
         """
         # الأنماط المؤكدة دائماً high
-        if self.pattern in {"rsa_private", "aws_access_key", "aws_secret_key"}:
+        if self.pattern in {"rsa_private", "aws_access_key", "aws_secret_key", "google_oauth_secret"}:
             return "high"
+        
         # entropy عالية تعني على الأرجح سر حقيقي
+        if self.pattern == "generic_secret":
+            if self.entropy >= 4.0:
+                return "medium"
+            return "low"
+
         if self.entropy >= 3.5:
             return "medium"
         # قد يكون false positive

@@ -88,8 +88,50 @@ class UploadProbeStage(Stage):
                     continue
                 checked += 1
                 
-                # Check candidate URLs
-                if url in candidates and resp.status in {200, 401, 403, 405, 302}:
+                body = resp.body or ""
+                has_dir_listing = self._looks_like_dir_listing(body)
+                has_upload_indicators = self._has_upload_indicators(body)
+                is_candidate = url in candidates
+
+                # Honest Finding: require proof (dir listing or form/input)
+                if has_dir_listing or has_upload_indicators:
+                    dir_exposed += 1
+                    tags = ["upload", "exposed"]
+                    if has_dir_listing: tags.append("directory")
+                    if has_upload_indicators: tags.append("form")
+                    
+                    host = urlparse(url).hostname
+                    signal_id = context.emit_signal(
+                        "upload_exposed" if has_upload_indicators else "upload_dir_exposed", 
+                        "url", url,
+                        confidence=0.8, source="upload-probe",
+                        tags=tags, evidence={
+                            "status_code": resp.status, 
+                            "has_indicators": has_upload_indicators,
+                            "has_dir_listing": has_dir_listing
+                        },
+                    )
+                    context.results.append({
+                        "type": "finding",
+                        "source": "upload-probe",
+                        "finding_type": "upload_exposed",
+                        "hostname": host,
+                        "url": url,
+                        "description": "Exposed upload surface with proof" if has_upload_indicators else "Upload directory listing exposed",
+                        "tags": tags,
+                        "score": 85 if has_dir_listing else 75,
+                        "priority": "high",
+                        "evidence_id": signal_id or None,
+                    })
+                    artifacts.append({
+                        "url": url, 
+                        "status": resp.status, 
+                        "has_indicators": has_upload_indicators,
+                        "has_dir_listing": has_dir_listing
+                    })
+                
+                # Signal only: if it looks like an upload path but has no proof in body
+                elif (is_candidate or url in probe_urls) and resp.status in {200, 401, 403, 405, 302}:
                     surfaced += 1
                     tags = ["surface:upload", "service:upload"]
                     context.results.append({
@@ -98,38 +140,14 @@ class UploadProbeStage(Stage):
                         "url": url,
                         "hostname": urlparse(url).hostname,
                         "tags": tags,
-                        "score": 40,
+                        "score": 20,
                     })
                     context.emit_signal(
                         "upload_surface", "url", url,
-                        confidence=0.5, source="upload-probe",
+                        confidence=0.3, source="upload-probe",
                         tags=tags, evidence={"status_code": resp.status},
                     )
-                    artifacts.append({"url": url, "status": resp.status})
-                
-                # Check directory listing
-                if url in probe_urls and resp.status == 200 and self._looks_like_dir_listing(resp.body):
-                    dir_exposed += 1
-                    tags = ["upload", "exposed", "directory"]
-                    host = urlparse(url).hostname
-                    signal_id = context.emit_signal(
-                        "upload_dir_exposed", "url", url,
-                        confidence=0.7, source="upload-probe",
-                        tags=tags, evidence={"status_code": resp.status},
-                    )
-                    context.results.append({
-                        "type": "finding",
-                        "source": "upload-probe",
-                        "finding_type": "upload_directory_listing",
-                        "hostname": host,
-                        "url": url,
-                        "description": "Upload directory listing exposed",
-                        "tags": tags,
-                        "score": 80,
-                        "priority": "high",
-                        "evidence_id": signal_id or None,
-                    })
-                    artifacts.append({"url": url, "status": resp.status, "directory_listing": True})
+                    artifacts.append({"url": url, "status": resp.status, "proof": False})
 
         if artifacts:
             artifact_path = context.record.paths.artifact("upload_probe.json")
@@ -194,4 +212,14 @@ class UploadProbeStage(Stage):
         for marker in self.DIR_LISTING_MARKERS:
             if marker in body:
                 return True
+        return False
+
+    def _has_upload_indicators(self, body: str) -> bool:
+        if not body:
+            return False
+        lowered = body.lower()
+        if 'enctype="multipart/form-data"' in lowered:
+            return True
+        if '<input' in lowered and 'type="file"' in lowered:
+            return True
         return False

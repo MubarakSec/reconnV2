@@ -4,6 +4,7 @@ from pathlib import Path
 from recon_cli.jobs import summary as jobs_summary
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
+from recon_cli.pipeline import stage_scanner as stage_scanner_module
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
 from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage, AuthRecord
@@ -12,7 +13,9 @@ from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
 from recon_cli.pipeline.stage_idor import IDORStage
 from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
+from recon_cli.pipeline.stage_scanner import ScannerStage
 from recon_cli.pipeline.stage_scoring import ScoringStage
+from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 
@@ -507,6 +510,143 @@ def test_js_intel_uses_runtime_crawl_javascript_files(monkeypatch, tmp_path: Pat
 
     urls = [entry.get("url") for entry in read_jsonl(record.paths.results_jsonl) if entry.get("source") == "js-intel"]
     assert "https://api.example.com/v1/users" in urls
+
+
+def test_js_intel_skips_out_of_scope_javascript_and_endpoints(monkeypatch, tmp_path: Path):
+    runtime_overrides = {
+        "enable_js_intel": True,
+        "js_intel_max_files": 10,
+        "js_intel_max_urls": 20,
+        "js_intel_timeout": 2,
+        "js_intel_rps": 0,
+        "js_intel_per_host_rps": 0,
+    }
+    record = _make_record(tmp_path, runtime_overrides)
+    with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "type": "runtime_crawl",
+                "source": "playwright",
+                "url": "https://app.example.com/",
+                "hostname": "app.example.com",
+                "success": True,
+                "javascript_files": [
+                    "https://cdn.example.com/app.js",
+                    "https://www.gstatic.com/recaptcha/releases/example/recaptcha__en.js",
+                ],
+            },
+            handle,
+            separators=(",", ":"),
+        )
+        handle.write("\n")
+
+    context = PipelineContext(record=record, manager=DummyManager())
+    stage = JSIntelligenceStage()
+    requested: list[str] = []
+
+    class _FakeResponse:
+        def __init__(self, text: str) -> None:
+            self.status_code = 200
+            self.text = text
+
+    def fake_get(url, *args, **kwargs):
+        requested.append(url)
+        if url == "https://cdn.example.com/app.js":
+            return _FakeResponse(
+                "const a='https://api.example.com/v1/users';"
+                "const b='https://support.google.com/recaptcha/?hl=en';"
+            )
+        raise AssertionError(f"unexpected out-of-scope fetch: {url}")
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    stage.run(context)
+
+    assert requested == ["https://cdn.example.com/app.js"]
+    artifact_rows = json.loads(record.paths.artifact("js_intel.json").read_text(encoding="utf-8"))
+    assert any("api.example.com" in endpoint for endpoint in artifact_rows[0]["endpoints"])
+    assert all("google" not in endpoint for endpoint in artifact_rows[0]["endpoints"])
+    urls = [entry.get("url") for entry in read_jsonl(record.paths.results_jsonl) if entry.get("source") == "js-intel"]
+    assert any("api.example.com" in str(url) for url in urls)
+    assert all("google" not in str(url) for url in urls)
+
+
+def test_vuln_scan_filters_out_of_scope_candidates(tmp_path: Path):
+    record = _make_record(tmp_path, {})
+    with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
+        for payload in (
+            {
+                "type": "url",
+                "url": "https://app.example.com/search?q=test",
+                "hostname": "app.example.com",
+                "score": 20,
+            },
+            {
+                "type": "url",
+                "url": "https://support.google.com/search?q=test",
+                "hostname": "support.google.com",
+                "score": 90,
+            },
+        ):
+            json.dump(payload, handle, separators=(",", ":"))
+            handle.write("\n")
+
+    context = PipelineContext(record=record, manager=DummyManager())
+    context.set_data(
+        "param_urls",
+        [
+            "https://support.google.com/search?q=test",
+            "https://app.example.com/search?q=test",
+        ],
+    )
+
+    candidates = VulnScanStage()._select_candidates(context)
+    assert candidates == ["https://app.example.com/search?q=test"]
+
+
+def test_scanner_stage_filters_out_of_scope_hosts(monkeypatch, tmp_path: Path):
+    record = _make_record(tmp_path, {})
+    record.spec.scanners = ["nuclei"]
+    with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
+        for payload in (
+            {
+                "type": "url",
+                "url": "https://api.example.com/api/users",
+                "hostname": "api.example.com",
+                "tags": ["service:api"],
+                "score": 50,
+            },
+            {
+                "type": "url",
+                "url": "https://support.google.com/api",
+                "hostname": "support.google.com",
+                "tags": ["service:api"],
+                "score": 90,
+            },
+        ):
+            json.dump(payload, handle, separators=(",", ":"))
+            handle.write("\n")
+
+    context = PipelineContext(record=record, manager=DummyManager())
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(stage_scanner_module.CommandExecutor, "available", staticmethod(lambda _command: True))
+
+    def fake_run_nuclei_batch(_executor, _logger, targets, _scanner_dir, _timeout, **_kwargs):
+        calls.append(list(targets))
+        return stage_scanner_module.scanner_integrations.ScannerExecution(
+            findings=[],
+            artifact_path=None,
+            stats={"targets": len(targets), "findings": 0},
+        )
+
+    monkeypatch.setattr(stage_scanner_module.scanner_integrations, "run_nuclei_batch", fake_run_nuclei_batch)
+
+    ScannerStage().run(context)
+
+    assert calls == [["https://api.example.com/api/users"]]
 
 
 def test_scoring_caps_generic_auth_challenge_noise(tmp_path: Path):

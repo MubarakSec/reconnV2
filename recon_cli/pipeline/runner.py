@@ -5,13 +5,12 @@ from typing import Iterable, Optional, Sequence
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import threading
 from pathlib import Path
 
 from recon_cli.jobs import summary
 from recon_cli.jobs.manager import JobManager
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_base import Stage, StageError, StageResult
+from recon_cli.pipeline.stage_base import Stage, StageResult
 from recon_cli.pipeline.stages import PIPELINE_STAGES
 from recon_cli.pipeline.parallel import DependencyResolver
 from recon_cli.utils.notify import send_pipeline_notification
@@ -162,6 +161,159 @@ class PipelineRunner:
         )
         context.manager.update_metadata(context.record)
 
+    def _start_stage_span(
+        self,
+        context: PipelineContext,
+        stage: Stage,
+        trace: Optional[PipelineTraceRecorder],
+    ) -> Optional[PipelineTraceSpan]:
+        if trace is None:
+            return None
+        return trace.start_span(
+            stage.name,
+            span_type="stage",
+            attributes={
+                "stage": stage.name,
+                "job_id": context.record.spec.job_id,
+                "target": context.record.spec.target,
+            },
+        )
+
+    def _update_stage_progress(
+        self,
+        context: PipelineContext,
+        stage_name: str,
+        status: str,
+        *,
+        started_at: Optional[str] = None,
+        finished_at: Optional[str] = None,
+        error: Optional[Exception] = None,
+        classification: Optional[dict[str, object]] = None,
+        progress_map: Optional[dict[str, dict[str, object]]] = None,
+    ) -> None:
+        if progress_map is not None:
+            entry = progress_map.get(stage_name)
+        else:
+            progress = context.record.metadata.stats.get("stage_progress", [])
+            entry = progress[-1] if progress and progress[-1].get("stage") == stage_name else None
+
+        if entry is None:
+            return
+
+        entry["status"] = status
+        if started_at:
+            entry["started_at"] = started_at
+        if finished_at:
+            entry["finished_at"] = finished_at
+        if error:
+            entry["error"] = str(error)
+        if classification:
+            entry["error_code"] = classification.get("code")
+            entry["error_category"] = classification.get("category")
+
+        context.manager.update_metadata(context.record)
+
+    def _handle_stage_failure(
+        self,
+        context: PipelineContext,
+        stage: Stage,
+        span: Optional[PipelineTraceSpan],
+        exc: Exception,
+        progress_map: Optional[dict[str, dict[str, object]]] = None,
+        finished_at: Optional[str] = None,
+    ) -> dict[str, object]:
+        classification = self._record_error_event(context, exc, stage=stage.name)
+        self._update_stage_progress(
+            context,
+            stage.name,
+            "failed",
+            error=exc,
+            classification=classification,
+            progress_map=progress_map,
+            finished_at=finished_at,
+        )
+        self._finalize_stage_span(
+            context,
+            stage,
+            span,
+            status="failed",
+            error=exc,
+            classification=classification,
+        )
+        context.mark_error(f"[{classification.get('code')}] {exc}")
+        return classification
+
+    def _handle_stage_success(
+        self,
+        context: PipelineContext,
+        stage: Stage,
+        span: Optional[PipelineTraceSpan],
+        result: bool,
+        progress_map: Optional[dict[str, dict[str, object]]] = None,
+        finished_at: Optional[str] = None,
+    ) -> None:
+        status = "completed" if result else "skipped"
+        self._update_stage_progress(
+            context,
+            stage.name,
+            status,
+            progress_map=progress_map,
+            finished_at=finished_at,
+        )
+        self._finalize_stage_span(
+            context,
+            stage,
+            span,
+            status=status,
+        )
+
+    def _initialize_progress(
+        self,
+        context: PipelineContext,
+        stages: Sequence[Stage],
+        *,
+        parallel: bool = False,
+    ) -> dict[str, dict[str, object]]:
+        progress = []
+        progress_map = {}
+        for stage in stages:
+            entry = {"stage": stage.name, "status": "pending"}
+            progress.append(entry)
+            progress_map[stage.name] = entry
+
+        context.record.metadata.stats["stage_progress"] = progress
+        if parallel:
+            context.record.metadata.stats["parallel_execution"] = True
+        context.manager.update_metadata(context.record)
+        return progress_map
+
+    def _get_execution_plan(
+        self,
+        context: PipelineContext,
+        stages: Sequence[Stage],
+    ) -> list[list[str]]:
+        stage_order = [stage.name for stage in stages]
+        dependency_map = {
+            name: set(deps) for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()
+        }
+        previous = None
+        for name in stage_order:
+            if name not in dependency_map:
+                dependency_map[name] = set()
+                if previous:
+                    dependency_map[name].add(previous)
+            previous = name
+
+        resolver = DependencyResolver(dependency_map)
+        execution_order = resolver.resolve(stage_order)
+        context.record.metadata.stats["parallel_groups"] = len(execution_order)
+        context.manager.update_metadata(context.record)
+        return execution_order
+
+    def _get_max_parallel(self, context: PipelineContext) -> int:
+        max_parallel = int(getattr(context.runtime_config, "max_parallel_stages", 4) or 4)
+        return max(1, max_parallel)
+
     @staticmethod
     def _finalize_stage_span(
         context: PipelineContext,
@@ -190,23 +342,13 @@ class PipelineRunner:
             span.add_event("stage.error", {k: v for k, v in classification.items() if v is not None})
         span.finish(status=status, error=error, attributes=attributes)
 
-    @staticmethod
     def _run_stage_threaded(
+        self,
         stage: Stage,
         context: PipelineContext,
         trace: Optional[PipelineTraceRecorder] = None,
     ) -> StageExecutionOutcome:
-        span = None
-        if trace is not None:
-            span = trace.start_span(
-                stage.name,
-                span_type="stage",
-                attributes={
-                    "stage": stage.name,
-                    "job_id": context.record.spec.job_id,
-                    "target": context.record.spec.target,
-                },
-            )
+        span = self._start_stage_span(context, stage, trace)
         try:
             with bind_trace_scope(trace, span):
                 if hasattr(stage, "run_async"):
@@ -261,71 +403,33 @@ class PipelineRunner:
                 self._run_parallel_sync(context, selected_stages, trace=trace)
                 return
 
-            progress = []
-            context.record.metadata.stats["stage_progress"] = progress
-            context.manager.update_metadata(context.record)
+            progress_map = self._initialize_progress(context, selected_stages)
             for stage in selected_stages:
                 started_at = time_utils.iso_now()
-                progress.append({"stage": stage.name, "status": "running", "started_at": started_at})
-                context.manager.update_metadata(context.record)
-                span = trace.start_span(
-                    stage.name,
-                    span_type="stage",
-                    attributes={
-                        "stage": stage.name,
-                        "job_id": context.record.spec.job_id,
-                        "target": context.record.spec.target,
-                    },
-                ) if trace is not None else None
+                self._update_stage_progress(
+                    context, stage.name, "running", started_at=started_at, progress_map=progress_map
+                )
+
+                span = self._start_stage_span(context, stage, trace)
                 try:
                     with bind_trace_scope(trace, span):
                         ran = stage.run(context)
-                    progress[-1]["status"] = "completed" if ran else "skipped"
-                    self._finalize_stage_span(
-                        context,
-                        stage,
-                        span,
-                        status="completed" if ran else "skipped",
+                    self._handle_stage_success(
+                        context, stage, span, bool(ran), progress_map=progress_map
                     )
-                except StageError as exc:
-                    classification = self._record_error_event(context, exc, stage=stage.name)
-                    error_recorded = True
-                    progress[-1]["status"] = "failed"
-                    progress[-1]["error"] = str(exc)
-                    progress[-1]["error_code"] = classification.get("code")
-                    progress[-1]["error_category"] = classification.get("category")
-                    self._finalize_stage_span(
-                        context,
-                        stage,
-                        span,
-                        status="failed",
-                        error=exc,
-                        classification=classification,
-                    )
-                    context.mark_error(f"[{classification.get('code')}] {exc}")
-                    error = exc
-                    raise
                 except Exception as exc:
-                    classification = self._record_error_event(context, exc, stage=stage.name)
                     error_recorded = True
-                    progress[-1]["status"] = "failed"
-                    progress[-1]["error"] = str(exc)
-                    progress[-1]["error_code"] = classification.get("code")
-                    progress[-1]["error_category"] = classification.get("category")
-                    self._finalize_stage_span(
-                        context,
-                        stage,
-                        span,
-                        status="failed",
-                        error=exc,
-                        classification=classification,
-                    )
-                    context.mark_error(f"[{classification.get('code')}] {exc}")
+                    self._handle_stage_failure(context, stage, span, exc, progress_map=progress_map)
                     error = exc
                     raise
                 finally:
-                    progress[-1]["finished_at"] = time_utils.iso_now()
-                    context.manager.update_metadata(context.record)
+                    self._update_stage_progress(
+                        context,
+                        stage.name,
+                        str(progress_map[stage.name]["status"]),
+                        finished_at=time_utils.iso_now(),
+                        progress_map=progress_map,
+                    )
             context.mark_finished()
             summary.generate_summary(context)
         except Exception as exc:
@@ -364,39 +468,14 @@ class PipelineRunner:
     ) -> None:
         stage_list = list(stages)
         stage_map = {stage.name: stage for stage in stage_list}
-        stage_order = [stage.name for stage in stage_list]
-
-        progress = []
-        progress_map = {}
-        for stage in stage_list:
-            entry = {"stage": stage.name, "status": "pending"}
-            progress.append(entry)
-            progress_map[stage.name] = entry
-        context.record.metadata.stats["stage_progress"] = progress
-        context.record.metadata.stats["parallel_execution"] = True
-        context.manager.update_metadata(context.record)
-
-        dependency_map = {name: set(deps) for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()}
-        previous = None
-        for name in stage_order:
-            if name not in dependency_map:
-                dependency_map[name] = set()
-                if previous:
-                    dependency_map[name].add(previous)
-            previous = name
-
-        resolver = DependencyResolver(dependency_map)
-        execution_order = resolver.resolve(stage_order)
-        context.record.metadata.stats["parallel_groups"] = len(execution_order)
-        context.manager.update_metadata(context.record)
-
-        max_parallel = int(getattr(context.runtime_config, "max_parallel_stages", 4) or 4)
-        max_parallel = max(1, max_parallel)
+        progress_map = self._initialize_progress(context, stage_list, parallel=True)
+        execution_order = self._get_execution_plan(context, stage_list)
+        max_parallel = self._get_max_parallel(context)
 
         with ThreadPoolExecutor(max_workers=max_parallel) as executor:
             for group_index, group in enumerate(execution_order, start=1):
                 for i in range(0, len(group), max_parallel):
-                    batch = group[i:i + max_parallel]
+                    batch = group[i : i + max_parallel]
                     now = time_utils.iso_now()
                     if trace is not None:
                         trace.emit(
@@ -408,15 +487,14 @@ class PipelineRunner:
                             },
                         )
                     for name in batch:
-                        entry = progress_map.get(name)
-                        if entry is None:
-                            continue
-                        entry["status"] = "running"
-                        entry["started_at"] = now
-                    context.manager.update_metadata(context.record)
+                        self._update_stage_progress(
+                            context, name, "running", started_at=now, progress_map=progress_map
+                        )
 
                     future_map = {
-                        executor.submit(self._run_stage_threaded, stage_map[name], context, trace): name
+                        executor.submit(
+                            self._run_stage_threaded, stage_map[name], context, trace
+                        ): name
                         for name in batch
                     }
                     outcomes: dict[str, StageExecutionOutcome] = {}
@@ -430,36 +508,27 @@ class PipelineRunner:
 
                     finished_at = time_utils.iso_now()
                     for name in batch:
-                        entry = progress_map.get(name)
-                        if entry is None:
-                            continue
                         outcome = outcomes.get(name) or StageExecutionOutcome()
-                        entry["finished_at"] = finished_at
                         if outcome.error is not None:
-                            classification = self._record_error_event(context, outcome.error, stage=name)
-                            entry["status"] = "failed"
-                            entry["error"] = str(outcome.error)
-                            entry["error_code"] = classification.get("code")
-                            entry["error_category"] = classification.get("category")
-                            self._finalize_stage_span(
+                            classification = self._handle_stage_failure(
                                 context,
                                 stage_map[name],
                                 outcome.span,
-                                status="failed",
-                                error=outcome.error,
-                                classification=classification,
+                                outcome.error,
+                                progress_map=progress_map,
+                                finished_at=finished_at,
                             )
                             if first_failure_code is None:
                                 first_failure_code = str(classification.get("code") or "")
                         else:
-                            entry["status"] = "completed" if bool(outcome.result) else "skipped"
-                            self._finalize_stage_span(
+                            self._handle_stage_success(
                                 context,
                                 stage_map[name],
                                 outcome.span,
-                                status="completed" if bool(outcome.result) else "skipped",
+                                bool(outcome.result),
+                                progress_map=progress_map,
+                                finished_at=finished_at,
                             )
-                    context.manager.update_metadata(context.record)
                     if trace is not None:
                         trace.emit(
                             "parallel.batch.finished",
@@ -490,47 +559,12 @@ class PipelineRunner:
     ) -> None:
         stage_list = list(stages)
         stage_map = {stage.name: stage for stage in stage_list}
-        stage_order = [stage.name for stage in stage_list]
-
-        progress = []
-        progress_map = {}
-        for stage in stage_list:
-            entry = {"stage": stage.name, "status": "pending"}
-            progress.append(entry)
-            progress_map[stage.name] = entry
-        context.record.metadata.stats["stage_progress"] = progress
-        context.record.metadata.stats["parallel_execution"] = True
-        context.manager.update_metadata(context.record)
-
-        dependency_map = {name: set(deps) for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()}
-        previous = None
-        for name in stage_order:
-            if name not in dependency_map:
-                dependency_map[name] = set()
-                if previous:
-                    dependency_map[name].add(previous)
-            previous = name
-
-        resolver = DependencyResolver(dependency_map)
-        execution_order = resolver.resolve(stage_order)
-        context.record.metadata.stats["parallel_groups"] = len(execution_order)
-        context.manager.update_metadata(context.record)
-
-        max_parallel = int(getattr(context.runtime_config, "max_parallel_stages", 4) or 4)
-        max_parallel = max(1, max_parallel)
+        progress_map = self._initialize_progress(context, stage_list, parallel=True)
+        execution_order = self._get_execution_plan(context, stage_list)
+        max_parallel = self._get_max_parallel(context)
 
         async def _run_stage(stage: Stage) -> StageExecutionOutcome:
-            span = None
-            if trace is not None:
-                span = trace.start_span(
-                    stage.name,
-                    span_type="stage",
-                    attributes={
-                        "stage": stage.name,
-                        "job_id": context.record.spec.job_id,
-                        "target": context.record.spec.target,
-                    },
-                )
+            span = self._start_stage_span(context, stage, trace)
             try:
                 with bind_trace_scope(trace, span):
                     if hasattr(stage, "run_async"):
@@ -546,7 +580,7 @@ class PipelineRunner:
 
         for group_index, group in enumerate(execution_order, start=1):
             for i in range(0, len(group), max_parallel):
-                batch = group[i:i + max_parallel]
+                batch = group[i : i + max_parallel]
                 now = time_utils.iso_now()
                 if trace is not None:
                     trace.emit(
@@ -558,12 +592,9 @@ class PipelineRunner:
                         },
                     )
                 for name in batch:
-                    entry = progress_map.get(name)
-                    if entry is None:
-                        continue
-                    entry["status"] = "running"
-                    entry["started_at"] = now
-                context.manager.update_metadata(context.record)
+                    self._update_stage_progress(
+                        context, name, "running", started_at=now, progress_map=progress_map
+                    )
 
                 tasks = [asyncio.create_task(_run_stage(stage_map[name])) for name in batch]
                 results = await asyncio.gather(*tasks)
@@ -572,36 +603,27 @@ class PipelineRunner:
                 first_failure_code: Optional[str] = None
                 finished_at = time_utils.iso_now()
                 for name, outcome in zip(batch, results):
-                    entry = progress_map.get(name)
-                    if entry is None:
-                        continue
-                    entry["finished_at"] = finished_at
                     if outcome.error is not None:
-                        classification = self._record_error_event(context, outcome.error, stage=name)
-                        entry["status"] = "failed"
-                        entry["error"] = str(outcome.error)
-                        entry["error_code"] = classification.get("code")
-                        entry["error_category"] = classification.get("category")
-                        self._finalize_stage_span(
+                        classification = self._handle_stage_failure(
                             context,
                             stage_map[name],
                             outcome.span,
-                            status="failed",
-                            error=outcome.error,
-                            classification=classification,
+                            outcome.error,
+                            progress_map=progress_map,
+                            finished_at=finished_at,
                         )
                         if first_failure_code is None:
                             first_failure_code = str(classification.get("code") or "")
                         errors.append(outcome)
                     else:
-                        entry["status"] = "completed" if outcome.result else "skipped"
-                        self._finalize_stage_span(
+                        self._handle_stage_success(
                             context,
                             stage_map[name],
                             outcome.span,
-                            status="completed" if outcome.result else "skipped",
+                            outcome.result if outcome.result is not None else False,
+                            progress_map=progress_map,
+                            finished_at=finished_at,
                         )
-                context.manager.update_metadata(context.record)
                 if trace is not None:
                     trace.emit(
                         "parallel.batch.finished",

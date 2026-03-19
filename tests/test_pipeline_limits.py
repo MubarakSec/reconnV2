@@ -56,7 +56,7 @@ def test_passive_stage_seeds_input(monkeypatch, tmp_path):
 
 
 def test_correlation_truncates_large_inputs(tmp_path):
-    overrides = {"correlation_max_records": 5, "correlation_svg_node_limit": 1000}
+    overrides = {"correlation_max_records": 5, "correlation_svg_node_limit": 1000, "enable_correlation": True}
     record = make_record(tmp_path, runtime_overrides=overrides)
     manager = DummyManager()
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
@@ -79,7 +79,7 @@ def test_correlation_truncates_large_inputs(tmp_path):
 
 
 def test_correlation_skips_svg_when_graph_large(tmp_path):
-    overrides = {"correlation_svg_node_limit": 1}
+    overrides = {"correlation_svg_node_limit": 1, "enable_correlation": True}
     record = make_record(tmp_path, runtime_overrides=overrides)
     manager = DummyManager()
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:

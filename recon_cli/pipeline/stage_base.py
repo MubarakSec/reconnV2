@@ -4,8 +4,9 @@ import time
 import threading
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Union, Literal
 
+from pydantic import BaseModel, ConfigDict, Field
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.utils import time as time_utils
 
@@ -18,12 +19,14 @@ class StageStopRequested(RuntimeError):
     pass
 
 
-@dataclass
-class StageResult:
+class StageResult(BaseModel):
+    """Result of a pipeline stage execution."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 try:  # pragma: no cover - test helper

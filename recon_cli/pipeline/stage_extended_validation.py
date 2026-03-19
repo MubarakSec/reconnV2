@@ -126,7 +126,7 @@ class ExtendedValidationStage(Stage):
                 token = self._token()
                 payload = f"https://example.com/{token}"
                 test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
-                if not context.url_allowed(test_url):
+                if not context.url_allowed(test_url) or not test_url.startswith(("http://", "https://")):
                     continue
                 session = context.auth_session(test_url)
                 headers = context.auth_headers({"User-Agent": "recon-cli redirect-validate"})
@@ -231,7 +231,7 @@ class ExtendedValidationStage(Stage):
                     if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                         continue
                     test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
-                    if not context.url_allowed(test_url):
+                    if not context.url_allowed(test_url) or not test_url.startswith(("http://", "https://")):
                         continue
                     session = context.auth_session(test_url)
                     headers = context.auth_headers({"User-Agent": "recon-cli lfi-validate"})
@@ -337,7 +337,7 @@ class ExtendedValidationStage(Stage):
                         if not oast_url:
                             continue
                         test_url, method, data, json_body = self._prepare_payload_request(entry, oast_url)
-                        if not context.url_allowed(test_url):
+                        if not context.url_allowed(test_url) or not test_url.startswith(("http://", "https://")):
                             continue
                         if limiter and not limiter.wait_for_slot(test_url, timeout=timeout):
                             continue
@@ -603,7 +603,7 @@ class ExtendedValidationStage(Stage):
                 url = entry.get("url")
                 if not isinstance(url, str) or not url:
                     continue
-                if not context.url_allowed(url):
+                if not context.url_allowed(url) or not url.startswith(("http://", "https://")):
                     continue
                 host = urlparse(url).hostname or ""
                 host_signals = signals.get("by_host", {}).get(host, set())
@@ -675,6 +675,8 @@ class ExtendedValidationStage(Stage):
                 for example in examples:
                     if not isinstance(example, str) or not example:
                         continue
+                    if not example.startswith(("http://", "https://")) or not context.url_allowed(example):
+                        continue
                     host = urlparse(example).hostname or ""
                     host_signals = signals.get("by_host", {}).get(host, set())
                     if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
@@ -708,7 +710,7 @@ class ExtendedValidationStage(Stage):
                 action = entry.get("action") or entry.get("url")
                 if not isinstance(action, str) or not action:
                     continue
-                if not context.url_allowed(action):
+                if not context.url_allowed(action) or not action.startswith(("http://", "https://")):
                     continue
                 method = str(entry.get("method") or "post").lower()
                 inputs = entry.get("inputs") or []
@@ -973,7 +975,7 @@ class ExtendedValidationStage(Stage):
                     headers=headers,
                     verify=verify_tls,
                 )
-            except requests.exceptions.RequestException:
+            except requests_mod.exceptions.RequestException:
                 if attempt >= retries:
                     return None
                 delay = backoff_base * (backoff_factor ** attempt)

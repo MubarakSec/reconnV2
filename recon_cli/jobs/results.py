@@ -157,6 +157,20 @@ class ResultsTracker:
         with self._lock:
             if self.allow and not self.allow(payload):
                 return False
+            
+            # Pydantic validation
+            from recon_cli.db.schemas import validate_result
+            try:
+                payload = validate_result(payload)
+            except Exception as e:
+                # We log this to stats so it's visible in the job metadata
+                ptype = payload.get("type") or "unknown"
+                self.stats[f"validation_failed:{ptype}"] += 1
+                # If it's a critical result type, we should probably still allow it 
+                # but we've marked it as failed validation.
+                # In a truly strict mode, we might return False here.
+                pass
+
             if isinstance(payload, dict):
                 payload = self._normalize_payload(payload)
             key = dedupe_key(payload)

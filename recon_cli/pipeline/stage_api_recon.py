@@ -35,14 +35,23 @@ class APIReconStage(Stage):
         "/api-docs",
         "/docs",
         "/redoc",
+        "/api/v1/docs",
+        "/api/v2/docs",
+        "/api/docs",
+        "/api/swagger.json",
+        "/api/openapi.json",
         "/graphql/schema.json",
         "/graphql/v1",
         "/graphql",
         "/graphiql",
         "/graphql/console",
+        "/v1/graphql",
+        "/v2/graphql",
+        "/api/graphql",
         "/grpc.health.v1.Health/Check",
     ]
-    SPEC_INDICATORS = ("openapi", "swagger", "\"openapi\"", "\"swagger\"")
+    SPEC_INDICATORS = ("openapi", "swagger", "\"openapi\"", "\"swagger\"", "swagger-ui", "redoc")
+    GRAPHQL_ERROR_INDICATORS = ("must provide query", "query not provided", "graphql missing", "no query found")
     LOGIN_HINTS = ("login", "signin", "sign-in", "auth", "sso", "oauth")
     TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
@@ -110,6 +119,7 @@ class APIReconStage(Stage):
         signaled_hosts: set[str] = set()
         specs_found = 0
         urls_added = 0
+        graphql_candidates: List[Tuple[str, str]] = []
 
         async with AsyncHTTPClient(config) as client:
             tasks = [
@@ -131,28 +141,18 @@ class APIReconStage(Stage):
                     continue
 
                 if "graphql" in path:
-                    if "graphql" in text.lower() or status_code in {200, 400}:
-                        payload = {
-                            "type": "api",
-                            "source": "api-recon",
-                            "hostname": host,
-                            "url": url,
-                            "tags": ["api:graphql"],
-                            "score": 40,
-                        }
-                        if context.results.append(payload):
-                            urls_added += 1
-                        if host not in signaled_hosts:
-                            context.emit_signal(
-                                "api_surface",
-                                "host",
-                                host,
-                                confidence=0.6,
-                                source="api-recon",
-                                tags=["api:graphql"],
-                                evidence={"url": url},
-                            )
-                            signaled_hosts.add(host)
+                    is_candidate = False
+                    lowered_text = text.lower()
+                    if "graphql" in lowered_text:
+                        is_candidate = True
+                    elif status_code in {200, 400}:
+                        if any(hint in lowered_text for hint in self.GRAPHQL_ERROR_INDICATORS):
+                            is_candidate = True
+                        elif "errors" in lowered_text and "query" in lowered_text:
+                            is_candidate = True
+                    
+                    if is_candidate:
+                        graphql_candidates.append((host, url))
                     elif status_code in {401, 403, 302}:
                         context.emit_signal(
                             "graphql_candidate",
@@ -251,6 +251,64 @@ class APIReconStage(Stage):
                             evidence={"url": url},
                         )
                         signaled_hosts.add(host)
+
+            if graphql_candidates:
+                # Active GraphQL probing: POST {"query": "{__typename}"}
+                # Must be 200 OK and contain {"data": {"__typename": ...}}
+                probe_tasks = [
+                    client.post(url, json={"query": "{__typename}"}, headers=headers, follow_redirects=True)
+                    for _, url in graphql_candidates
+                ]
+                probe_responses = await asyncio.gather(*probe_tasks, return_exceptions=True)
+
+                for (host, url), p_resp in zip(graphql_candidates, probe_responses):
+                    if isinstance(p_resp, Exception) or p_resp.status != 200:
+                        # Failed active probe, emit as candidate only
+                        context.emit_signal(
+                            "graphql_candidate",
+                            "url",
+                            url,
+                            confidence=0.3,
+                            source="api-recon",
+                            tags=["api:graphql"],
+                            evidence={"reason": "active probe failed or not 200"},
+                        )
+                        continue
+                    
+                    p_body = p_resp.body or ""
+                    # Check for honest proof: {"data": {"__typename": ...}}
+                    if '"data"' in p_body and '"__typename"' in p_body:
+                        payload = {
+                            "type": "api",
+                            "source": "api-recon",
+                            "hostname": host,
+                            "url": url,
+                            "tags": ["api:graphql", "api:honest"],
+                            "score": 60,
+                        }
+                        if context.results.append(payload):
+                            urls_added += 1
+                        if host not in signaled_hosts:
+                            context.emit_signal(
+                                "api_surface",
+                                "host",
+                                host,
+                                confidence=0.9,
+                                source="api-recon",
+                                tags=["api:graphql"],
+                                evidence={"url": url, "confirmed": True},
+                            )
+                            signaled_hosts.add(host)
+                    else:
+                         context.emit_signal(
+                            "graphql_candidate",
+                            "url",
+                            url,
+                            confidence=0.4,
+                            source="api-recon",
+                            tags=["api:graphql"],
+                            evidence={"reason": "active probe response missing expected data"},
+                        )
 
         stats = context.record.metadata.stats.setdefault("api_recon", {})
         stats["specs"] = specs_found

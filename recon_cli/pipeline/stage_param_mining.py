@@ -55,6 +55,14 @@ class ParamMiningStage(Stage):
             for name in js_param_hints:
                 if isinstance(name, str) and name:
                     auth_inputs.setdefault(name, []).append("js:intel")
+        elif isinstance(js_param_hints, dict):
+            for name, urls in js_param_hints.items():
+                if isinstance(name, str) and name:
+                    if isinstance(urls, list):
+                        for url in urls:
+                            auth_inputs.setdefault(name, []).append(url)
+                    else:
+                        auth_inputs.setdefault(name, []).append("js:intel")
         if not candidates:
             context.logger.info("No parameterized URLs found")
             return
