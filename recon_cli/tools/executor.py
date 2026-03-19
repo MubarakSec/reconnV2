@@ -1168,6 +1168,28 @@ class CommandExecutor:
         self.cache = cache
 
     @staticmethod
+    def resolve_tool(command: str) -> Optional[str]:
+        if command == "httpx":
+            # Try kali default
+            if shutil.which("httpx-toolkit"):
+                return shutil.which("httpx-toolkit")
+            
+            # Check if normal httpx is the go version
+            normal_path = shutil.which("httpx")
+            if normal_path and _projectdiscovery_httpx_available(normal_path):
+                return normal_path
+                
+            # Check ~/go/bin/httpx explicitly (common when running in venv)
+            go_path = os.path.expanduser("~/go/bin/httpx")
+            if os.path.isfile(go_path) and os.access(go_path, os.X_OK):
+                if _projectdiscovery_httpx_available(go_path):
+                    return go_path
+                    
+            return None
+            
+        return shutil.which(command)
+
+    @staticmethod
     def available(command: str) -> bool:
         """
         التحقق من وجود أداة في النظام.
@@ -1177,17 +1199,8 @@ class CommandExecutor:
 
         Returns:
             True إذا كانت الأداة متاحة، False خلاف ذلك
-
-        Example:
-            >>> if CommandExecutor.available("subfinder"):
-            ...     print("Subfinder is installed")
         """
-        command_path = shutil.which(command)
-        if command_path is None:
-            return False
-        if command == "httpx":
-            return _projectdiscovery_httpx_available(command_path)
-        return True
+        return CommandExecutor.resolve_tool(command) is not None
 
     def run(
         self,
@@ -1228,6 +1241,10 @@ class CommandExecutor:
         """
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        
+        resolved_path = self.resolve_tool(cmd_list[0])
+        if resolved_path:
+            cmd_list[0] = resolved_path
         if self.cache:
             cached = self.cache.get(cmd_list, cwd, env)
             if cached:
@@ -1427,6 +1444,10 @@ class CommandExecutor:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        
+        resolved_path = self.resolve_tool(cmd_list[0])
+        if resolved_path:
+            cmd_list[0] = resolved_path
         if self.cache:
             cached = self.cache.get(cmd_list, cwd, env)
             if cached:
@@ -1566,6 +1587,10 @@ class CommandExecutor:
     ) -> subprocess.CompletedProcess:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        
+        resolved_path = self.resolve_tool(cmd_list[0])
+        if resolved_path:
+            cmd_list[0] = resolved_path
         if self.cache:
             cached = self.cache.get(cmd_list, cwd, env)
             if cached:
@@ -1725,6 +1750,10 @@ class CommandExecutor:
     ) -> CommandSessionInfo:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
+        
+        resolved_path = self.resolve_tool(cmd_list[0])
+        if resolved_path:
+            cmd_list[0] = resolved_path
         if self.cache:
             cached = self.cache.get(cmd_list, cwd, env)
             if cached:
