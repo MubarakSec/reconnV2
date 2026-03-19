@@ -128,6 +128,10 @@ class HttpProbeStage(Stage):
                     except json.JSONDecodeError:
                         continue
                     status_code = payload.get("status-code") or payload.get("status_code")
+                    host = payload.get("host") or payload.get("input")
+                    if host and status_code:
+                        context.record_host_error(str(host), int(status_code))
+                    
                     content_length = (
                         payload.get("content-length")
                         or payload.get("content_length")

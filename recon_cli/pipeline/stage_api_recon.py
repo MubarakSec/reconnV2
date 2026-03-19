@@ -129,11 +129,18 @@ class APIReconStage(Stage):
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
             for (host, url, path), resp in zip(urls_to_check, responses):
+                if context.is_host_blocked(host):
+                    continue
+
                 if isinstance(resp, Exception) or resp.status == 0:
                     continue
                 
-                content_type = resp.headers.get("Content-Type", "").lower()
                 status_code = resp.status
+                context.record_host_error(host, status_code)
+                if context.is_host_blocked(host):
+                    continue
+
+                content_type = resp.headers.get("Content-Type", "").lower()
                 text = resp.body or ""
                 meta = self._response_meta(resp, text)
                 

@@ -9,7 +9,7 @@ from typing import Callable, Dict, Iterable, Optional
 from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import JsonlWriter, read_jsonl
+from recon_cli.utils.jsonl import JsonlWriter, read_jsonl, iter_jsonl
 from recon_cli.utils.reporting import build_finding_fingerprint, confidence_to_score, is_finding, resolve_confidence_label
 from recon_cli.jobs.manager import JobManager
 
@@ -89,6 +89,8 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
         return (ptype, payload.get("url"), payload.get("auth_profile"))
     if ptype == "idor_suspect":
         return (ptype, payload.get("url"), payload.get("auth"), payload.get("source"))
+    if ptype == "idor_candidate":
+        return (ptype, payload.get("url"), payload.get("auth"), payload.get("source"))
     if ptype == "attack_path":
         return (
             ptype,
@@ -120,8 +122,13 @@ class ResultsTracker:
     _lock: threading.RLock = field(init=False, default_factory=threading.RLock)
     _seen: set[tuple] = field(default_factory=set)
     stats: Counter = field(default_factory=Counter)
-    _records: Dict[tuple, Dict[str, object]] = field(init=False, default_factory=dict)
+    
+    # Permanently buffer critical types (findings, signals)
+    _critical_records: Dict[tuple, Dict[str, object]] = field(init=False, default_factory=dict)
+    # LRU buffer for other types (urls, etc) to allow merging without loading everything
+    _lru_records: Dict[tuple, Dict[str, object]] = field(init=False, default_factory=dict)
     _order: list[tuple] = field(init=False, default_factory=list)
+    MAX_LRU_SIZE = 10000
 
     def __post_init__(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,11 +152,23 @@ class ResultsTracker:
                 if key in self._seen:
                     continue
                 self._seen.add(key)
-                self._records[key] = payload
+                
+                ptype = payload.get("type")
+                # All unique records must be in _order to be written to file
                 self._order.append(key)
+                
+                # Permanently buffer critical types
+                if ptype in {"finding", "signal", "attack_path", "meta"}:
+                    self._critical_records[key] = payload
+                else:
+                    # Add to LRU for potential merging later
+                    self._lru_records[key] = payload
+                    if len(self._lru_records) > self.MAX_LRU_SIZE:
+                        oldest_lru_key = next(iter(self._lru_records))
+                        self._lru_records.pop(oldest_lru_key)
+                
                 self.stats["records_seen"] += 1
                 self.stats["records_unique"] += 1
-                ptype = payload.get("type")
                 if ptype:
                     self.stats[f"type:{ptype}"] += 1
 
@@ -158,41 +177,56 @@ class ResultsTracker:
             if self.allow and not self.allow(payload):
                 return False
             
-            # Pydantic validation
-            from recon_cli.db.schemas import validate_result
-            try:
-                payload = validate_result(payload)
-            except Exception as e:
-                # We log this to stats so it's visible in the job metadata
-                ptype = payload.get("type") or "unknown"
-                self.stats[f"validation_failed:{ptype}"] += 1
-                # If it's a critical result type, we should probably still allow it 
-                # but we've marked it as failed validation.
-                # In a truly strict mode, we might return False here.
-                pass
+            # Redact sensitive data from proof and details
+            from recon_cli.utils.sanitizer import redact_json_value
+            payload = redact_json_value(payload)
+            
+            # Pydantic validation (optional, can be disabled for performance on large URL lists)
+            ptype = str(payload.get("type") or "unknown")
+            if ptype in {"finding", "signal", "attack_path"}:
+                from recon_cli.db.schemas import validate_result
+                try:
+                    payload = validate_result(payload)
+                except Exception:
+                    self.stats[f"validation_failed:{ptype}"] += 1
+                    pass
 
             if isinstance(payload, dict):
                 payload = self._normalize_payload(payload)
             key = dedupe_key(payload)
             self.stats["records_seen"] += 1
+            
             if key in self._seen:
                 self.stats["records_duplicate"] += 1
-                ptype = payload.get("type")
                 if ptype:
                     self.stats[f"duplicate:{ptype}"] += 1
-                merged = self._merge_entries(self._records.get(key, {}), payload)
-                if merged != self._records.get(key):
-                    self._records[key] = merged
-                    self._rewrite_all()
+                
+                # Check critical buffer first, then LRU buffer
+                buffer = self._critical_records if key in self._critical_records else self._lru_records
+                if key in buffer:
+                    merged = self._merge_entries(buffer.get(key, {}), payload)
+                    if merged != buffer.get(key):
+                        buffer[key] = merged
+                        self._rewrite_all()
                 return True
+            
             self._seen.add(key)
             self.stats["records_unique"] += 1
             payload.setdefault("timestamp", time_utils.iso_now())
-            self._records[key] = payload
             self._order.append(key)
+            
+            if ptype in {"finding", "signal", "attack_path", "meta"}:
+                self._critical_records[key] = payload
+            else:
+                self._lru_records[key] = payload
+                if len(self._lru_records) > self.MAX_LRU_SIZE:
+                    oldest_lru_key = next(iter(self._lru_records))
+                    self._lru_records.pop(oldest_lru_key)
+            
+            # Always write to file
             with self._writer as writer:
                 writer.write(payload)
-            ptype = payload.get("type")
+            
             if ptype:
                 self.stats[f"type:{ptype}"] += 1
             return True
@@ -208,7 +242,8 @@ class ResultsTracker:
         """Replace all tracked results with the provided payloads."""
         with self._lock:
             self._seen.clear()
-            self._records.clear()
+            self._critical_records.clear()
+            self._lru_records.clear()
             self._order.clear()
             self.stats = Counter()
             has_schema = False
@@ -218,17 +253,28 @@ class ResultsTracker:
                     continue
                 payload = self._normalize_payload(payload)
                 key = dedupe_key(payload)
+                ptype = payload.get("type")
+                
                 if key in self._seen:
-                    merged = self._merge_entries(self._records.get(key, {}), payload)
-                    if merged != self._records.get(key):
-                        self._records[key] = merged
+                    buffer = self._critical_records if key in self._critical_records else self._lru_records
+                    if key in buffer:
+                        merged = self._merge_entries(buffer.get(key, {}), payload)
+                        if merged != buffer.get(key):
+                            buffer[key] = merged
                     continue
+                
                 self._seen.add(key)
-                self._records[key] = payload
                 self._order.append(key)
+                if ptype in {"finding", "signal", "attack_path", "meta"}:
+                    self._critical_records[key] = payload
+                else:
+                    self._lru_records[key] = payload
+                    if len(self._lru_records) > self.MAX_LRU_SIZE:
+                        oldest_lru_key = next(iter(self._lru_records))
+                        self._lru_records.pop(oldest_lru_key)
+                
                 self.stats["records_seen"] += 1
                 self.stats["records_unique"] += 1
-                ptype = payload.get("type")
                 if ptype:
                     self.stats[f"type:{ptype}"] += 1
                 if ptype == "meta" and payload.get("schema_version"):
@@ -238,7 +284,7 @@ class ResultsTracker:
                 schema_key = ("meta", "1.0.0")
                 payload = {"type": "meta", "schema_version": "1.0.0", "timestamp": time_utils.iso_now()}
                 self._seen.add(schema_key)
-                self._records[schema_key] = payload
+                self._critical_records[schema_key] = payload
                 self._order.insert(0, schema_key)
 
             self._rewrite_all()
@@ -253,7 +299,7 @@ class ResultsTracker:
             return
         payload = {"type": "meta", "schema_version": "1.0.0", "timestamp": time_utils.iso_now()}
         self._seen.add(schema_key)
-        self._records[schema_key] = payload
+        self._critical_records[schema_key] = payload
         self._order.insert(0, schema_key)
         with self._writer as writer:
             writer.write(payload)
@@ -374,7 +420,7 @@ class ResultsTracker:
     def _rewrite_all(self) -> None:
         with self.path.open("w", encoding="utf-8") as handle:
             for key in self._order:
-                payload = self._records.get(key)
+                payload = self._critical_records.get(key) or self._lru_records.get(key)
                 if not payload:
                     continue
                 json.dump(payload, handle, separators=(",", ":"), ensure_ascii=True)
@@ -395,7 +441,7 @@ class JobResults:
         if not record:
             return None
         results: list[Dict[str, object]] = []
-        for item in read_jsonl(record.paths.results_jsonl):
+        for item in iter_jsonl(record.paths.results_jsonl):
             if result_type and item.get("type") != result_type:
                 continue
             results.append(item)

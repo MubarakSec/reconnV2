@@ -39,6 +39,8 @@ class PipelineContext:
     _simple_mode: bool = field(init=False, default=False)
     _data_store: Dict[str, object] = field(init=False, default_factory=dict)
     _rate_limiters: Dict[str, object] = field(init=False, default_factory=dict)
+    _host_errors: Dict[str, Dict[int, int]] = field(init=False, default_factory=lambda: defaultdict(lambda: defaultdict(int)))
+    _host_blocks: Dict[str, str] = field(init=False, default_factory=dict)
     _auth_manager: object = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
     trace_recorder: Optional[object] = field(init=False, default=None)
@@ -138,6 +140,28 @@ class PipelineContext:
 
     def get_data(self, key: str, default: object = None) -> object:
         return self._data_store.get(key, default)
+
+    def record_host_error(self, host: str, code: int) -> None:
+        if not host:
+            return
+        self._host_errors[host][code] += 1
+        
+        # Check for block triggers (WAF detection)
+        threshold = int(getattr(self.runtime_config, "host_circuit_breaker_threshold", 10))
+        if code == 429 and self._host_errors[host][code] >= threshold:
+            if host not in self._host_blocks:
+                self.logger.warning("Host circuit breaker OPEN for %s: Too many 429s (Rate Limited)", host)
+                self._host_blocks[host] = "rate_limited"
+        elif code == 403 and self._host_errors[host][code] >= threshold * 2:
+            if host not in self._host_blocks:
+                self.logger.warning("Host circuit breaker OPEN for %s: Too many 403s (WAF Blocked?)", host)
+                self._host_blocks[host] = "waf_blocked"
+
+    def is_host_blocked(self, host: str) -> bool:
+        return host in self._host_blocks
+
+    def get_host_block_reason(self, host: str) -> Optional[str]:
+        return self._host_blocks.get(host)
 
     def get_rate_limiter(
         self,
