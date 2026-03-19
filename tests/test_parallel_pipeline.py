@@ -85,7 +85,7 @@ def test_parallel_pipeline_respects_dependencies(tmp_path: Path):
     context = PipelineContext(record=record, manager=DummyManager(), force=False)
     runner = PipelineRunner(stages=[DedupeStage(), DnsStage(), HttpStage()])
 
-    runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"])
+    asyncio.run(runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"]))
 
     dedupe_end = _timestamp(events, "dedupe_end")
     dns_start = _timestamp(events, "dns_start")
@@ -137,7 +137,7 @@ def test_parallel_pipeline_failure_marks_error(tmp_path: Path):
     runner = PipelineRunner(stages=[DedupeStage(), FailingDns(), HttpStage()])
 
     with pytest.raises(StageError):
-        runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"])
+        asyncio.run(runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"]))
 
     assert record.metadata.error
 
@@ -181,7 +181,7 @@ def test_parallel_pipeline_supports_async_stage(tmp_path: Path):
     context = PipelineContext(record=record, manager=DummyManager(), force=False)
     runner = PipelineRunner(stages=[DedupeStage(), AsyncDnsStage(), HttpStage()])
 
-    runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"])
+    asyncio.run(runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"]))
 
     dedupe_end = _timestamp(events, "dedupe_end")
     dns_start = _timestamp(events, "dns_start")

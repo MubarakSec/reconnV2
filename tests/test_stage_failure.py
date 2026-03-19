@@ -1,4 +1,5 @@
 import json
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ def make_record(tmp_path: Path) -> JobRecord:
 def test_pipeline_records_failure(tmp_path: Path):
     record = make_record(tmp_path)
     manager = DummyManager()
-    runner = PipelineRunner(stages=[FailingStage()])
+    runner = PipelineRunner(stages=[FailingStage()], continue_on_error=False)
     ctx = type("Ctx", (), {})()
     ctx.record = record
     ctx.manager = manager
@@ -64,7 +65,7 @@ def test_pipeline_records_failure(tmp_path: Path):
     ctx.increment_attempt = lambda *_: None
     ctx.checkpoint = lambda *_: None
     with pytest.raises(StageError):
-        runner.run(ctx)
+        asyncio.run(runner.run(ctx))
     assert record.metadata.error
     taxonomy = record.metadata.stats.get("error_taxonomy", {})
     assert taxonomy.get("last", {}).get("code")

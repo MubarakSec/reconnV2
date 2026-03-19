@@ -41,8 +41,12 @@ class PipelineContext:
     _rate_limiters: Dict[str, object] = field(init=False, default_factory=dict)
     _auth_manager: object = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
+    trace_recorder: Optional[object] = field(init=False, default=None)
 
     def __post_init__(self) -> None:
+        from recon_cli.utils.pipeline_trace import current_trace_recorder
+        self.trace_recorder = current_trace_recorder()
+        
         if self.record is None:
             self._simple_mode = True
             if self.job_id is None:

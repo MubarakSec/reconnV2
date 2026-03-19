@@ -15,12 +15,12 @@ from recon_cli.utils.last_run import update_last_trace_pointers
 
 
 @dataclass(frozen=True)
-class _PipelineTraceScope:
+class PipelineTraceScope:
     recorder: "PipelineTraceRecorder"
     parent_span_id: Optional[str]
 
 
-_CURRENT_TRACE_SCOPE: contextvars.ContextVar[Optional[_PipelineTraceScope]] = contextvars.ContextVar(
+CURRENT_TRACE_SCOPE: contextvars.ContextVar[Optional[PipelineTraceScope]] = contextvars.ContextVar(
     "recon_pipeline_trace_scope",
     default=None,
 )
@@ -395,14 +395,14 @@ class PipelineTraceRecorder:
 
 
 def current_trace_recorder() -> Optional[PipelineTraceRecorder]:
-    scope = _CURRENT_TRACE_SCOPE.get()
+    scope = CURRENT_TRACE_SCOPE.get()
     if scope is None:
         return None
     return scope.recorder
 
 
 def current_parent_span_id() -> Optional[str]:
-    scope = _CURRENT_TRACE_SCOPE.get()
+    scope = CURRENT_TRACE_SCOPE.get()
     if scope is None:
         return None
     return scope.parent_span_id
@@ -411,18 +411,18 @@ def current_parent_span_id() -> Optional[str]:
 @contextmanager
 def bind_trace_scope(
     recorder: Optional[PipelineTraceRecorder],
-    parent_span: Optional[PipelineTraceSpan] = None,
+    parent_span_id: Optional[str] = None,
 ) -> Generator[None, None, None]:
     if recorder is None:
         yield
         return
-    token = _CURRENT_TRACE_SCOPE.set(
-        _PipelineTraceScope(
+    token = CURRENT_TRACE_SCOPE.set(
+        PipelineTraceScope(
             recorder=recorder,
-            parent_span_id=parent_span.span_id if parent_span is not None else recorder.root_span_id,
+            parent_span_id=parent_span_id if parent_span_id is not None else recorder.root_span_id,
         )
     )
     try:
         yield
     finally:
-        _CURRENT_TRACE_SCOPE.reset(token)
+        CURRENT_TRACE_SCOPE.reset(token)

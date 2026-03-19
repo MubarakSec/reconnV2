@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 
 """
 Command Executor Module - تنفيذ الأوامر الخارجية
@@ -136,11 +137,17 @@ _SENSITIVE_FILE_MARKERS = (
     ".bash_history",
     ".zsh_history",
     "/var/run/secrets/",
+    "id_rsa",
+    "id_ed25519",
+    "config.php",
+    "web.config",
+    "settings.py",
+    ".env",
 )
 
-_NETWORK_SHELL_EXECUTABLES = {"nc", "ncat", "netcat", "socat"}
-_INLINE_CODE_FLAGS = {"-c", "-e", "-r"}
-_SHELL_TARGET_MARKERS = ("/bin/sh", "/bin/bash", "cmd.exe", "powershell", "pwsh")
+_NETWORK_SHELL_EXECUTABLES = {"nc", "ncat", "netcat", "socat", "telnet", "ssh"}
+_INLINE_CODE_FLAGS = {"-c", "-e", "-r", "--eval", "--command"}
+_SHELL_TARGET_MARKERS = ("/bin/sh", "/bin/bash", "cmd.exe", "powershell", "pwsh", "/bin/zsh", "/bin/dash")
 _REVERSE_SHELL_SCRIPT_MARKERS = (
     "socket",
     "connect(",
@@ -151,8 +158,13 @@ _REVERSE_SHELL_SCRIPT_MARKERS = (
     "cmd.exe",
     "powershell",
     "/dev/tcp/",
+    "exec 5<>/dev/tcp/",
+    "bash -i",
+    "sh -i",
+    "nc -e",
+    "nc -c",
 )
-_EXECUTION_MARKERS = ("exec(", "eval(", "os.system(", "subprocess.", "pty.spawn", "system(")
+_EXECUTION_MARKERS = ("exec(", "eval(", "os.system(", "subprocess.", "pty.spawn", "system(", "popen(", "shell_exec(")
 _SUSPICIOUS_OUTPUT_RULES = (
     ("instruction-like content", re.compile(r"ignore\s+(all\s+)?(previous|prior)\s+instructions?", re.IGNORECASE)),
     ("tool reprogramming language", re.compile(r"(follow|obey)\s+(these|the|following)\s+(instructions?|directives?)", re.IGNORECASE)),
@@ -316,27 +328,40 @@ def _guard_command_or_raise(
             )
 
     if executable in {"curl", "wget"}:
-        if any(token in joined for token in ("$(env)", "`env`", "$(", "`", "${")):
+        if any(token in joined for token in ("$(env)", "`env`", "$(", "`", "${", "%env%", "!env!")):
             raise CommandError(
                 f"Blocked {executable} command containing shell-style expansion payload"
             )
-        if any(marker in joined for marker in _SENSITIVE_FILE_MARKERS) and any(
-            part.startswith("@") or part in {"-d", "--data", "--data-binary", "--upload-file", "-t", "-T"}
+        if any(marker in joined for marker in _SENSITIVE_FILE_MARKERS) or any(
+            part.startswith("@") or part in {"-d", "--data", "--data-binary", "--upload-file", "-t", "-T", "--post-file"}
             for part in normalized[1:]
         ):
-            raise CommandError(
-                f"Blocked {executable} command referencing a sensitive local file payload"
-            )
+            # Check if an @ symbol is actually being used to reference a sensitive file
+            for part in normalized[1:]:
+                if part.startswith("@"):
+                    filename = part[1:].lower()
+                    if any(marker in filename for marker in _SENSITIVE_FILE_MARKERS):
+                        raise CommandError(
+                            f"Blocked {executable} command referencing a sensitive local file via @ notation"
+                        )
+                if part in {"-d", "--data", "--data-binary", "--upload-file", "-t", "-T", "--post-file"}:
+                    # In curl, if the next argument starts with @ it's a file
+                    idx = normalized.index(part)
+                    if idx + 1 < len(normalized):
+                        next_arg = normalized[idx + 1]
+                        if next_arg.startswith("@") and any(marker in next_arg.lower() for marker in _SENSITIVE_FILE_MARKERS):
+                             raise CommandError(
+                                f"Blocked {executable} command referencing a sensitive local file payload"
+                             )
 
-    if executable in {"nc", "ncat", "netcat"}:
-        if any(arg in {"-e", "-c"} for arg in normalized[1:]) and any(
-            marker in joined for marker in _SHELL_TARGET_MARKERS
-        ):
+    if executable in {"nc", "ncat", "netcat", "telnet"}:
+        if any(arg in {"-e", "-c", "--exec", "--sh-exec"} for arg in normalized[1:]):
             raise CommandError(f"Blocked {executable} reverse-shell style execution payload")
 
     if executable == "socat":
-        if "tcp:" in joined and any(marker in joined for marker in ("exec:", "system:")):
-            raise CommandError("Blocked socat reverse-shell style execution payload")
+        if any(marker in joined for marker in ("exec:", "system:", "pty", "stderr")):
+            if any(marker in joined for marker in ("tcp:", "udp:", "sctp:")):
+                raise CommandError("Blocked socat potential reverse-shell execution payload")
 
     if _is_inline_code_interpreter(executable):
         for index, arg in enumerate(normalized[1:], start=1):
@@ -501,10 +526,30 @@ def _start_command_trace_span(
     capture_output: bool,
     cwd: Optional[Path] = None,
     output_path: Optional[Path] = None,
+    context: Optional[object] = None,
+    parent_span_id: Optional[str] = None,
 ) -> Optional[PipelineTraceSpan]:
     recorder = current_trace_recorder()
+    
+    if recorder is None and context is not None:
+        recorder = getattr(context, "trace_recorder", None)
+        # If we found a recorder in context but not in contextvars, 
+        # we should bind it for this thread/task.
+        if recorder:
+            from recon_cli.utils.pipeline_trace import bind_trace_scope
+            # We use a nested CM here just to set the contextvar
+            # but we don't have a clean way to yield out of here.
+            # However, start_span on the recorder is what actually matters.
+            pass
+
     if recorder is None:
         return None
+    
+    if parent_span_id is None:
+        parent_span_id = current_parent_span_id()
+        if parent_span_id is None:
+            parent_span_id = getattr(recorder, "root_span_id", None)
+
     cmd_list = [str(part) for part in command]
     tool_name = Path(cmd_list[0]).name if cmd_list else "command"
     attributes: Dict[str, object] = {
@@ -519,10 +564,11 @@ def _start_command_trace_span(
         attributes["cwd"] = str(cwd)
     if output_path is not None:
         attributes["output_path"] = str(output_path)
+    
     return recorder.start_span(
         f"tool:{tool_name}",
         span_type="tool_exec",
-        parent_span_id=current_parent_span_id(),
+        parent_span_id=parent_span_id,
         attributes=attributes,
     )
 
@@ -1152,6 +1198,7 @@ class CommandExecutor:
         check: bool = True,
         capture_output: bool = False,
         redact: bool = True,
+        context: Optional[object] = None,
     ) -> subprocess.CompletedProcess:
         """
         تشغيل أمر خارجي.
@@ -1189,14 +1236,6 @@ class CommandExecutor:
 
         message = _command_preview(cmd_list, redact=redact)
         policy = _resolve_policy(cmd_list, timeout_override=timeout)
-        trace_span = _start_command_trace_span(
-            cmd_list,
-            policy=policy,
-            redact=redact,
-            check=check,
-            capture_output=capture_output,
-            cwd=cwd,
-        )
         breaker = circuit_registry.get_or_create(
             f"executor:{policy.tool_class}",
             CircuitBreakerConfig(
@@ -1210,99 +1249,139 @@ class CommandExecutor:
         final_error: Optional[Exception | str] = None
         final_returncode: Optional[int] = None
         attempt_used = 0
-        try:
-            for attempt in range(1, attempts + 1):
-                attempt_used = attempt
-                if trace_span is not None:
-                    trace_span.add_event("tool.attempt", {"attempt": attempt, "max_attempts": attempts})
-                if not breaker.allow_request():
-                    final_error = f"Circuit open for tool class '{policy.tool_class}'"
-                    raise CommandError(str(final_error))
-                try:
-                    completed = subprocess.run(
-                        cmd_list,
-                        cwd=str(cwd) if cwd else None,
-                        env=dict(env) if env else None,
-                        timeout=policy.timeout,
-                        capture_output=capture_output,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        check=check,
-                    )
-                    final_returncode = completed.returncode
-                    final_status = "completed" if completed.returncode == 0 else "failed"
-                    if capture_output:
-                        _report_suspicious_output(
-                            self.logger,
-                            trace_span,
-                            cmd_list,
-                            source="stdout",
-                            text=completed.stdout,
-                        )
-                        _report_suspicious_output(
-                            self.logger,
-                            trace_span,
-                            cmd_list,
-                            source="stderr",
-                            text=completed.stderr,
-                        )
-                    if completed.returncode == 0:
-                        final_error = None
-                        breaker.record_success()
-                        if self.cache:
-                            self.cache.set(completed, cwd, env)
-                    else:
-                        final_error = f"Command exited with {completed.returncode}"
+
+        recorder = current_trace_recorder()
+        parent_span_id = current_parent_span_id()
+        trace_span: Optional[PipelineTraceSpan] = None
+
+        async def _run() -> subprocess.CompletedProcess:
+            # Re-bind trace scope inside the coroutine for asyncio.run compatibility
+            from recon_cli.utils.pipeline_trace import PipelineTraceScope, CURRENT_TRACE_SCOPE
+            if recorder:
+                CURRENT_TRACE_SCOPE.set(PipelineTraceScope(recorder, parent_span_id))
+            
+            nonlocal final_status, final_error, final_returncode, attempt_used, trace_span
+            
+            trace_span = _start_command_trace_span(
+                cmd_list,
+                policy=policy,
+                redact=redact,
+                check=check,
+                capture_output=capture_output,
+                cwd=cwd,
+                context=context,
+                parent_span_id=parent_span_id,
+            )
+            
+            try:
+                for attempt in range(1, attempts + 1):
+                    attempt_used = attempt
+                    if trace_span is not None:
+                        trace_span.add_event("tool.attempt", {"attempt": attempt, "max_attempts": attempts})
+                    if not breaker.allow_request():
+                        final_error = f"Circuit open for tool class '{policy.tool_class}'"
+                        raise CommandError(str(final_error))
+                    try:
+                        from recon_cli.utils.pipeline_trace import bind_trace_scope
+                        loop = asyncio.get_running_loop()
+                        
+                        def _run_in_thread():
+                            with bind_trace_scope(recorder, parent_span_id):
+                                return subprocess.run(
+                                    cmd_list,
+                                    cwd=str(cwd) if cwd else None,
+                                    env=dict(env) if env else None,
+                                    timeout=policy.timeout,
+                                    capture_output=capture_output,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                    check=check,
+                                )
+
+                        completed = await loop.run_in_executor(None, _run_in_thread)
+                        final_returncode = completed.returncode
+                        final_status = "completed" if completed.returncode == 0 else "failed"
+                        if capture_output:
+                            _report_suspicious_output(
+                                self.logger,
+                                trace_span,
+                                cmd_list,
+                                source="stdout",
+                                text=completed.stdout,
+                            )
+                            _report_suspicious_output(
+                                self.logger,
+                                trace_span,
+                                cmd_list,
+                                source="stderr",
+                                text=completed.stderr,
+                            )
+                        if completed.returncode == 0:
+                            final_error = None
+                            breaker.record_success()
+                            if self.cache:
+                                self.cache.set(completed, cwd, env)
+                        else:
+                            final_error = f"Command exited with {completed.returncode}"
+                            breaker.record_failure()
+                        return completed
+                    except subprocess.TimeoutExpired as exc:
                         breaker.record_failure()
-                    return completed
-                except subprocess.TimeoutExpired as exc:
-                    breaker.record_failure()
-                    final_error = f"Command timeout after {policy.timeout}s"
-                    self.logger.error("Command timed out after %ss: %s", policy.timeout, message)
-                    if attempt < attempts:
-                        delay = policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1))
-                        self.logger.warning(
-                            "Retrying command after timeout in %.1fs (%s/%s)",
-                            delay,
-                            attempt,
-                            attempts,
-                        )
-                        time.sleep(delay)
-                        continue
-                    raise CommandError(str(final_error)) from exc
-                except FileNotFoundError as exc:
-                    breaker.record_failure()
-                    missing = redact_text(cmd_list[0]) if redact else cmd_list[0]
-                    self.logger.error("Command not found: %s", missing)
-                    final_error = f"Command not found: {cmd_list[0]}"
-                    raise CommandError(str(final_error)) from exc
-                except subprocess.CalledProcessError as exc:
-                    breaker.record_failure()
-                    final_returncode = exc.returncode
-                    final_error = f"Command failed ({exc.returncode})"
-                    if capture_output:
-                        stderr_text = exc.stderr or ""
-                        if redact:
-                            stderr_text = redact_text(stderr_text) or ""
-                        self.logger.error("Command failed (%s): %s", exc.returncode, stderr_text)
-                    else:
-                        self.logger.error("Command failed (%s)", exc.returncode)
-                    if check and attempt < attempts:
-                        delay = policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1))
-                        self.logger.warning(
-                            "Retrying command after failure in %.1fs (%s/%s)",
-                            delay,
-                            attempt,
-                            attempts,
-                        )
-                        time.sleep(delay)
-                        continue
-                    if check:
-                        raise CommandError(str(final_error), exc.returncode) from exc
-                    return exc
-            final_error = "Command execution failed unexpectedly"
-            raise CommandError(str(final_error))
+                        final_error = f"Command timeout after {policy.timeout}s"
+                        self.logger.error("Command timed out after %ss: %s", policy.timeout, message)
+                        if attempt < attempts:
+                            delay = policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1))
+                            self.logger.warning(
+                                "Retrying command after timeout in %.1fs (%s/%s)",
+                                delay,
+                                attempt,
+                                attempts,
+                            )
+                            time.sleep(delay)
+                            continue
+                        raise CommandError(str(final_error)) from exc
+                    except FileNotFoundError as exc:
+                        breaker.record_failure()
+                        missing = redact_text(cmd_list[0]) if redact else cmd_list[0]
+                        self.logger.error("Command not found: %s", missing)
+                        final_error = f"Command not found: {cmd_list[0]}"
+                        raise CommandError(str(final_error)) from exc
+                    except subprocess.CalledProcessError as exc:
+                        breaker.record_failure()
+                        final_returncode = exc.returncode
+                        final_error = f"Command failed ({exc.returncode})"
+                        if capture_output:
+                            stderr_text = exc.stderr or ""
+                            if redact:
+                                stderr_text = redact_text(stderr_text) or ""
+                            self.logger.error("Command failed (%s): %s", exc.returncode, stderr_text)
+                        else:
+                            self.logger.error("Command failed (%s)", exc.returncode)
+                        if check and attempt < attempts:
+                            delay = policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1))
+                            self.logger.warning(
+                                "Retrying command after failure in %.1fs (%s/%s)",
+                                delay,
+                                attempt,
+                                attempts,
+                            )
+                            time.sleep(delay)
+                            continue
+                        if check:
+                            raise CommandError(str(final_error), exc.returncode) from exc
+                        return exc
+                final_error = "Command execution failed unexpectedly"
+                raise CommandError(str(final_error))
+            finally:
+                pass
+
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+                return asyncio.run_coroutine_threadsafe(_run(), loop).result()
+            except RuntimeError:
+                return asyncio.run(_run())
         finally:
             _finish_command_trace_span(
                 trace_span,
@@ -1483,6 +1562,7 @@ class CommandExecutor:
         check: bool = True,
         capture_output: bool = False,
         redact: bool = True,
+        context: Optional[object] = None,
     ) -> subprocess.CompletedProcess:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
@@ -1501,6 +1581,7 @@ class CommandExecutor:
             check=check,
             capture_output=capture_output,
             cwd=cwd,
+            context=context,
         )
         breaker = circuit_registry.get_or_create(
             f"executor:{policy.tool_class}",
@@ -1640,6 +1721,7 @@ class CommandExecutor:
         env: Optional[Mapping[str, str]] = None,
         redact: bool = True,
         max_output_chars: Optional[int] = None,
+        context: Optional[object] = None,
     ) -> CommandSessionInfo:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
@@ -1658,6 +1740,7 @@ class CommandExecutor:
             check=False,
             capture_output=False,
             cwd=cwd,
+            context=context,
         )
         alias = _next_session_alias()
         session = _CommandSession(

@@ -157,7 +157,7 @@ def test_command_session_records_tool_trace(tmp_path: Path) -> None:
     executor = CommandExecutor(DummyLogger())
 
     try:
-        with bind_trace_scope(recorder, stage_span):
+        with bind_trace_scope(recorder, stage_span.span_id):
             info = executor.start_session(_interactive_command())
             _wait_for_output(executor, info.session_id, "ready")
             echo_snapshot = executor.send_session_input(info.alias, "trace")
@@ -202,7 +202,7 @@ def test_command_session_truncates_buffer_and_records_trace(tmp_path: Path) -> N
     executor = CommandExecutor(logger)
 
     try:
-        with bind_trace_scope(recorder, stage_span):
+        with bind_trace_scope(recorder, stage_span.span_id):
             info = executor.start_session(_large_output_command(4096), max_output_chars=128)
             deadline = time.monotonic() + 3.0
             snapshot = info

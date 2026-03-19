@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
@@ -121,7 +122,7 @@ def test_pipeline_trace_updates_last_trace_pointer(monkeypatch, tmp_path: Path) 
     context = PipelineContext(record=record, manager=DummyManager(), force=False)
     runner = PipelineRunner(stages=[SuccessStage()])
 
-    runner.run(context)
+    asyncio.run(runner.run(context))
 
     assert _pointer_target(config.RECON_HOME / "artifacts" / "last-trace.json") == record.paths.artifact("trace.json").resolve()
     assert _pointer_target(config.RECON_HOME / "artifacts" / "last-trace-events.jsonl") == record.paths.artifact("trace_events.jsonl").resolve()
