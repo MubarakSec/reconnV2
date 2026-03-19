@@ -1698,6 +1698,29 @@ def generate_report(
 # QUICK START HELPER
 # ============================================================================
 
+@app.command("telegram-bot")
+def start_telegram_bot(
+    token: Optional[str] = typer.Option(None, "--token", envvar="RECON_TELEGRAM_TOKEN", help="Telegram Bot Token"),
+    chat_id: Optional[str] = typer.Option(None, "--chat-id", envvar="RECON_TELEGRAM_CHAT_ID", help="Allowed Chat ID"),
+) -> None:
+    """Start the interactive Telegram Bot listener."""
+    if not token or not chat_id:
+        rich_print("[bold red]Error:[/bold red] Missing Telegram token or chat ID. Set RECON_TELEGRAM_TOKEN and RECON_TELEGRAM_CHAT_ID.")
+        raise typer.Exit(code=1)
+
+    from recon_cli.utils.telegram_bot import TelegramBot
+    bot = TelegramBot(token, chat_id)
+    
+    rich_print(f"[bold green]Starting Telegram Bot...[/bold green]")
+    rich_print(f"Locked to Chat ID: {chat_id}")
+    
+    try:
+        asyncio.run(bot.start())
+    except KeyboardInterrupt:
+        bot.stop()
+        rich_print("\n[yellow]Bot stopped.[/yellow]")
+
+
 @app.command("quickstart")
 def quickstart_guide() -> None:
     """Show quick start guide for new users."""

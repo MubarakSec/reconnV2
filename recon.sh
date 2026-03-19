@@ -1082,6 +1082,7 @@ show_main_menu() {
     echo -e "${WHITE}[32]${NC} Show schema (JSON)"
     echo -e "${WHITE}[33]${NC} Cache stats"
     echo -e "${WHITE}[34]${NC} Cache clear"
+    echo -e "${WHITE}[35]${NC} Start Telegram Bot"
     echo -e "${WHITE}[0]${NC} Exit"
     echo ""
     echo -ne "${MAGENTA}Choose: ${NC}"
@@ -1136,6 +1137,7 @@ main() {
             32) show_schema ;;
             33) cache_stats ;;
             34) cache_clear ;;
+            35) run_recon telegram-bot ;;
             0|q|Q)
                 echo ""
                 print_ok "Bye"
