@@ -32,6 +32,8 @@ class _JSSurfaceExtraction:
 
 class JSIntelligenceStage(Stage):
     name = "js_intelligence"
+    requires = ["url"]
+    provides = ["api", "parameter"]
 
     ENDPOINT_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
     WS_ENDPOINT_PATTERN = re.compile(r"wss?://[^\s\"'<>\\)]+", re.IGNORECASE)

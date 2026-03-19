@@ -9,6 +9,8 @@ from recon_cli.tools.executor import CommandError
 
 class NmapStage(Stage):
     name = "nmap_scan"
+    requires = ["hostname"]
+    provides = ["asset"]
 
     HIGH_RISK_PORTS = {
         21,

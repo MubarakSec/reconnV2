@@ -43,11 +43,26 @@ class PipelineContext:
     _host_blocks: Dict[str, str] = field(init=False, default_factory=dict)
     _auth_manager: object = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
+    _global_limiter: Optional[object] = field(init=False, default=None)
+    event_bus: "PipelineEventBus" = field(init=False)
+    finished_stages: Set[str] = field(init=False, default_factory=set)
     trace_recorder: Optional[object] = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         from recon_cli.utils.pipeline_trace import current_trace_recorder
+        from recon_cli.utils.event_bus import PipelineEventBus
         self.trace_recorder = current_trace_recorder()
+        self.event_bus = PipelineEventBus()
+        
+        # Initialize Global Rate Limiter
+        from recon_cli.utils.rate_limiter import RateLimitConfig, RateLimiter
+        global_rps = float(getattr(self.runtime_config, "global_rps", 50.0) if hasattr(self, "runtime_config") else 50.0)
+        global_per_host = float(getattr(self.runtime_config, "global_per_host_rps", 10.0) if hasattr(self, "runtime_config") else 10.0)
+        self._global_limiter = RateLimiter(RateLimitConfig(
+            requests_per_second=global_rps,
+            per_host_limit=global_per_host,
+            burst_size=max(1, int(global_rps * 2))
+        ))
         
         if self.record is None:
             self._simple_mode = True
@@ -122,7 +137,11 @@ class PipelineContext:
                 return False
             return True
 
-        self.results = ResultsTracker(self.record.paths.results_jsonl, allow=_allow_payload)
+        self.results = ResultsTracker(
+            self.record.paths.results_jsonl, 
+            allow=_allow_payload,
+            event_bus=self.event_bus
+        )
         self.stage_attempts: Dict[str, int] = dict(self.record.metadata.attempts)
         self.targets = [spec.target]
         self.execution_profile = getattr(spec, 'execution_profile', None)
@@ -196,7 +215,7 @@ class PipelineContext:
             config.cooldown_on_429 = float(cooldown_429)
         if cooldown_error is not None:
             config.cooldown_on_error = float(cooldown_error)
-        limiter = RateLimiter(config)
+        limiter = RateLimiter(config, parent=self._global_limiter)
         self._rate_limiters[name] = limiter
         return limiter
 

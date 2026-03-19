@@ -14,6 +14,8 @@ from recon_cli.utils.jsonl import read_jsonl
 
 class VulnScanStage(Stage):
     name = "vuln_scan"
+    requires = ["param_mutation", "url"]
+    provides = ["finding"]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(

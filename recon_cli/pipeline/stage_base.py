@@ -46,6 +46,12 @@ def note_missing_tool(context: PipelineContext, tool: str) -> None:
 class Stage(ABC):
     name: str = "stage"
     optional: bool = False
+    
+    # Dynamic Dependency attributes
+    # What data types (e.g. 'hostname', 'url') this stage provides
+    provides: List[str] = []
+    # What data types this stage requires to function
+    requires: List[str] = []
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return True
@@ -166,6 +172,46 @@ class Stage(ABC):
         entry["count"] = int(entry.get("count", 0)) + 1
         entry["last_skipped_at"] = time_utils.iso_now()
         context.manager.update_metadata(context.record)
+
+    async def iter_events(
+        self, 
+        context: PipelineContext, 
+        event_types: Optional[List[str]] = None,
+        dependencies: Optional[List[str]] = None
+    ):
+        """
+        Consumes events from the event bus in real-time.
+        Yields (event_type, data) tuples.
+        """
+        queue = context.event_bus.subscribe(event_types)
+        # If no dependencies provided, we might never know when to stop
+        # unless the whole pipeline is finishing.
+        upstream = set(dependencies) if dependencies else set()
+        
+        try:
+            while True:
+                # Check for stop request
+                if self._stop_requested(context):
+                    break
+                
+                try:
+                    # Wait for an event with a short timeout
+                    event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                    yield event["type"], event["data"]
+                    queue.task_done()
+                except (asyncio.TimeoutError, TimeoutError):
+                    # Check if all upstream stages are in finished_stages
+                    if upstream and upstream.issubset(context.finished_stages):
+                        # All upstream done, and queue is empty? then we are done.
+                        if queue.empty():
+                            break
+                    
+                    # If the whole pipeline runner signaled finish (fallback)
+                    if getattr(context, "_all_upstream_done", False) and queue.empty():
+                        break
+                    continue
+        finally:
+            await context.event_bus.unsubscribe(queue)
 
     def run(self, context: PipelineContext) -> bool:
         logger = context.logger

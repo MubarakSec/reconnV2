@@ -12,6 +12,8 @@ from recon_cli.utils.jsonl import read_jsonl
 
 class ParamMiningStage(Stage):
     name = "param_mining"
+    requires = ["url", "api"]
+    provides = ["parameter", "param_mutation"]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_param_mining", False))

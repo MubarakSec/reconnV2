@@ -292,20 +292,12 @@ class PipelineRunner:
         context: PipelineContext,
         stages: Sequence[Stage],
     ) -> list[list[str]]:
-        stage_order = [stage.name for stage in stages]
         dependency_map = {
             name: set(deps) for name, deps in DependencyResolver.STAGE_DEPENDENCIES.items()
         }
-        previous = None
-        for name in stage_order:
-            if name not in dependency_map:
-                dependency_map[name] = set()
-                if previous:
-                    dependency_map[name].add(previous)
-            previous = name
-
+        
         resolver = DependencyResolver(dependency_map)
-        execution_order = resolver.resolve(stage_order)
+        execution_order = resolver.resolve(list(stages))
         context.record.metadata.stats["parallel_groups"] = len(execution_order)
         context.manager.update_metadata(context.record)
         return execution_order
@@ -454,83 +446,87 @@ class PipelineRunner:
         stage_list = list(stages)
         stage_map = {stage.name: stage for stage in stage_list}
         progress_map = self._initialize_progress(context, stage_list, parallel=True)
-        execution_order = self._get_execution_plan(context, stage_list)
+        
+        # Build dependency graph
+        deps = {stage.name: set() for stage in stage_list}
+        rev_deps = {stage.name: set() for stage in stage_list}
+        
+        known_deps = DependencyResolver.STAGE_DEPENDENCIES
+        for stage in stage_list:
+            s_deps = known_deps.get(stage.name, set())
+            for d in s_deps:
+                if d in stage_map:
+                    deps[stage.name].add(d)
+                    rev_deps[d].add(stage.name)
+
+        completed: Set[str] = set()
+        running: Set[str] = set()
+        ready: List[str] = [s.name for s in stage_list if not deps[s.name]]
+        
         max_parallel = self._get_max_parallel(context)
+        tasks: Dict[str, asyncio.Task] = {}
+        
+        first_error: Optional[Exception] = None
+        
+        async def _run_stage_wrapper(name: str):
+            stage = stage_map[name]
+            span = self._start_stage_span(context, stage, trace)
+            started_at = time_utils.iso_now()
+            self._update_stage_progress(
+                context, name, "running", started_at=started_at, progress_map=progress_map
+            )
+            
+            # Check if this stage can handle streaming (future enhancement)
+            # For now, we signal 'all_upstream_done' when all DEPS are in completed.
+            
+            outcome = await self._run_one_stage(stage, context, trace, span)
+            finished_at = time_utils.iso_now()
+            
+            if outcome.error:
+                nonlocal first_error
+                if not first_error:
+                    first_error = outcome.error
+                self._handle_stage_failure(context, stage, span, outcome.error, progress_map=progress_map, finished_at=finished_at)
+            else:
+                success = outcome.result.success if isinstance(outcome.result, StageResult) else bool(outcome.result)
+                self._handle_stage_success(
+                    context, stage, span, success, progress_map=progress_map, finished_at=finished_at
+                )
+            return name
 
-        for group_index, group in enumerate(execution_order, start=1):
-            for i in range(0, len(group), max_parallel):
-                batch = group[i : i + max_parallel]
-                now = time_utils.iso_now()
-                if trace is not None:
-                    trace.emit(
-                        "parallel.batch.started",
-                        {
-                            "group_index": group_index,
-                            "batch": list(batch),
-                            "batch_size": len(batch),
-                        },
-                    )
-                for name in batch:
-                    self._update_stage_progress(
-                        context, name, "running", started_at=now, progress_map=progress_map
-                    )
+        while ready or tasks:
+            # Launch new tasks
+            while ready and len(tasks) < max_parallel:
+                name = ready.pop(0)
+                running.add(name)
+                tasks[name] = asyncio.create_task(_run_stage_wrapper(name))
+            
+            if not tasks:
+                break
+                
+            # Wait for any task to finish
+            done, _ = await asyncio.wait(tasks.values(), return_when=asyncio.FIRST_COMPLETED)
+            
+            for task in done:
+                name = task.result()
+                del tasks[name]
+                running.remove(name)
+                completed.add(name)
+                context.finished_stages.add(name)
+                
+                # Check for new ready stages
+                for dependent in rev_deps[name]:
+                    if dependent not in completed and dependent not in running:
+                        if deps[dependent].issubset(completed):
+                            if dependent not in ready:
+                                ready.append(dependent)
+            
+            if first_error and not self.continue_on_error:
+                # Stop launching new things, but wait for current ones to finish
+                ready.clear()
 
-                tasks = [
-                    asyncio.create_task(
-                        self._run_one_stage(
-                            stage_map[name],
-                            context,
-                            trace,
-                            self._start_stage_span(context, stage_map[name], trace)
-                        )
-                    ) 
-                    for name in batch
-                ]
-                results = await asyncio.gather(*tasks)
-
-                errors: list[StageExecutionOutcome] = []
-                first_failure_code: Optional[str] = None
-                finished_at = time_utils.iso_now()
-                for name, outcome in zip(batch, results):
-                    if outcome.error is not None:
-                        classification = self._handle_stage_failure(
-                            context,
-                            stage_map[name],
-                            outcome.span,
-                            outcome.error,
-                            progress_map=progress_map,
-                            finished_at=finished_at,
-                        )
-                        if first_failure_code is None:
-                            first_failure_code = str(classification.get("code") or "")
-                        errors.append(outcome)
-                    else:
-                        success = outcome.result.success if isinstance(outcome.result, StageResult) else (outcome.result if outcome.result is not None else False)
-                        self._handle_stage_success(
-                            context,
-                            stage_map[name],
-                            outcome.span,
-                            bool(success),
-                            progress_map=progress_map,
-                            finished_at=finished_at,
-                        )
-                if trace is not None:
-                    trace.emit(
-                        "parallel.batch.finished",
-                        {
-                            "group_index": group_index,
-                            "batch": list(batch),
-                            "batch_size": len(batch),
-                            "failed": len(errors),
-                        },
-                    )
-
-                if errors:
-                    message = str(errors[0].error)
-                    if first_failure_code:
-                        message = f"[{first_failure_code}] {message}"
-                    context.mark_error(message)
-                    raise errors[0].error
+        if first_error:
+            raise first_error
 
         context.mark_finished()
         summary.generate_summary(context)

@@ -98,10 +98,12 @@ class RateLimiter:
     - Token Bucket لكل مضيف
     - تتبع الأخطاء والاستجابات 429
     - Adaptive rate limiting
+    - دعم الهيكلية الهرمية (Parent/Child)
     """
     
-    def __init__(self, config: Optional[RateLimitConfig] = None):
+    def __init__(self, config: Optional[RateLimitConfig] = None, parent: Optional[RateLimiter] = None):
         self.config = config or RateLimitConfig()
+        self.parent = parent
         self._global_bucket = TokenBucket(
             capacity=self.config.burst_size,
             rate=self.config.requests_per_second
@@ -120,7 +122,7 @@ class RateLimiter:
         with self._lock:
             if host not in self._host_buckets:
                 self._host_buckets[host] = TokenBucket(
-                    capacity=self.config.burst_size // 2,
+                    capacity=max(1, self.config.burst_size // 2),
                     rate=self.config.per_host_limit
                 )
             return self._host_buckets[host]
@@ -130,19 +132,23 @@ class RateLimiter:
         from urllib.parse import urlparse
         try:
             parsed = urlparse(url)
-            return parsed.hostname or parsed.netloc or parsed.path.split('/')[0]
+            return parsed.hostname or parsed.netloc or parsed.path.split('/')[0] or "unknown"
         except Exception:
             return url
     
     def is_cooled_down(self, host: str) -> bool:
         """التحقق من انتهاء فترة التهدئة"""
+        if self.parent and not self.parent.is_cooled_down(host):
+            return False
         cooldown_until = self._host_cooldowns.get(host, 0)
         return time.monotonic() >= cooldown_until
     
     def set_cooldown(self, host: str, duration: float) -> None:
-        """تعيين فترة تهدئة للمضيف"""
+        """تعيين فترة تهدئة للمضيف وللأب إذا وجد"""
         with self._lock:
             self._host_cooldowns[host] = time.monotonic() + duration
+        if self.parent:
+            self.parent.set_cooldown(host, duration)
     
     def wait_for_slot(self, url: str, timeout: Optional[float] = 30.0) -> bool:
         """
@@ -152,8 +158,18 @@ class RateLimiter:
             True إذا تم الحصول على إذن، False إذا انتهى الوقت
         """
         host = self._extract_host(url)
+        start_time = time.monotonic()
         
-        # التحقق من التهدئة
+        # 1. التنسيق مع الأب أولاً (إذا وجد)
+        if self.parent:
+            if not self.parent.wait_for_slot(url, timeout=timeout):
+                return False
+            # تحديث الوقت المتبقي
+            if timeout:
+                elapsed = time.monotonic() - start_time
+                timeout = max(0.1, timeout - elapsed)
+
+        # 2. التحقق من التهدئة الخاصة بنا
         if not self.is_cooled_down(host):
             remaining = self._host_cooldowns[host] - time.monotonic()
             if remaining > 0:
@@ -161,11 +177,11 @@ class RateLimiter:
                     return False
                 time.sleep(remaining)
         
-        # الحصول على إذن عام
+        # 3. الحصول على إذن عام من الـ bucket الخاص بنا
         if not self._global_bucket.acquire(timeout=timeout):
             return False
         
-        # الحصول على إذن للمضيف
+        # 4. الحصول على إذن للمضيف من الـ bucket الخاص بنا
         host_bucket = self._get_host_bucket(host)
         allowed = host_bucket.acquire(timeout=timeout)
         if allowed:
@@ -173,22 +189,26 @@ class RateLimiter:
         return allowed
     
     def on_response(self, url: str, status_code: int) -> None:
-        """تحديث بناءً على الاستجابة"""
+        """تحديث بناءً على الاستجابة وتمريرها للأب"""
         host = self._extract_host(url)
         
         if status_code == 429:
-            # Too Many Requests - تهدئة طويلة
             self.set_cooldown(host, self.config.cooldown_on_429)
             self._stats["total_429s"] += 1
         elif status_code >= 500:
-            # Server Error - تهدئة قصيرة
             self.set_cooldown(host, self.config.cooldown_on_error)
+            
+        if self.parent:
+            self.parent.on_response(url, status_code)
     
     def on_error(self, url: str) -> None:
-        """تحديث عند حدوث خطأ"""
+        """تحديث عند حدوث خطأ وتمريره للأب"""
         host = self._extract_host(url)
         self.set_cooldown(host, self.config.cooldown_on_error)
         self._stats["total_errors"] += 1
+        
+        if self.parent:
+            self.parent.on_error(url)
     
     def stats(self) -> Dict[str, object]:
         """إحصائيات Rate Limiter"""

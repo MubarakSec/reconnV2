@@ -16,6 +16,7 @@ class PassiveEnumerationStage(Stage):
     """
 
     name = "passive_enumeration"
+    provides = ["hostname"]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return context.record.spec.profile in {"passive", "full"}

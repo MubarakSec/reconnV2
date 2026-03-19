@@ -20,8 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    
-    from recon_cli.pipeline.stages import PipelineStage
+    from recon_cli.pipeline.stage_base import Stage
 
 logger = logging.getLogger(__name__)
 
@@ -131,41 +130,52 @@ class DependencyResolver:
     def __init__(self, dependency_map: Optional[Dict[str, Set[str]]] = None) -> None:
         self.dependency_map = dependency_map or self.STAGE_DEPENDENCIES
 
-    def resolve(self, stage_names: List[str]) -> List[List[str]]:
+    def resolve(self, stages: List["PipelineStage"]) -> List[List[str]]:
         """
         حل التبعيات وإرجاع مجموعات التنفيذ.
-        
-        Args:
-            stage_names: قائمة أسماء المراحل
-            
-        Returns:
-            قائمة من المجموعات، كل مجموعة يمكن تنفيذها بالتوازي
+        تدعم التبعيات الديناميكية بناءً على نوع البيانات.
         """
-        # Build dependency graph
+        stage_names = [s.name for s in stages]
         available = set(stage_names)
         remaining = set(stage_names)
         execution_order = []
         
+        # Build dynamic dependency map
+        dynamic_deps = {s.name: set() for s in stages}
+        
+        # Mapping of data_type -> stages that provide it
+        providers = defaultdict(set)
+        for s in stages:
+            for p in getattr(s, "provides", []):
+                providers[p].add(s.name)
+        
+        for s in stages:
+            # 1. Start with hardcoded dependencies if any
+            hard_deps = self.dependency_map.get(s.name, set())
+            for d in hard_deps:
+                if d in available:
+                    dynamic_deps[s.name].add(d)
+            
+            # 2. Add dynamic dependencies based on 'requires'
+            for req in getattr(s, "requires", []):
+                for provider in providers[req]:
+                    if provider != s.name: # Don't depend on self
+                        dynamic_deps[s.name].add(provider)
+        
         while remaining:
             # Find stages with satisfied dependencies
             ready = []
-            for stage in remaining:
-                deps = self.dependency_map.get(stage, set())
-                # Only consider dependencies that are in our stage list
-                relevant_deps = deps & available
-                
-                # Check if all dependencies are completed
-                if not (relevant_deps - (available - remaining)):
-                    ready.append(stage)
+            for name in remaining:
+                deps = dynamic_deps.get(name, set())
+                # Check if all dependencies are in the 'completed' set (available - remaining)
+                if deps.issubset(available - remaining):
+                    ready.append(name)
             
             if not ready:
-                # Deadlock or unknown stages - run remaining sequentially
-                logger.warning(
-                    "Could not resolve dependencies for: %s. Running sequentially.",
-                    remaining
-                )
-                for stage in sorted(remaining):
-                    execution_order.append([stage])
+                # Deadlock detection
+                logger.warning("Dynamic resolver found deadlock or unresolved deps for: %s", remaining)
+                for name in sorted(remaining):
+                    execution_order.append([name])
                 break
             
             execution_order.append(sorted(ready))

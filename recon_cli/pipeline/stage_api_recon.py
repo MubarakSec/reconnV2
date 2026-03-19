@@ -18,6 +18,8 @@ except ImportError:
 
 class APIReconStage(Stage):
     name = "api_recon"
+    requires = ["url"]
+    provides = ["api", "api_spec"]
 
     PROBE_PATHS = [
         "/.well-known/openapi.json",

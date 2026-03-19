@@ -118,6 +118,7 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
 class ResultsTracker:
     path: Path
     allow: Optional[Callable[[Dict[str, object]], bool]] = None
+    event_bus: Optional["PipelineEventBus"] = None
     _writer: JsonlWriter = field(init=False)
     _lock: threading.RLock = field(init=False, default_factory=threading.RLock)
     _seen: set[tuple] = field(default_factory=set)
@@ -214,7 +215,7 @@ class ResultsTracker:
             self.stats["records_unique"] += 1
             payload.setdefault("timestamp", time_utils.iso_now())
             self._order.append(key)
-            
+            # Buffer only critical types
             if ptype in {"finding", "signal", "attack_path", "meta"}:
                 self._critical_records[key] = payload
             else:
@@ -222,8 +223,24 @@ class ResultsTracker:
                 if len(self._lru_records) > self.MAX_LRU_SIZE:
                     oldest_lru_key = next(iter(self._lru_records))
                     self._lru_records.pop(oldest_lru_key)
-            
+
+            # Publish to event bus if available
+            if self.event_bus:
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        # Use call_soon_threadsafe if we are in a thread, or just create task if in loop
+                        # To keep it simple and robust, we'll try to publish
+                        asyncio.run_coroutine_threadsafe(
+                            self.event_bus.publish(ptype, payload), 
+                            loop
+                        )
+                except RuntimeError:
+                    # No loop running, skip publishing
+                    pass
+
             # Always write to file
+
             with self._writer as writer:
                 writer.write(payload)
             

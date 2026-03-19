@@ -23,6 +23,8 @@ except ImportError:  # pragma: no cover - optional dependency
 
 class HttpProbeStage(Stage):
     name = "http_probe"
+    requires = ["hostname"]
+    provides = ["url"]
 
     PROBE_PATHS = [
         "/robots.txt",
