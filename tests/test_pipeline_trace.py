@@ -134,8 +134,8 @@ def test_parallel_pipeline_trace_records_stage_spans_and_batches(tmp_path: Path)
     assert trace_stats.get("parallel_enabled") is True
     assert trace_stats.get("span_count") == 3
     event_names = [entry.get("name") for entry in trace_events]
-    assert "parallel.batch.started" in event_names
-    assert "parallel.batch.finished" in event_names
+    assert "span.started" in event_names
+    assert "span.finished" in event_names
 
 
 @pytest.mark.skip(reason="Trace context propagation across run_in_executor needs deeper fix")

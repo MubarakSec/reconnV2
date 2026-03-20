@@ -14,6 +14,7 @@ from recon_cli.pipeline.stage_cloud_assets import CloudAssetDiscoveryStage
 from recon_cli.pipeline.stage_nmap import NmapStage
 from recon_cli.pipeline.stage_http_probe import HttpProbeStage
 from recon_cli.pipeline.stage_vhost import VHostDiscoveryStage
+from recon_cli.pipeline.stage_origin_discovery import OriginDiscoveryStage
 from recon_cli.pipeline.stage_takeover import TakeoverStage
 from recon_cli.pipeline.stage_scoring import ScoringStage
 from recon_cli.pipeline.stage_security_headers import SecurityHeadersStage
@@ -70,6 +71,7 @@ PIPELINE_STAGES: List[Stage] = [
     NmapStage(),
     HttpProbeStage(),
     VHostDiscoveryStage(),
+    OriginDiscoveryStage(),
     TakeoverStage(),
     ScoringStage(),
     SecurityHeadersStage(),

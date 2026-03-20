@@ -294,6 +294,15 @@ class JobManager:
                     job_ids.append(child.name)
         return sorted(job_ids)
 
+    def get_job_counts(self) -> Dict[str, int]:
+        """الحصول على أعداد المهام حسب الحالة"""
+        return {
+            "queued": len(self.list_jobs("queued")),
+            "running": len(self.list_jobs("running")),
+            "finished": len(self.list_jobs("finished")),
+            "failed": len(self.list_jobs("failed")),
+        }
+
     def move_job(self, job_id: str, destination: Path) -> Optional[Path]:
         src = self._find_job_dir(job_id)
         if not src:

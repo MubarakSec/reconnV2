@@ -4,7 +4,6 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![Kali](https://img.shields.io/badge/Kali-Linux-557C94.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 [![CI/CD](https://github.com/username/reconnv2/workflows/CI/badge.svg)](https://github.com/username/reconnv2/actions)
 [![codecov](https://codecov.io/gh/username/reconnv2/branch/main/graph/badge.svg)](https://codecov.io/gh/username/reconnv2)
@@ -16,8 +15,7 @@
 [الواجهات](#-طرق-الاستخدام-المتعددة) •
 [المراحل](#-مراحل-الفحص) •
 [Dashboard](#-لوحة-التحكم) •
-[API](#-rest-api) •
-[Docker](#-docker)
+[API](#-rest-api)
 
 </div>
 
@@ -32,8 +30,6 @@ reconnV2/
 ├── 📜 wizard.py            # معالج تفاعلي بواجهة ملونة
 ├── 📜 cheatsheet.sh        # مرجع سريع للأوامر
 ├── 📜 Makefile             # أوامر Make مختصرة
-├── 🐳 Dockerfile           # صورة Docker
-├── 🐳 docker-compose.yml   # تكوين Docker Compose
 ├── 📁 recon_cli/           # الكود الرئيسي
 │   ├── cli.py              # واجهة سطر الأوامر
 │   ├── api.py              # REST API
@@ -135,46 +131,6 @@ pip install -e .
 
 # تثبيت الأدوات الخارجية
 sudo apt install subfinder amass nuclei httpx-toolkit
-```
-
-### الطريقة 3: Docker 🐳 (الأسهل للتثبيت!)
-
-> **لماذا Docker؟** تثبيت بأمر واحد - جميع الأدوات جاهزة - لا حاجة لتثبيت يدوي!
-
-```bash
-# أمر واحد فقط - كل شيء جاهز!
-docker-compose up -d
-
-# الآن افتح لوحة التحكم
-# http://localhost:8080
-
-# أو استخدم الوضع التفاعلي
-docker-compose exec recon recon interactive
-
-# أو الفحص المباشر
-docker-compose exec recon recon scan example.com --profile passive
-```
-
-**ما الذي يتضمنه Docker؟**
-| المكون | الحالة |
-|--------|--------|
-| ✅ Python + جميع المكتبات | مثبت |
-| ✅ subfinder, amass, nuclei | مثبت |
-| ✅ httpx, naabu, dalfox | مثبت |
-| ✅ sqlmap, wpscan | مثبت |
-| ✅ waybackurls, gau | مثبت |
-| ✅ Web Dashboard | يعمل على :8080 |
-| ✅ PDF Reports | جاهز |
-
-**أوامر Docker المفيدة:**
-```bash
-make docker-up          # تشغيل كل شيء
-make docker-interactive # وضع تفاعلي
-make docker-wizard      # معالج خطوة بخطوة
-make docker-scan TARGET=example.com
-make docker-logs        # عرض السجلات
-make docker-shell       # فتح shell
-make docker-down        # إيقاف
 ```
 
 ---
@@ -531,7 +487,6 @@ recon db-stats
 
 **CD (Continuous Deployment)** - النشر المستمر:
 - يبني الحزم تلقائياً
-- يبني صور Docker
 - ينشر الإصدارات الجديدة
 
 ### الـ Workflow:
@@ -548,7 +503,6 @@ recon db-stats
 | **Test** | تشغيل الاختبارات (pytest) |
 | **Security** | فحص أمني (Bandit, Safety) |
 | **Build** | بناء الحزمة |
-| **Docker** | بناء صورة Docker |
 | **Release** | نشر الإصدار |
 
 ### ملف الـ Workflow:
@@ -564,7 +518,6 @@ jobs:
   test:     # الاختبارات (Python 3.10-3.12, Linux/Windows/Mac)
   security: # فحص أمني
   build:    # بناء الحزمة
-  docker:   # بناء Docker
   release:  # نشر الإصدار
 ```
 
@@ -623,33 +576,6 @@ jobs/finished/example.com_20260201_143052_a1b2/
 │   └── ...
 └── logs/
     └── pipeline.log   # سجل التنفيذ
-```
-
----
-
-## 🐳 Docker
-
-### بناء الصورة
-```bash
-docker build -t reconnv2 .
-```
-
-### تشغيل فحص
-```bash
-# فحص سريع
-docker run -v $(pwd)/jobs:/app/jobs reconnv2 scan target.com --inline
-
-# فحص تفاعلي
-docker run -it -v $(pwd)/jobs:/app/jobs reconnv2 scan target.com --profile full --inline
-```
-
-### Docker Compose
-```bash
-# تشغيل
-docker-compose run recon scan target.com --inline
-
-# عرض المهام
-docker-compose run recon list-jobs
 ```
 
 ---

