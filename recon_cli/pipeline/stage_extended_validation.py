@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -10,9 +11,9 @@ from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
-from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.oast import InteractshSession
 
+LOGGER = logging.getLogger(__name__)
 
 class ExtendedValidationStage(Stage):
     name = "extended_validation"
@@ -29,9 +30,9 @@ class ExtendedValidationStage(Stage):
     )
 
     LFI_LINUX_RE = re.compile(r"root:.*:0:0:", re.IGNORECASE)
-    LFI_WIN_RE = re.compile(r"\\[(extensions|fonts|mci extensions)\\]", re.IGNORECASE)
-    VALUE_DOMAIN_RE = re.compile(r"^[a-z0-9.-]+\\.[a-z]{2,}$", re.IGNORECASE)
-    VALUE_FILE_RE = re.compile(r"\\.[a-z0-9]{2,5}$", re.IGNORECASE)
+    LFI_WIN_RE = re.compile(r"\[(extensions|fonts|mci extensions)\]", re.IGNORECASE)
+    VALUE_DOMAIN_RE = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}$", re.IGNORECASE)
+    VALUE_FILE_RE = re.compile(r"\.[a-z0-9]{2,5}$", re.IGNORECASE)
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(
@@ -72,10 +73,6 @@ class ExtendedValidationStage(Stage):
             rps=float(getattr(runtime, "oast_rps", 0)),
             per_host=float(getattr(runtime, "oast_per_host_rps", 0)),
         )
-
-        results_path = context.record.paths.results_jsonl
-        if not results_path.exists():
-            return
 
         signals = context.signal_index()
         candidates = self._collect_candidates(context, signals)
@@ -667,240 +664,16 @@ class ExtendedValidationStage(Stage):
         ssrf_map: Dict[Tuple[str, str, str, str], Dict[str, object]] = {}
         lfi_map: Dict[Tuple[str, str, str, str], Dict[str, object]] = {}
         xxe_map: Dict[Tuple[str, str], Dict[str, object]] = {}
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+
+        for entry in context.get_results():
             etype = entry.get("type")
             if etype == "url":
-                url = entry.get("url")
-                if not isinstance(url, str) or not url:
-                    continue
-                if not context.url_allowed(url) or not url.startswith(
-                    ("http://", "https://")
-                ):
-                    continue
-                host = urlparse(url).hostname or ""
-                host_signals = signals.get("by_host", {}).get(host, set())
-                if (
-                    "waf_detected" in host_signals
-                    and "waf_bypass_possible" not in host_signals
-                ):
-                    continue
-                params = parse_qsl(urlparse(url).query, keep_blank_values=True)
-                for key, value in params:
-                    key_lower = key.lower()
-                    score = int(entry.get("score", 0))
-                    if isinstance(value, str) and value:
-                        if key_lower in self.REDIRECT_PARAMS:
-                            score = self._adjust_score(score, "redirect", value)
-                        if key_lower in self.SSRF_PARAMS:
-                            score = self._adjust_score(score, "ssrf", value)
-                        if key_lower in self.LFI_PARAMS:
-                            score = self._adjust_score(score, "lfi", value)
-                    candidate_key = (url, key_lower, "query", "get")
-                    if key_lower in self.REDIRECT_PARAMS:
-                        redirect_map[candidate_key] = self._pick_best(
-                            redirect_map.get(candidate_key),
-                            {
-                                "url": url,
-                                "param": key,
-                                "location": "query",
-                                "method": "get",
-                                "score": score,
-                            },
-                        )
-                    if key_lower in self.SSRF_PARAMS:
-                        ssrf_map[candidate_key] = self._pick_best(
-                            ssrf_map.get(candidate_key),
-                            {
-                                "url": url,
-                                "param": key,
-                                "location": "query",
-                                "method": "get",
-                                "score": score,
-                            },
-                        )
-                    if key_lower in self.LFI_PARAMS:
-                        lfi_map[candidate_key] = self._pick_best(
-                            lfi_map.get(candidate_key),
-                            {
-                                "url": url,
-                                "param": key,
-                                "location": "query",
-                                "method": "get",
-                                "score": score,
-                            },
-                        )
-                tags = entry.get("tags", [])
-                if "api:schema" in tags and any(
-                    tag.startswith("method:") for tag in tags
-                ):
-                    method = "post"
-                    for tag in tags:
-                        if tag.startswith("method:"):
-                            method = tag.split(":", 1)[1]
-                    score = int(entry.get("score", 0))
-                    xxe_key = (url, method)
-                    xxe_map[xxe_key] = self._pick_best(
-                        xxe_map.get(xxe_key),
-                        {"url": url, "method": method, "score": score},
-                    )
-                    if method in {"post", "put", "patch"}:
-                        redirect_key = (url, "url", "json", method)
-                        ssrf_key = (url, "url", "json", method)
-                        lfi_key = (url, "file", "json", method)
-                        redirect_map[redirect_key] = self._pick_best(
-                            redirect_map.get(redirect_key),
-                            {
-                                "url": url,
-                                "param": "url",
-                                "location": "json",
-                                "method": method,
-                                "score": score,
-                            },
-                        )
-                        ssrf_map[ssrf_key] = self._pick_best(
-                            ssrf_map.get(ssrf_key),
-                            {
-                                "url": url,
-                                "param": "url",
-                                "location": "json",
-                                "method": method,
-                                "score": score,
-                            },
-                        )
-                        lfi_map[lfi_key] = self._pick_best(
-                            lfi_map.get(lfi_key),
-                            {
-                                "url": url,
-                                "param": "file",
-                                "location": "json",
-                                "method": method,
-                                "score": score,
-                            },
-                        )
+                self._process_url_entry(entry, context, signals, redirect_map, ssrf_map, lfi_map, xxe_map)
             elif etype == "parameter":
-                name = entry.get("name")
-                if not isinstance(name, str):
-                    continue
-                name_lower = name.lower()
-                if name_lower not in (
-                    self.REDIRECT_PARAMS | self.SSRF_PARAMS | self.LFI_PARAMS
-                ):
-                    continue
-                examples = entry.get("examples") or []
-                for example in examples:
-                    if not isinstance(example, str) or not example:
-                        continue
-                    if not example.startswith(
-                        ("http://", "https://")
-                    ) or not context.url_allowed(example):
-                        continue
-                    host = urlparse(example).hostname or ""
-                    host_signals = signals.get("by_host", {}).get(host, set())
-                    if (
-                        "waf_detected" in host_signals
-                        and "waf_bypass_possible" not in host_signals
-                    ):
-                        continue
-                    score = int(entry.get("score", 0))
-                    example_value = self._extract_param_value(example, name)
-                    if example_value:
-                        if name_lower in self.REDIRECT_PARAMS:
-                            score = self._adjust_score(score, "redirect", example_value)
-                        if name_lower in self.SSRF_PARAMS:
-                            score = self._adjust_score(score, "ssrf", example_value)
-                        if name_lower in self.LFI_PARAMS:
-                            score = self._adjust_score(score, "lfi", example_value)
-                    candidate_key = (example, name_lower, "query", "get")
-                    if name_lower in self.REDIRECT_PARAMS:
-                        redirect_map[candidate_key] = self._pick_best(
-                            redirect_map.get(candidate_key),
-                            {
-                                "url": example,
-                                "param": name,
-                                "location": "query",
-                                "method": "get",
-                                "score": score,
-                            },
-                        )
-                    if name_lower in self.SSRF_PARAMS:
-                        ssrf_map[candidate_key] = self._pick_best(
-                            ssrf_map.get(candidate_key),
-                            {
-                                "url": example,
-                                "param": name,
-                                "location": "query",
-                                "method": "get",
-                                "score": score,
-                            },
-                        )
-                    if name_lower in self.LFI_PARAMS:
-                        lfi_map[candidate_key] = self._pick_best(
-                            lfi_map.get(candidate_key),
-                            {
-                                "url": example,
-                                "param": name,
-                                "location": "query",
-                                "method": "get",
-                                "score": score,
-                            },
-                        )
+                self._process_parameter_entry(entry, context, signals, redirect_map, ssrf_map, lfi_map)
             elif etype == "form":
-                action = entry.get("action") or entry.get("url")
-                if not isinstance(action, str) or not action:
-                    continue
-                if not context.url_allowed(action) or not action.startswith(
-                    ("http://", "https://")
-                ):
-                    continue
-                method = str(entry.get("method") or "post").lower()
-                inputs = entry.get("inputs") or []
-                if not isinstance(inputs, list):
-                    continue
-                for item in inputs:
-                    if not isinstance(item, dict):
-                        continue
-                    name = item.get("name")
-                    if not isinstance(name, str) or not name:
-                        continue
-                    name_lower = name.lower()
-                    score = int(entry.get("score", 25))
-                    location = "body" if method in {"post", "put", "patch"} else "query"
-                    if name_lower in self.REDIRECT_PARAMS:
-                        redirect_key = (action, name_lower, location, method)
-                        redirect_map[redirect_key] = self._pick_best(
-                            redirect_map.get(redirect_key),
-                            {
-                                "url": action,
-                                "param": name,
-                                "location": location,
-                                "method": method,
-                                "score": score,
-                            },
-                        )
-                    if name_lower in self.SSRF_PARAMS:
-                        ssrf_key = (action, name_lower, location, method)
-                        ssrf_map[ssrf_key] = self._pick_best(
-                            ssrf_map.get(ssrf_key),
-                            {
-                                "url": action,
-                                "param": name,
-                                "location": location,
-                                "method": method,
-                                "score": score,
-                            },
-                        )
-                    if name_lower in self.LFI_PARAMS:
-                        lfi_key = (action, name_lower, location, method)
-                        lfi_map[lfi_key] = self._pick_best(
-                            lfi_map.get(lfi_key),
-                            {
-                                "url": action,
-                                "param": name,
-                                "location": location,
-                                "method": method,
-                                "score": score,
-                            },
-                        )
+                self._process_form_entry(entry, context, redirect_map, ssrf_map, lfi_map)
+
         redirect = sorted(
             redirect_map.values(),
             key=lambda item: int(item.get("score", 0)),
@@ -916,6 +689,139 @@ class ExtendedValidationStage(Stage):
             xxe_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
         )
         return {"redirect": redirect, "ssrf": ssrf, "lfi": lfi, "xxe": xxe}
+
+    def _process_url_entry(self, entry, context, signals, redirect_map, ssrf_map, lfi_map, xxe_map):
+        url = entry.get("url")
+        if not isinstance(url, str) or not url:
+            return
+        if not context.url_allowed(url) or not url.startswith(("http://", "https://")):
+            return
+        host = urlparse(url).hostname or ""
+        host_signals = signals.get("by_host", {}).get(host, set())
+        if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
+            return
+        
+        params = parse_qsl(urlparse(url).query, keep_blank_values=True)
+        for key, value in params:
+            key_lower = key.lower()
+            score = int(entry.get("score", 0))
+            if isinstance(value, str) and value:
+                if key_lower in self.REDIRECT_PARAMS:
+                    score = self._adjust_score(score, "redirect", value)
+                if key_lower in self.SSRF_PARAMS:
+                    score = self._adjust_score(score, "ssrf", value)
+                if key_lower in self.LFI_PARAMS:
+                    score = self._adjust_score(score, "lfi", value)
+            candidate_key = (url, key_lower, "query", "get")
+            if key_lower in self.REDIRECT_PARAMS:
+                redirect_map[candidate_key] = self._pick_best(redirect_map.get(candidate_key), {
+                    "url": url, "param": key, "location": "query", "method": "get", "score": score
+                })
+            if key_lower in self.SSRF_PARAMS:
+                ssrf_map[candidate_key] = self._pick_best(ssrf_map.get(candidate_key), {
+                    "url": url, "param": key, "location": "query", "method": "get", "score": score
+                })
+            if key_lower in self.LFI_PARAMS:
+                lfi_map[candidate_key] = self._pick_best(lfi_map.get(candidate_key), {
+                    "url": url, "param": key, "location": "query", "method": "get", "score": score
+                })
+        
+        tags = entry.get("tags", [])
+        if "api:schema" in tags and any(tag.startswith("method:") for tag in tags):
+            method = "post"
+            for tag in tags:
+                if tag.startswith("method:"):
+                    method = tag.split(":", 1)[1]
+            score = int(entry.get("score", 0))
+            xxe_key = (url, method)
+            xxe_map[xxe_key] = self._pick_best(xxe_map.get(xxe_key), {"url": url, "method": method, "score": score})
+            if method in {"post", "put", "patch"}:
+                for m, target_map, p in [("redirect", redirect_map, "url"), ("ssrf", ssrf_map, "url"), ("lfi", lfi_map, "file")]:
+                    ckey = (url, p, "json", method)
+                    target_map[ckey] = self._pick_best(target_map.get(ckey), {
+                        "url": url, "param": p, "location": "json", "method": method, "score": score
+                    })
+
+    def _process_parameter_entry(self, entry, context, signals, redirect_map, ssrf_map, lfi_map):
+        name = entry.get("name")
+        if not isinstance(name, str):
+            return
+        name_lower = name.lower()
+        if name_lower not in (self.REDIRECT_PARAMS | self.SSRF_PARAMS | self.LFI_PARAMS):
+            return
+        
+        examples = entry.get("examples") or []
+        for example in examples:
+            if not isinstance(example, str) or not example:
+                continue
+            if not example.startswith(("http://", "https://")) or not context.url_allowed(example):
+                continue
+            host = urlparse(example).hostname or ""
+            host_signals = signals.get("by_host", {}).get(host, set())
+            if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
+                continue
+            
+            score = int(entry.get("score", 0))
+            example_value = self._extract_param_value(example, name)
+            if example_value:
+                if name_lower in self.REDIRECT_PARAMS:
+                    score = self._adjust_score(score, "redirect", example_value)
+                if name_lower in self.SSRF_PARAMS:
+                    score = self._adjust_score(score, "ssrf", example_value)
+                if name_lower in self.LFI_PARAMS:
+                    score = self._adjust_score(score, "lfi", example_value)
+            
+            candidate_key = (example, name_lower, "query", "get")
+            if name_lower in self.REDIRECT_PARAMS:
+                redirect_map[candidate_key] = self._pick_best(redirect_map.get(candidate_key), {
+                    "url": example, "param": name, "location": "query", "method": "get", "score": score
+                })
+            if name_lower in self.SSRF_PARAMS:
+                ssrf_map[candidate_key] = self._pick_best(ssrf_map.get(candidate_key), {
+                    "url": example, "param": name, "location": "query", "method": "get", "score": score
+                })
+            if name_lower in self.LFI_PARAMS:
+                lfi_map[candidate_key] = self._pick_best(lfi_map.get(candidate_key), {
+                    "url": example, "param": name, "location": "query", "method": "get", "score": score
+                })
+
+    def _process_form_entry(self, entry, context, redirect_map, ssrf_map, lfi_map):
+        action = entry.get("action") or entry.get("url")
+        if not isinstance(action, str) or not action:
+            return
+        if not context.url_allowed(action) or not action.startswith(("http://", "https://")):
+            return
+        
+        method = str(entry.get("method") or "post").lower()
+        inputs = entry.get("inputs") or []
+        if not isinstance(inputs, list):
+            return
+        
+        for item in inputs:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            name_lower = name.lower()
+            score = int(entry.get("score", 25))
+            location = "body" if method in {"post", "put", "patch"} else "query"
+            
+            if name_lower in self.REDIRECT_PARAMS:
+                redirect_key = (action, name_lower, location, method)
+                redirect_map[redirect_key] = self._pick_best(redirect_map.get(redirect_key), {
+                    "url": action, "param": name, "location": location, "method": method, "score": score
+                })
+            if name_lower in self.SSRF_PARAMS:
+                ssrf_key = (action, name_lower, location, method)
+                ssrf_map[ssrf_key] = self._pick_best(ssrf_map.get(ssrf_key), {
+                    "url": action, "param": name, "location": location, "method": method, "score": score
+                })
+            if name_lower in self.LFI_PARAMS:
+                lfi_key = (action, name_lower, location, method)
+                lfi_map[lfi_key] = self._pick_best(lfi_map.get(lfi_key), {
+                    "url": action, "param": name, "location": location, "method": method, "score": score
+                })
 
     @staticmethod
     def _token() -> str:
@@ -966,7 +872,8 @@ class ExtendedValidationStage(Stage):
             if loc_value.startswith("//"):
                 loc_value = "http:" + loc_value
             parsed_location = urlparse(loc_value)
-        except Exception:
+        except Exception as e:
+            LOGGER.debug("Open redirect parsing failed: %s", e)
             return False
         if not parsed_location.scheme or not parsed_location.netloc:
             return False
@@ -1075,7 +982,8 @@ class ExtendedValidationStage(Stage):
     def _extract_param_value(url: str, name: str) -> str:
         try:
             params = parse_qsl(urlparse(url).query, keep_blank_values=True)
-        except Exception:
+        except Exception as e:
+            LOGGER.debug("Param extraction failed for %s: %s", url, e)
             return ""
         for key, value in params:
             if key == name:

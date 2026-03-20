@@ -81,13 +81,14 @@ def test_takeover_provider_filtering(monkeypatch, tmp_path: Path):
         def __init__(self, *args, **kwargs):
             return None
 
-        def check_host(self, hostname, providers=None):
+        async def check_host(self, hostname, providers=None):
             FakeDetector.last_providers = providers
             return TakeoverFinding(hostname=hostname, provider="aws_s3", evidence="NoSuchBucket")
 
     monkeypatch.setattr(stage_mod, "TakeoverDetector", FakeDetector)
 
     stage = TakeoverStage()
+    monkeypatch.setattr(stage, "_has_wildcard_dns", lambda *_a, **_k: False)
     stage.run(context)
 
     assert FakeDetector.last_providers == {"aws_s3"}

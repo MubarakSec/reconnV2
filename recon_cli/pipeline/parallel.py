@@ -73,6 +73,7 @@ class DependencyResolver:
         # البداية
         "normalize_scope": set(),
         "passive_enumeration": {"normalize_scope"},
+        "github_recon": {"normalize_scope"},
         "subdomain_permute": {"passive_enumeration"},
         "ct_asn_pivot": {"subdomain_permute"},
         "dedupe_canonicalize": {"ct_asn_pivot"},

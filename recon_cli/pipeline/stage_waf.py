@@ -7,7 +7,6 @@ from urllib.parse import urlparse, urlsplit, urlunsplit, quote_plus
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils import enrich as enrich_utils
 
 
@@ -101,7 +100,7 @@ class WafProbeStage(Stage):
             return
         candidates: List[Tuple[int, str]] = []
         fallback: List[Tuple[int, str]] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             if entry.get("type") != "url":
                 continue
             url = entry.get("url")
@@ -168,7 +167,8 @@ class WafProbeStage(Stage):
                     timeout=timeout,
                     headers={"User-Agent": "recon-cli waf-probe"},
                 )
-            except Exception:
+            except Exception as exc:
+                context.logger.debug("Failed to fetch baseline for %s: %s", url, exc)
                 if limiter:
                     limiter.on_error(url)
                 continue
@@ -188,7 +188,8 @@ class WafProbeStage(Stage):
                         "User-Agent": "recon-cli waf-probe",
                     },
                 )
-            except Exception:
+            except Exception as exc:
+                context.logger.debug("Failed to fetch baseline for %s: %s", url, exc)
                 if limiter:
                     limiter.on_error(url)
                 continue
@@ -214,7 +215,8 @@ class WafProbeStage(Stage):
                         "X-Rewrite-URL": alt_path,
                     },
                 )
-            except Exception:
+            except Exception as exc:
+                context.logger.debug("Failed to fetch baseline for %s: %s", url, exc)
                 if limiter:
                     limiter.on_error(url)
                 continue
@@ -418,7 +420,7 @@ class WafProbeStage(Stage):
     def _looks_blocked(self, resp, body_snippet: str) -> bool:
         try:
             status_code = int(resp.status_code)
-        except requests.exceptions.RequestException:
+        except Exception:
             status_code = 0
         if status_code in self.BLOCK_STATUSES:
             return True

@@ -9,19 +9,16 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.secrets.detector import SecretsDetector
 from recon_cli.utils import enrich as enrich_utils
-from recon_cli.utils.jsonl import iter_jsonl, read_jsonl
 
 
 class SecretsDetectionStage(Stage):
     name = "secrets_detection"
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        if not context.runtime_config.enable_secrets:
-            return False
-        return context.runtime_config.secrets_max_files > 0
+        return bool(getattr(context.runtime_config, "enable_secrets", False))
 
     def execute(self, context: PipelineContext) -> None:
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         if not items:
             return
         candidates: List[tuple[int, str, str]] = []  # (score, url, host)
@@ -124,9 +121,8 @@ class SecretsDetectionStage(Stage):
             if matches
         }
         if boosted_urls:
-            results_path = context.record.paths.results_jsonl
             updated_entries = []
-            for entry in iter_jsonl(results_path):
+            for entry in context.iter_results():
                 if entry.get("type") == "url":
                     entry_url = entry.get("url")
                     if entry_url in boosted_urls:
@@ -141,6 +137,7 @@ class SecretsDetectionStage(Stage):
                         )
                 updated_entries.append(entry)
             context.results.replace_all(updated_entries)
+            context.clear_results_cache()
 
         stats = context.record.metadata.stats.setdefault("secrets", {})
         stats.update(

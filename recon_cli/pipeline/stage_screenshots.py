@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class ScreenshotStage(Stage):
@@ -182,7 +181,7 @@ class ScreenshotStage(Stage):
         self, context: PipelineContext, limit: int
     ) -> List[Dict[str, object]]:
         urls: List[Dict[str, object]] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             status = entry.get("status_code")

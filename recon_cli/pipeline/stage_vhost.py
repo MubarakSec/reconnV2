@@ -11,7 +11,6 @@ import requests
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 @dataclass
@@ -275,7 +274,7 @@ class VHostDiscoveryStage(Stage):
     ) -> List[Tuple[str, str, int]]:
         """Pick highest-scoring URL per host to use as vhost baseline."""
         best: Dict[str, Tuple[str, int]] = {}
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             url = entry.get("url")

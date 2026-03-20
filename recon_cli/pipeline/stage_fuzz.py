@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -9,7 +10,7 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.tools.executor import CommandError
-from recon_cli.utils.jsonl import read_jsonl
+
 
 
 class FuzzStage(Stage):
@@ -28,10 +29,6 @@ class FuzzStage(Stage):
     def execute(self, context: PipelineContext) -> None:
         executor = context.executor
         runtime = context.runtime_config
-        tool_timeout = runtime.tool_timeout
-        per_host_limit = max(runtime.trim_url_max_per_host, 0)
-        per_host_counts: Dict[str, int] = defaultdict(int)
-        stage_seen: Set[str] = set()
         if not executor.available("ffuf"):
             context.logger.warning("ffuf not available; skipping fuzzing stage")
             note_missing_tool(context, "ffuf")
@@ -47,18 +44,73 @@ class FuzzStage(Stage):
             return
         host_tags = self._tags_for_hosts(context)
         host_meta = self._collect_fuzz_metadata(context)
-        enable_param_fuzz = bool(getattr(runtime, "enable_param_fuzz", False))
-        fuzz_custom_max_words = int(getattr(runtime, "fuzz_custom_max_words", 1500))
-        fuzz_combined_max_words = int(getattr(runtime, "fuzz_combined_max_words", 6000))
-        fuzz_param_max_words = int(getattr(runtime, "fuzz_param_max_words", 500))
         param_wordlist_words = self._load_param_wordlist(runtime)
-        for host in targets[: context.runtime_config.max_fuzz_hosts]:
+
+        per_host_counts: Dict[str, int] = defaultdict(int)
+        stage_seen: Set[str] = set()
+        per_host_limit = max(runtime.trim_url_max_per_host, 0)
+
+        async def _run_all():
+            semaphore = asyncio.Semaphore(3)
+            tasks = []
+            for host in targets[: context.runtime_config.max_fuzz_hosts]:
+                tasks.append(
+                    self._run_ffuf_for_host(
+                        context,
+                        host,
+                        semaphore,
+                        wordlist_override,
+                        host_tags,
+                        host_meta,
+                        param_wordlist_words,
+                        stage_seen,
+                        per_host_counts,
+                        per_host_limit,
+                    )
+                )
+            await asyncio.gather(*tasks)
+
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                # We are already in an event loop, possibly in a different thread
+                # or the same thread. Since execute is sync, we use run_coroutine_threadsafe.
+                asyncio.run_coroutine_threadsafe(_run_all(), loop).result()
+            else:
+                asyncio.run(_run_all())
+        except RuntimeError:
+            asyncio.run(_run_all())
+
+    async def _run_ffuf_for_host(
+        self,
+        context: PipelineContext,
+        host: str,
+        semaphore: asyncio.Semaphore,
+        wordlist_override: Path | None,
+        host_tags: Dict[str, Set[str]],
+        host_meta: Dict[str, Dict[str, object]],
+        param_wordlist_words: Set[str],
+        stage_seen: Set[str],
+        per_host_counts: Dict[str, int],
+        per_host_limit: int,
+    ) -> None:
+        async with semaphore:
+            runtime = context.runtime_config
+            tool_timeout = runtime.tool_timeout
+            enable_param_fuzz = bool(getattr(runtime, "enable_param_fuzz", False))
+            fuzz_custom_max_words = int(getattr(runtime, "fuzz_custom_max_words", 1500))
+            fuzz_combined_max_words = int(
+                getattr(runtime, "fuzz_combined_max_words", 6000)
+            )
+            fuzz_param_max_words = int(getattr(runtime, "fuzz_param_max_words", 500))
+
             wordlist_path = wordlist_override or self._select_wordlist_for_host(
                 runtime, host, host_tags.get(host, set())
             )
             if not wordlist_path.exists():
                 context.logger.warning("Wordlist not found: %s", wordlist_path)
-                continue
+                return
+
             meta = host_meta.get(host, {})
             base_url = self._base_url_for_host(host, meta)
             base_root = self._root_url(base_url)
@@ -89,7 +141,7 @@ class FuzzStage(Stage):
                 "-o",
                 str(artifact),
             ]
-            if self._run_ffuf(context, cmd, tool_timeout, runtime, host=host):
+            if await self._run_ffuf(context, cmd, tool_timeout, runtime, host=host):
                 self._ingest_ffuf_results(
                     context,
                     artifact,
@@ -129,7 +181,7 @@ class FuzzStage(Stage):
                         "-o",
                         str(param_artifact),
                     ]
-                    if self._run_ffuf(
+                    if await self._run_ffuf(
                         context, param_cmd, tool_timeout, runtime, host=host
                     ):
                         self._ingest_ffuf_results(
@@ -141,15 +193,16 @@ class FuzzStage(Stage):
                             tag="param-fuzz",
                         )
 
+
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts = defaultdict(int)
-        results_path = context.record.paths.results_jsonl
-        if not results_path.exists():
+        results = context.get_results()
+        if not results:
             return []
         soft_404_hosts = set(
             context.record.metadata.stats.get("soft_404", {}).get("hosts", [])
         )
-        for entry in read_jsonl(results_path):
+        for entry in results:
             if entry.get("type") == "url" and entry.get("status_code") in {200, 204}:
                 url_value = entry.get("url")
                 if url_value and not context.url_allowed(url_value):
@@ -187,10 +240,10 @@ class FuzzStage(Stage):
                 "base_score": -1,
             }
         )
-        results_path = context.record.paths.results_jsonl
-        if not results_path.exists():
+        results = context.get_results()
+        if not results:
             return metadata
-        for entry in read_jsonl(results_path):
+        for entry in results:
             etype = entry.get("type")
             if etype == "url":
                 url_value = entry.get("url")
@@ -241,6 +294,7 @@ class FuzzStage(Stage):
 
     @staticmethod
     def _add_path_words(word_set: Set[str], path: str) -> None:
+
         if not path:
             return
         stripped = path.strip("/")
@@ -339,7 +393,7 @@ class FuzzStage(Stage):
         combined_path.write_text("\n".join(combined) + "\n", encoding="utf-8")
         return combined_path
 
-    def _run_ffuf(
+    async def _run_ffuf(
         self,
         context: PipelineContext,
         cmd: List[str],
@@ -372,7 +426,7 @@ class FuzzStage(Stage):
                 timeout = ffuf_maxtime + max(
                     0, int(getattr(runtime, "ffuf_timeout_buffer", 30))
                 )
-            context.executor.run(cmd, check=False, timeout=timeout)
+            await context.executor.run_async(cmd, check=False, timeout=timeout)
             return True
         except CommandError as exc:
             retried = False
@@ -401,10 +455,12 @@ class FuzzStage(Stage):
                     0, int(getattr(runtime, "ffuf_timeout_buffer", 30))
                 )
                 try:
-                    context.executor.run(retry_cmd, check=False, timeout=retry_timeout)
+                    await context.executor.run_async(
+                        retry_cmd, check=False, timeout=retry_timeout
+                    )
                     retried = True
-                except CommandError:
-                    pass
+                except CommandError as retry_exc:
+                    context.logger.error("ffuf retry failed for %s: %s", host, retry_exc)
             if not retried:
                 context.logger.warning(
                     "ffuf failed for %s",
@@ -426,9 +482,11 @@ class FuzzStage(Stage):
             return
         try:
             data = json.loads(artifact.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            context.logger.error("Failed to decode ffuf results for %s: %s", artifact, exc)
             return
         for result in data.get("results", []):
+
             payload = {
                 "type": "url",
                 "source": "ffuf",
@@ -458,10 +516,10 @@ class FuzzStage(Stage):
 
     def _tags_for_hosts(self, context: PipelineContext) -> Dict[str, set[str]]:
         tags_by_host: Dict[str, set[str]] = defaultdict(set)
-        results_path = context.record.paths.results_jsonl
-        if not results_path.exists():
+        results = context.get_results()
+        if not results:
             return tags_by_host
-        for entry in read_jsonl(results_path):
+        for entry in results:
             entry_type = entry.get("type")
             url_value = entry.get("url")
             host = None
@@ -491,6 +549,7 @@ class FuzzStage(Stage):
                 ):
                     tags_by_host[host].add("cms:wordpress")
         signals = context.signal_index()
+
         for host, host_signals in signals.get("by_host", {}).items():
             if "cms_drupal" in host_signals:
                 tags_by_host[host].add("cms:drupal")

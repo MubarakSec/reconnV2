@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.tools.executor import CommandError
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class VulnScanStage(Stage):
@@ -197,7 +196,7 @@ class VulnScanStage(Stage):
         url_tags: Dict[str, set] = {}
         url_status: Dict[str, int] = {}
         if results_path.exists():
-            for entry in read_jsonl(results_path):
+            for entry in context.get_results():
                 if entry.get("type") != "url":
                     continue
                 url_value = entry.get("url")

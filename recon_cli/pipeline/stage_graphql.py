@@ -6,7 +6,6 @@ from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class GraphQLReconStage(Stage):
@@ -172,7 +171,7 @@ class GraphQLReconStage(Stage):
                 candidates.append(url)
                 urls_seen.add(url)
 
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             url = entry.get("url")

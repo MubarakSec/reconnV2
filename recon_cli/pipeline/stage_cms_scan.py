@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.tools.executor import CommandError, CommandExecutor
-from recon_cli.utils.jsonl import read_jsonl
 
 try:
     from recon_cli.scanners import integrations as scanner_integrations
@@ -277,7 +276,7 @@ class CMSScanStage(Stage):
     @staticmethod
     def _collect_hosts(context: PipelineContext) -> Dict[str, Dict[str, object]]:
         host_info: Dict[str, Dict[str, object]] = {}
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             url_value = entry.get("url")

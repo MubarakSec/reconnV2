@@ -7,14 +7,13 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import enrich as enrich_utils
 from recon_cli.utils import fs
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class EnrichmentStage(Stage):
     name = "asset_enrichment"
 
     def execute(self, context: PipelineContext) -> None:
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         assets = [
             entry for entry in items if entry.get("type") == "asset" and entry.get("ip")
         ]

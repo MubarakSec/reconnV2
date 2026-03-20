@@ -296,6 +296,19 @@ def generate_summary(context) -> None:
         for code, count in sorted(status_counter.items()):
             lines.append(f"{code}: {count}")
 
+    # Quality metrics
+    total_urls = counts.get("url", 0)
+    noise_count = data["noise_count"]
+    findings_total = data["findings_total"]
+    verified_count = data["verified_count"]
+    verified_ratio = data["verified_ratio"]
+    noise_ratio = (noise_count / total_urls) if total_urls else 0.0
+
+    lines.append("")
+    lines.append("== Quality ==")
+    lines.append(f"Noise ratio     : {noise_ratio:.2%} (noise {noise_count} / urls {total_urls})")
+    lines.append(f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})")
+
     top_urls = data["top_urls"]
     if top_urls:
         lines.append("")
@@ -327,3 +340,57 @@ def generate_summary(context) -> None:
 
     content = "\n".join(lines) + "\n"
     record.paths.results_txt.write_text(content, encoding="utf-8")
+
+    # Update metadata stats
+    counts = data["counts"]
+    total_urls = counts.get("url", 0)
+    noise_count = data["noise_count"]
+    findings_total = data["findings_total"]
+    verified_count = data["verified_count"]
+    
+    dupe_seen = 0
+    dupe_count = 0
+    if hasattr(context, "results") and getattr(context.results, "stats", None) is not None:
+        dupe_seen = int(context.results.stats.get("records_seen", 0))
+        dupe_count = int(context.results.stats.get("records_duplicate", 0))
+    
+    noise_ratio = (noise_count / total_urls) if total_urls else 0.0
+    verified_ratio = data["verified_ratio"]
+    duplicate_ratio = (dupe_count / dupe_seen) if dupe_seen else 0.0
+
+    metadata.stats.update({f"type_{key}": value for key, value in counts.items()})
+    metadata.stats["noise_suppressed"] = noise_count
+    metadata.stats["quality"] = {
+        "noise_ratio": noise_ratio,
+        "verified_ratio": verified_ratio,
+        "duplicate_ratio": duplicate_ratio,
+        "noise": noise_count,
+        "urls": total_urls,
+        "verified_findings": verified_count,
+        "findings": findings_total,
+        "duplicates": dupe_count,
+        "records_seen": dupe_seen,
+    }
+    context.manager.update_metadata(record)
+
+
+class JobSummary:
+    def __init__(self, manager: Optional[JobManager] = None) -> None:
+        from recon_cli.jobs.manager import JobManager
+        self.manager = manager or JobManager()
+
+    def get_summary(self, job_id: str) -> Optional[Dict[str, Any]]:
+        record = self.manager.load_job(job_id)
+        if not record:
+            return None
+        counts = Counter()
+        for entry in iter_jsonl(record.paths.results_jsonl):
+            etype = entry.get("type", "unknown")
+            counts[etype] += 1
+        return {
+            "job_id": job_id,
+            "target": record.spec.target,
+            "profile": record.spec.profile,
+            "status": record.metadata.status,
+            "counts": dict(counts),
+        }

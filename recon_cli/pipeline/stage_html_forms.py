@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class HTMLFormMiningStage(Stage):
@@ -185,7 +184,7 @@ class HTMLFormMiningStage(Stage):
 
     def _select_urls(self, context: PipelineContext, max_urls: int) -> List[str]:
         candidates: Dict[str, int] = {}
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             url = entry.get("url")

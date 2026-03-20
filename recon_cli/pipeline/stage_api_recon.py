@@ -8,7 +8,6 @@ from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 try:
     from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
@@ -370,7 +369,7 @@ class APIReconStage(Stage):
 
     def _collect_hosts(self, context: PipelineContext) -> Dict[str, Dict[str, object]]:
         host_info: Dict[str, Dict[str, object]] = {}
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             url_value = entry.get("url")
@@ -414,7 +413,7 @@ class APIReconStage(Stage):
             for value in js_endpoints:
                 if isinstance(value, str):
                     candidate_urls.append(value)
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             source = str(entry.get("source") or "").lower()

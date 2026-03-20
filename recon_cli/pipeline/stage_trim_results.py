@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.pipeline.progress import ProgressLogger
-from recon_cli.utils.jsonl import iter_jsonl
 
 
 class TrimResultsStage(Stage):
@@ -53,7 +52,7 @@ class TrimResultsStage(Stage):
             "findings_dropped_limit": 0,
         }
 
-        for entry in iter_jsonl(results_path):
+        for entry in context.iter_results():
             if not isinstance(entry, dict):
                 continue
             order += 1

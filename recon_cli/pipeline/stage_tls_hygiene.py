@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class TLSHygieneStage(Stage):
@@ -18,7 +17,7 @@ class TLSHygieneStage(Stage):
         return bool(getattr(context.runtime_config, "enable_tls_hygiene", False))
 
     def execute(self, context: PipelineContext) -> None:
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         if not items:
             return
 

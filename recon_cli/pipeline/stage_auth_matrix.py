@@ -13,7 +13,6 @@ except ImportError:  # pragma: no cover
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 SENSITIVE_KEYS = {
     "email",
@@ -146,7 +145,7 @@ class AuthMatrixStage(Stage):
             try:
                 requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
             except Exception:
-                pass
+                context.logger.debug("Failed to disable urllib3 warnings", exc_info=True)
 
         timeout = int(getattr(runtime, "idor_timeout", 10))
         stats = context.record.metadata.stats.setdefault(
@@ -205,7 +204,7 @@ class AuthMatrixStage(Stage):
         context.manager.update_metadata(context.record)
 
     def _collect_urls(self, context: PipelineContext) -> List[str]:
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         max_targets = max(
             1,
             int(

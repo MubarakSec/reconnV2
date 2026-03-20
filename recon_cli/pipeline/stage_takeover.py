@@ -23,7 +23,7 @@ class TakeoverStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_takeover", False))
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         results_path = context.record.paths.results_jsonl
         if not results_path.exists():
             return
@@ -67,6 +67,20 @@ class TakeoverStage(Stage):
         if not hosts:
             return
 
+        # Wildcard DNS detection
+        root_domains = {".".join(h.split(".")[-2:]) for h in hosts[:max_hosts]}
+        wildcard_domains = {
+            d for d in root_domains if self._has_wildcard_dns(d, dns_timeout)
+        }
+        if wildcard_domains:
+            context.logger.warning("Wildcard DNS detected for: %s", wildcard_domains)
+            hosts = [
+                h for h in hosts if ".".join(h.split(".")[-2:]) not in wildcard_domains
+            ]
+
+        if not hosts:
+            return
+
         checked = 0
         findings = 0
         skipped_no_cname = 0
@@ -97,23 +111,29 @@ class TakeoverStage(Stage):
             providers = self._match_providers(cname_chain)
             if providers:
                 cname_matches += 1
-            finding = detector.check_host(
-                host, providers=providers if providers else None
-            )
+            
+            try:
+                finding = await detector.check_host(
+                    host, providers=providers if providers else None
+                )
+            except Exception as e:
+                context.logger.debug("Takeover check failed for %s: %s", host, e)
+                continue
+
             if not finding:
                 continue
             claimability = self._assess_claimability(
                 finding.provider, providers, dns_state
             )
-            if claimability["level"] == "low":
+            if claimability["level"] == "low" and finding.finding_type == "subdomain_takeover":
                 suppressed_low_confidence += 1
                 continue
             payload = {
                 "type": "finding",
-                "finding_type": "subdomain_takeover",
+                "finding_type": finding.finding_type,
                 "source": "takeover-check",
                 "hostname": finding.hostname,
-                "description": f"Potential subdomain takeover detected ({claimability['level']} claimability)",
+                "description": f"Potential {finding.finding_type.replace('_', ' ')} detected ({claimability['level']} claimability)" if finding.finding_type == "subdomain_takeover" else "Parked domain / Domain for sale detected",
                 "details": {
                     "provider": finding.provider,
                     "evidence": finding.evidence,
@@ -134,6 +154,12 @@ class TakeoverStage(Stage):
                 "severity": str(claimability["severity"]),
                 "confidence_label": str(claimability["confidence"]),
             }
+            if finding.finding_type == "parking_page":
+                payload["tags"].append("parking")
+                payload["score"] = 30
+                payload["priority"] = "low"
+                payload["severity"] = "low"
+
             if claimability["level"] == "high":
                 payload["tags"].append("confirmed")
             if context.results.append(payload):
@@ -149,6 +175,10 @@ class TakeoverStage(Stage):
         if cname_matches:
             stats["cname_matches"] = cname_matches
         context.manager.update_metadata(context.record)
+
+    def execute(self, context: PipelineContext) -> None:
+        import asyncio
+        asyncio.run(self.run_async(context))
 
     def _resolve_cname_chain(self, hostname: str, timeout: int) -> List[str]:
         if dns is None:
@@ -243,7 +273,19 @@ class TakeoverStage(Stage):
         }
 
     @staticmethod
-    def _match_providers(cname_chain: List[str]) -> Set[str]:
+    def _cname_matches_pattern(cname: str, pattern: str) -> bool:
+        """Match cname as a subdomain/exact match of pattern, not arbitrary substring."""
+        cname = cname.lower().rstrip(".")
+        pattern = pattern.lower().rstrip(".")
+        return cname == pattern or cname.endswith("." + pattern)
+
+    def _has_wildcard_dns(self, domain: str, timeout: int) -> bool:
+        """Detect wildcard DNS by resolving a random nonexistent subdomain."""
+        import uuid
+        test_host = f"{uuid.uuid4().hex[:8]}.{domain}"
+        return self._target_has_address(test_host, timeout)
+
+    def _match_providers(self, cname_chain: List[str]) -> Set[str]:
         providers: Set[str] = set()
         if not cname_chain:
             return providers
@@ -251,7 +293,7 @@ class TakeoverStage(Stage):
             patterns = fp.get("cname") or []
             for pattern in patterns:
                 for cname in cname_chain:
-                    if pattern in cname:
+                    if self._cname_matches_pattern(cname, pattern):
                         providers.add(fp.get("provider", ""))
                         break
         providers.discard("")

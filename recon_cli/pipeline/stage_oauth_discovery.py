@@ -6,7 +6,6 @@ from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class OAuthDiscoveryStage(Stage):
@@ -205,7 +204,7 @@ class OAuthDiscoveryStage(Stage):
     @staticmethod
     def _collect_hosts(context: PipelineContext) -> List[str]:
         hosts: List[str] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             etype = entry.get("type")
             if etype == "hostname":
                 host = entry.get("hostname")

@@ -8,7 +8,6 @@ from urllib.parse import urlencode, urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class ApiSchemaProbeStage(Stage):
@@ -368,7 +367,7 @@ class ApiSchemaProbeStage(Stage):
     @staticmethod
     def _collect_specs(context: PipelineContext) -> List[str]:
         specs: List[str] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "api_spec":
                 continue
             url = entry.get("url")

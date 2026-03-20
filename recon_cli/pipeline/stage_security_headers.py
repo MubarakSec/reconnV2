@@ -5,7 +5,6 @@ from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class SecurityHeadersStage(Stage):
@@ -29,7 +28,7 @@ class SecurityHeadersStage(Stage):
             context.logger.warning("security headers check requires requests; skipping")
             return
 
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         if not items:
             return
 

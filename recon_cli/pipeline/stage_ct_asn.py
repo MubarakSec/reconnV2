@@ -7,22 +7,24 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import validation
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class CTPivotStage(Stage):
     name = "ct_asn_pivot"
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return bool(getattr(context.runtime_config, "enable_ct_pivot", False)) or bool(
-            getattr(context.runtime_config, "enable_asn_pivot", False)
+        return (
+            bool(getattr(context.runtime_config, "enable_ct_pivot", False))
+            or bool(getattr(context.runtime_config, "enable_asn_pivot", False))
+            or bool(getattr(context.runtime_config, "enable_reverse_whois", False))
         )
 
     def execute(self, context: PipelineContext) -> None:
         ct_enabled = bool(getattr(context.runtime_config, "enable_ct_pivot", False))
         asn_enabled = bool(getattr(context.runtime_config, "enable_asn_pivot", False))
+        whois_enabled = bool(getattr(context.runtime_config, "enable_reverse_whois", False))
 
-        if not ct_enabled and not asn_enabled:
+        if not ct_enabled and not asn_enabled and not whois_enabled:
             return
 
         try:
@@ -35,6 +37,75 @@ class CTPivotStage(Stage):
             self._run_ct_pivot(context, requests)
         if asn_enabled:
             self._run_asn_pivot(context, requests)
+        if whois_enabled:
+            self._run_reverse_whois(context, requests)
+        
+        # Always run bulk ASN for any new IPs found
+        self._run_bulk_asn_lookup(context)
+
+    def _run_reverse_whois(self, context: PipelineContext, requests_mod) -> None:
+        # Simple implementation using a public API or placeholder for premium ones
+        # For now, we'll try to use a common pattern if API keys are present
+        api_key = getattr(context.runtime_config, "viewdns_api_key", None)
+        if not api_key:
+            return
+        
+        roots = self._root_domains(context)
+        for root in roots:
+            url = f"https://viewdns.info/reversewhois/?q={root}&apikey={api_key}&output=json"
+            try:
+                resp = requests_mod.get(url, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Parse and add to results...
+            except Exception:
+                pass
+
+    def _run_bulk_asn_lookup(self, context: PipelineContext) -> None:
+        """Bulk IP-to-ASN lookup via whois.cymru.com"""
+        ips = set()
+        for entry in context.iter_results():
+            ip = entry.get("ip")
+            if ip and validation.is_ip(ip):
+                ips.add(ip)
+        
+        if not ips:
+            return
+            
+        context.logger.info("Performing bulk ASN lookup for %d IPs", len(ips))
+        # This usually uses a socket-based WHOIS query
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(10)
+                s.connect(("whois.cymru.com", 43))
+                s.sendall(b"begin\nverbose\n" + "\n".join(ips).encode() + b"\nend\n")
+                
+                response = b""
+                while True:
+                    data = s.recv(4096)
+                    if not data: break
+                    response += data
+                
+                # Parse response: AS | IP | BGP Prefix | CC | Registry | Allocated | AS Name
+                for line in response.decode().splitlines():
+                    if "|" not in line or line.startswith("AS"): continue
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) >= 3:
+                        asn = parts[0]
+                        ip = parts[1]
+                        prefix = parts[2]
+                        
+                        context.results.append({
+                            "type": "asset_enrichment",
+                            "source": "team-cymru",
+                            "ip": ip,
+                            "asn": asn,
+                            "bgp_prefix": prefix,
+                            "tags": ["asn", f"asn:{asn}"]
+                        })
+        except Exception as e:
+            context.logger.debug("Bulk ASN lookup failed: %s", e)
 
     def _run_ct_pivot(self, context: PipelineContext, requests_mod) -> None:
         runtime = context.runtime_config
@@ -216,7 +287,7 @@ class CTPivotStage(Stage):
 
     def _root_domains(self, context: PipelineContext) -> List[str]:
         roots: Set[str] = set()
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             etype = entry.get("type")
             if etype == "hostname":
                 host = entry.get("hostname")

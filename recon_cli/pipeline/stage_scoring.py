@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import enrich as enrich_utils
-from recon_cli.utils.jsonl import read_jsonl
 from recon_cli import rules as rules_engine
 
 
@@ -53,10 +52,7 @@ class ScoringStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         self.rules = getattr(self, "rules", rules_engine.load_rules())
-        results_path = context.record.paths.results_jsonl
-        if not results_path.exists():
-            return
-        items = read_jsonl(results_path)
+        items = context.get_results()
         if not items:
             return
         if hasattr(context, "signal_index"):
@@ -74,6 +70,7 @@ class ScoringStage(Stage):
                     enrichment_artifact.read_text(encoding="utf-8")
                 )
             except Exception:
+                context.logger.debug("Failed to load IP enrichment artifact", exc_info=True)
                 enrichment_map = {}
 
         soft_404_hosts = set(
@@ -387,7 +384,7 @@ class ScoringStage(Stage):
         if hasattr(context, "results") and hasattr(context.results, "replace_all"):
             context.results.replace_all(updated)
         else:
-            results_path.write_text(
+            context.record.paths.results_jsonl.write_text(
                 "\n".join(
                     json.dumps(item, separators=(",", ":"), ensure_ascii=True)
                     for item in updated

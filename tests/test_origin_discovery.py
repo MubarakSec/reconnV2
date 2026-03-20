@@ -50,6 +50,11 @@ def test_origin_discovery_stage_with_mock_hosts(tmp_path: Path, monkeypatch):
                 return [RData(txt='"v=spf1 ip4:192.168.1.1"')]
             elif rdtype == 'MX':
                 return [RData(ex="mail.example.com.")]
+            elif rdtype == 'A':
+                if qname == "direct.example.com":
+                    return ["10.0.0.2"]
+                elif qname == "mail.example.com":
+                    return ["10.0.0.1"]
             raise Exception("not found")
 
     monkeypatch.setattr(dns.resolver, "Resolver", DummyResolver)
@@ -63,6 +68,21 @@ def test_origin_discovery_stage_with_mock_hosts(tmp_path: Path, monkeypatch):
         raise socket.error("not found")
     
     monkeypatch.setattr(socket, "gethostbyname_ex", fake_gethostbyname_ex)
+    
+    # Mock httpx.AsyncClient for verification
+    class MockResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+    
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, url, headers=None):
+            return MockResponse(200)
+            
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
     
     stage.execute(context)
     

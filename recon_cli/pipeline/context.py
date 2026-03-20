@@ -177,6 +177,26 @@ class PipelineContext:
     def get_data(self, key: str, default: object = None) -> object:
         return self._data_store.get(key, default)
 
+    def get_results(self) -> List[Dict[str, Any]]:
+        """Read and cache the full results file for the current job."""
+        cached = self.get_data("_results_cache")
+        if cached is not None and isinstance(cached, list):
+            return cached
+        results = self.results.read_all()
+        self.set_data("_results_cache", results)
+        return results
+
+    def iter_results(self) -> Iterable[Dict[str, Any]]:
+        """Iterate over results, using cache if available."""
+        cached = self.get_data("_results_cache")
+        if cached is not None and isinstance(cached, list):
+            return cached
+        return self.results.iter_results()
+
+    def clear_results_cache(self) -> None:
+        """Clear the results cache (call after significant modifications)."""
+        self._data_store.pop("_results_cache", None)
+
     def record_host_error(self, host: str, code: int) -> None:
         if not host:
             return

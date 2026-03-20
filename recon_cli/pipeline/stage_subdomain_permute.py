@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import validation
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class SubdomainPermuteStage(Stage):
@@ -95,6 +94,7 @@ class SubdomainPermuteStage(Stage):
             try:
                 normalized = validation.normalize_hostname(candidate)
             except ValueError:
+                context.logger.debug("Failed to normalize candidate: %s", candidate)
                 continue
             signal_id = context.emit_signal(
                 "subdomain_permuted",
@@ -123,7 +123,7 @@ class SubdomainPermuteStage(Stage):
 
     def _collect_seed_hosts(self, context: PipelineContext) -> List[str]:
         seeds: Set[str] = set()
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             etype = entry.get("type")
             if etype == "hostname":
                 host = entry.get("hostname")

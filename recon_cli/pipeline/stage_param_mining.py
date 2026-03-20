@@ -7,7 +7,6 @@ from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class ParamMiningStage(Stage):
@@ -22,7 +21,7 @@ class ParamMiningStage(Stage):
         candidates: List[str] = []
         auth_inputs: Dict[str, List[str]] = defaultdict(list)
         value_examples: Dict[str, List[str]] = defaultdict(list)
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             etype = entry.get("type")
             if etype == "url":
                 url = entry.get("url")

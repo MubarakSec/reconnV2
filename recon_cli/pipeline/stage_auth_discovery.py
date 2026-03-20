@@ -6,7 +6,6 @@ from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class AuthDiscoveryStage(Stage):
@@ -64,7 +63,7 @@ class AuthDiscoveryStage(Stage):
                     self._current = None
 
         candidates: List[Dict[str, object]] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             status = entry.get("status_code")

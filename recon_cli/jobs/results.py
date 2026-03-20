@@ -491,6 +491,19 @@ class ResultsTracker:
                 json.dump(payload, handle, separators=(",", ":"), ensure_ascii=True)
                 handle.write("\n")
 
+    def iter_results(self) -> Iterable[Dict[str, Any]]:
+        """Iterate over all results currently tracked (disk + buffer)."""
+        with self._lock:
+            # We must use iter_jsonl for the full set because the buffer might be limited (LRU)
+            # However, if we want to avoid disk IO, we could increase LRU size or cache everything.
+            # For now, let's keep it simple and read from disk to ensure completeness,
+            # but provide a centralized place for it.
+            return iter_jsonl(self.path)
+
+    def read_all(self) -> List[Dict[str, Any]]:
+        """Read all results into a list."""
+        return list(self.iter_results())
+
 
 class JobResults:
     def __init__(self, manager: Optional[JobManager] = None) -> None:

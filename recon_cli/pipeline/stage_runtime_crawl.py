@@ -15,7 +15,6 @@ from recon_cli.crawl.runtime import (
 )
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class RuntimeCrawlStage(Stage):
@@ -23,10 +22,7 @@ class RuntimeCrawlStage(Stage):
     optional = True
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        if not context.runtime_config.enable_runtime_crawl:
-            return False
-        max_urls = getattr(context.runtime_config, "runtime_crawl_max_urls", 0)
-        return max_urls > 0
+        return bool(getattr(context.runtime_config, "enable_runtime_crawl", False))
 
     @staticmethod
     def _dom_relpath(
@@ -43,7 +39,7 @@ class RuntimeCrawlStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         logger = context.logger
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         if not items:
             logger.info("No results recorded; skipping runtime crawl stage")
             stats = context.record.metadata.stats.setdefault("runtime_crawl", {})

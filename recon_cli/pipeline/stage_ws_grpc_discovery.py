@@ -7,7 +7,6 @@ from urllib.parse import urlparse, urlunparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class WsGrpcDiscoveryStage(Stage):
@@ -150,7 +149,7 @@ class WsGrpcDiscoveryStage(Stage):
                 "ws://" in url or "wss://" in url or self._has_ws_hint(url)
             ):
                 urls.append(self._normalize_ws_url(url))
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             url_value = entry.get("url")
@@ -162,7 +161,7 @@ class WsGrpcDiscoveryStage(Stage):
 
     def _detect_grpc_from_urls(self, context: PipelineContext) -> Set[str]:
         hosts: Set[str] = set()
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
             content_type = str(
@@ -188,7 +187,7 @@ class WsGrpcDiscoveryStage(Stage):
 
     def _detect_grpc_from_services(self, context: PipelineContext) -> Set[str]:
         hosts: Set[str] = set()
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") != "service":
                 continue
             port = entry.get("port")

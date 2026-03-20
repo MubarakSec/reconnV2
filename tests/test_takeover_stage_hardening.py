@@ -67,7 +67,7 @@ def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(m
     monkeypatch.setattr(stage, "_resolve_cname_chain", lambda _host, _timeout: ["orphan.s3.amazonaws.com"])
     monkeypatch.setattr(stage, "_target_has_address", lambda _host, _timeout: False)
 
-    def fake_check(_self, hostname: str, providers=None):
+    async def fake_check(_self, hostname: str, providers=None):
         assert providers == {"aws_s3"}
         return TakeoverFinding(
             hostname=hostname,
@@ -78,6 +78,7 @@ def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(m
         )
 
     monkeypatch.setattr(stage_mod.TakeoverDetector, "check_host", fake_check)
+    monkeypatch.setattr(stage, "_has_wildcard_dns", lambda *_a, **_k: False)
 
     stage.run(context)
 
@@ -118,7 +119,7 @@ def test_takeover_stage_suppresses_low_confidence_fingerprints(monkeypatch, tmp_
     monkeypatch.setattr(stage, "_resolve_cname_chain", lambda _host, _timeout: [])
     monkeypatch.setattr(stage, "_target_has_address", lambda _host, _timeout: True)
 
-    def fake_check(_self, hostname: str, providers=None):
+    async def fake_check(_self, hostname: str, providers=None):
         assert not providers
         return TakeoverFinding(
             hostname=hostname,
@@ -129,6 +130,7 @@ def test_takeover_stage_suppresses_low_confidence_fingerprints(monkeypatch, tmp_
         )
 
     monkeypatch.setattr(stage_mod.TakeoverDetector, "check_host", fake_check)
+    monkeypatch.setattr(stage, "_has_wildcard_dns", lambda *_a, **_k: False)
 
     stage.run(context)
 

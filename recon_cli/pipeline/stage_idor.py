@@ -13,7 +13,6 @@ except ImportError:  # pragma: no cover
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 UUID_RE = re.compile(
@@ -118,7 +117,7 @@ class IDORStage(Stage):
         return True
 
     def execute(self, context: PipelineContext) -> None:
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         candidates = self._collect_candidates(context, items)
         if not candidates:
             context.logger.info("IDOR stage: no suitable endpoints found")

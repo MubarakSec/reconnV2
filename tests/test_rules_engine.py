@@ -42,7 +42,17 @@ def test_scoring_stage_applies_rules(monkeypatch, tmp_path: Path):
     root.mkdir()
     record = DummyRecord(root)
     record.paths.results_jsonl.write_text('{"type":"url","url":"https://ex.com/admin","hostname":"ex.com","tags":[]}\n', encoding="utf-8")
-    context = type("Ctx", (), {"record": record, "manager": DummyManager(), "logger": type("L", (), {"info": lambda *a, **k: None})(), "runtime_config": type("RC", (), {})()})()
+    import json
+    def mock_get_results(*args, **kwargs):
+        return [json.loads(line) for line in record.paths.results_jsonl.read_text().splitlines() if line]
+    context = type("Ctx", (), {
+        "record": record, 
+        "manager": DummyManager(), 
+        "logger": type("L", (), {"info": lambda *a, **k: None})(), 
+        "runtime_config": type("RC", (), {})(),
+        "get_results": mock_get_results,
+        "results": type("R", (), {"append": lambda *a: True})()
+    })()
     stage.execute(context)
     entries = (root / "results.jsonl").read_text(encoding="utf-8")
     assert "custom:admin" in entries

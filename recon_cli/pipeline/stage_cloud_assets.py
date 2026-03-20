@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 @dataclass
@@ -198,6 +197,7 @@ class CloudAssetDiscoveryStage(Stage):
                     enrichment_artifact.read_text(encoding="utf-8")
                 )
             except Exception:
+                context.logger.warning("Failed to load enrichment map; continuing with empty map")
                 enrichment_map = {}
             for entries in enrichment_map.values():
                 if not isinstance(entries, list):
@@ -206,7 +206,7 @@ class CloudAssetDiscoveryStage(Stage):
                     org = entry.get("org")
                     if isinstance(org, str):
                         org_tokens.update(self._extract_tokens(org))
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             etype = entry.get("type")
             if etype == "hostname":
                 host = entry.get("hostname")

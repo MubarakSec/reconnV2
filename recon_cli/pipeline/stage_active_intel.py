@@ -6,7 +6,6 @@ from typing import Dict, List
 from recon_cli.active import modules as active_modules
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 
 class ActiveIntelligenceStage(Stage):
@@ -38,7 +37,7 @@ class ActiveIntelligenceStage(Stage):
             context.logger.info("No valid active modules requested")
             return
 
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         url_entries = [entry for entry in items if entry.get("type") == "url"]
         host_scores: Dict[str, int] = {}
         for entry in url_entries:

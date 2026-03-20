@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.tools.executor import CommandExecutor
-from recon_cli.utils.jsonl import read_jsonl
 
 try:
     from recon_cli.scanners import integrations as scanner_integrations
@@ -48,7 +47,7 @@ class ScannerStage(Stage):
             context.logger.info("No scanners to execute after availability checks")
             return
 
-        items = read_jsonl(context.record.paths.results_jsonl)
+        items = context.get_results()
         url_entries = []
         for entry in items:
             if entry.get("type") != "url":
