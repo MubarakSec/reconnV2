@@ -118,13 +118,17 @@ class TelegramBot:
         await self.send_message(chat_id, text)
 
     async def _cmd_list(self, chat_id: str) -> None:
-        jobs = self.manager.list_jobs(limit=5)
-        if not jobs:
+        job_ids = self.manager.list_jobs()
+        if not job_ids:
             await self.send_message(chat_id, "No jobs found.")
             return
 
-        text = "*📝 Recent Jobs*\n\n"
-        for job in jobs:
+        text = "*📝 Recent Jobs (Last 5)*\n\n"
+        # Take last 5 and load records
+        for jid in reversed(job_ids[-5:]):
+            job = self.manager.load_job(jid)
+            if not job:
+                continue
             status_emoji = (
                 "✅"
                 if job.metadata.status == "finished"
@@ -146,12 +150,7 @@ class TelegramBot:
         profile = args[1] if len(args) > 1 else "passive"
 
         try:
-            # Create a basic spec
-            spec = JobSpec(
-                target=target,
-                profile=profile,
-            )
-            record = self.manager.create_job(spec)
+            record = self.manager.create_job(target=target, profile=profile, initiator="telegram")
             await self.send_message(
                 chat_id, f"✅ Scan queued!\nJob ID: `{record.metadata.job_id}`"
             )
