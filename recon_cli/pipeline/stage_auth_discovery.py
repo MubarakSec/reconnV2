@@ -155,7 +155,9 @@ class AuthDiscoveryStage(Stage):
                 inputs = form.get("inputs") or []
                 tags = set(candidate.get("tags", []))  # type: ignore[call-overload]
                 input_names = [
-                    item.get("name") for item in inputs if isinstance(item, dict)  # type: ignore[attr-defined]
+                    item.get("name")
+                    for item in inputs  # type: ignore[attr-defined]
+                    if isinstance(item, dict)  # type: ignore[attr-defined]
                 ]
                 lower_action = str(action_url).lower()
                 if any(

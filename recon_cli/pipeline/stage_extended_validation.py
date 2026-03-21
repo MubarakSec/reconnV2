@@ -229,7 +229,8 @@ class ExtendedValidationStage(Stage):
                     str(entry.get("method") or "get"),
                 )
                 baseline_status, baseline_body = baseline_cache.get(
-                    baseline_key, (0, "")  # type: ignore[arg-type]
+                    baseline_key,  # type: ignore[arg-type]
+                    (0, ""),  # type: ignore[arg-type]
                 )
                 if baseline_key not in baseline_cache:
                     baseline_status, baseline_body = self._fetch_baseline(
@@ -687,13 +688,19 @@ class ExtendedValidationStage(Stage):
             reverse=True,
         )
         ssrf = sorted(
-            ssrf_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True  # type: ignore[call-overload]
+            ssrf_map.values(),
+            key=lambda item: int(item.get("score", 0)),  # type: ignore[call-overload]
+            reverse=True,  # type: ignore[call-overload]
         )
         lfi = sorted(
-            lfi_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True  # type: ignore[call-overload]
+            lfi_map.values(),
+            key=lambda item: int(item.get("score", 0)),  # type: ignore[call-overload]
+            reverse=True,  # type: ignore[call-overload]
         )
         xxe = sorted(
-            xxe_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True  # type: ignore[call-overload]
+            xxe_map.values(),
+            key=lambda item: int(item.get("score", 0)),  # type: ignore[call-overload]
+            reverse=True,  # type: ignore[call-overload]
         )
         return {"redirect": redirect, "ssrf": ssrf, "lfi": lfi, "xxe": xxe}
 

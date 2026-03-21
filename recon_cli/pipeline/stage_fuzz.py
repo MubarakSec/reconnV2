@@ -255,7 +255,8 @@ class FuzzStage(Stage):
                     metadata[host]["base_url"] = url_value
                     metadata[host]["base_score"] = score
                 self._add_path_words(
-                    metadata[host]["path_words"], urlparse(url_value).path  # type: ignore[arg-type]
+                    metadata[host]["path_words"],  # type: ignore[arg-type]
+                    urlparse(url_value).path,  # type: ignore[arg-type]
                 )
             elif etype == "form":
                 action = entry.get("action") or entry.get("url")
@@ -265,7 +266,8 @@ class FuzzStage(Stage):
                 if not host:
                     continue
                 self._add_path_words(
-                    metadata[host]["path_words"], urlparse(action).path  # type: ignore[arg-type]
+                    metadata[host]["path_words"],  # type: ignore[arg-type]
+                    urlparse(action).path,  # type: ignore[arg-type]
                 )
             elif etype == "parameter":
                 name = entry.get("name")

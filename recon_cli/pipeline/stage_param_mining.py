@@ -159,7 +159,8 @@ class ParamMiningStage(Stage):
         stats["urls"] = len(candidates)
         stats["mutation_params"] = len(mutation_catalog)
         stats["mutation_values"] = sum(
-            len(item.get("values", [])) for item in mutation_catalog.values()  # type: ignore[misc, arg-type]
+            len(item.get("values", []))  # type: ignore[misc, arg-type]
+            for item in mutation_catalog.values()  # type: ignore[misc, arg-type]
         )
         context.manager.update_metadata(context.record)
 

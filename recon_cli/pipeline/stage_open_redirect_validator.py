@@ -122,7 +122,9 @@ class OpenRedirectValidatorStage(Stage):
                     limiter.on_response(test_url, status_code)
 
                 if status_code in self.REDIRECT_STATUS and self._is_external_redirect(
-                    url, location, payload  # type: ignore[arg-type]
+                    url,  # type: ignore[arg-type]
+                    location,
+                    payload,  # type: ignore[arg-type]
                 ):
                     signal_id = context.emit_signal(
                         "open_redirect_confirmed",
