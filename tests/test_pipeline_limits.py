@@ -44,6 +44,9 @@ def test_passive_stage_seeds_input(monkeypatch, tmp_path):
         "recon_cli.tools.executor.CommandExecutor.available",
         staticmethod(lambda *_: False),
     )
+    # Mock wayback to avoid real network requests
+    monkeypatch.setattr(PassiveEnumerationStage, "_run_wayback", lambda *_: None)
+    
     stage = PassiveEnumerationStage()
     stage.run(context)
     entries = read_jsonl(record.paths.results_jsonl)
