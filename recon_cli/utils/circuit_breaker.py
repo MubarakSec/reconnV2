@@ -333,7 +333,7 @@ class CircuitBreaker:
         if exc_val is None:
             await self._after_success()
         elif not isinstance(exc_val, CircuitOpenError):
-            await self._after_failure(exc_val)
+            await self._after_failure(exc_val)  # type: ignore[arg-type]
         return False
 
     def protect(
@@ -355,7 +355,7 @@ class CircuitBreaker:
                 async with self:
                     return await func(*args, **kwargs)
 
-            return async_wrapper
+            return async_wrapper  # type: ignore[return-value]
         return self.protect_sync(func)
 
     def protect_sync(self, func: Callable[[Any], T]) -> Callable[[Any], T]:

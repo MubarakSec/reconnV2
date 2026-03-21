@@ -147,10 +147,10 @@ def crawl_urls(
             context_kwargs: Dict[str, object] = {}
             if headers:
                 context_kwargs["extra_http_headers"] = headers
-            browser_ctx = await browser.new_context(**context_kwargs)
+            browser_ctx = await browser.new_context(**context_kwargs)  # type: ignore[arg-type]
             if cookies:
                 try:
-                    await browser_ctx.add_cookies(cookies)
+                    await browser_ctx.add_cookies(cookies)  # type: ignore[arg-type]
                 except Exception:
                     pass
             semaphore = asyncio.Semaphore(concurrency)

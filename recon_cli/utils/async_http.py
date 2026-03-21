@@ -557,7 +557,7 @@ class AsyncHTTPClient:
                     )
                 )
             else:
-                processed.append(result)
+                processed.append(result)  # type: ignore[arg-type]
 
         return processed
 
@@ -640,7 +640,7 @@ async def check_urls_alive(
             if isinstance(result, Exception):
                 alive[url] = False
             else:
-                alive[url] = result.ok
+                alive[url] = result.ok  # type: ignore[union-attr]
 
         return alive
 

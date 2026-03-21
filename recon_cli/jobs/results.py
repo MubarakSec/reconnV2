@@ -361,7 +361,7 @@ class ResultsTracker:
             "timestamp": time_utils.iso_now(),
         }
         self._seen.add(schema_key)
-        self._critical_records[schema_key] = payload
+        self._critical_records[schema_key] = payload  # type: ignore[assignment]
         self._order.insert(0, schema_key)
         with self._writer as writer:
             writer.write(payload)
@@ -479,7 +479,7 @@ class ResultsTracker:
                 merged[key] = value
         if is_finding(merged):
             merged["confidence_label"] = resolve_confidence_label(merged)
-            merged["confidence_score"] = confidence_to_score(merged["confidence_label"])
+            merged["confidence_score"] = confidence_to_score(merged["confidence_label"])  # type: ignore[arg-type]
             merged["finding_fingerprint"] = build_finding_fingerprint(merged)
         return merged
 

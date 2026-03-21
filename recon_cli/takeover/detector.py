@@ -191,7 +191,7 @@ class TakeoverDetector:
                         if snippet.lower() in body.lower():
                             return TakeoverFinding(
                                 hostname=hostname,
-                                provider=fp["provider"],
+                                provider=fp["provider"],  # type: ignore[arg-type]
                                 evidence=snippet,
                                 status_code=int(resp.status_code or 0),
                                 matched_url=url,

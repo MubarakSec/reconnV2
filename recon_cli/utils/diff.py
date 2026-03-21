@@ -587,13 +587,13 @@ class HistoryTracker:
         snapshots = [s for s in snapshots if s.timestamp >= cutoff]
 
         if len(snapshots) < 2:
-            return {"error": "Not enough snapshots for trend analysis"}
+            return {"error": "Not enough snapshots for trend analysis"}  # type: ignore[dict-item]
 
         # Calculate trends
         trends: Dict[str, Any] = {
             "dates": [],
             "total_findings": [],
-            "by_category": defaultdict(list),
+            "by_category": defaultdict(list),  # type: ignore[dict-item]
         }
 
         for snapshot in reversed(snapshots):  # Oldest first

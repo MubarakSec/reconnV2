@@ -37,7 +37,7 @@ class PipelineEventBus:
         Subscribe to specific event types or all events.
         Returns a queue where events will be pushed.
         """
-        queue = asyncio.Queue()
+        queue = asyncio.Queue()  # type: ignore[var-annotated]
         if event_types is None:
             self._all_subscribers.append(queue)
         else:

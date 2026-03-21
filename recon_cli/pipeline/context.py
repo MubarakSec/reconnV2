@@ -264,7 +264,7 @@ class PipelineContext:
             config.cooldown_on_429 = float(cooldown_429)
         if cooldown_error is not None:
             config.cooldown_on_error = float(cooldown_error)
-        limiter = RateLimiter(config, parent=self._global_limiter)
+        limiter = RateLimiter(config, parent=self._global_limiter)  # type: ignore[arg-type]
         self._rate_limiters[name] = limiter
         return limiter
 
@@ -348,7 +348,7 @@ class PipelineContext:
     def auth_headers(self, base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         if self._auth_manager:
             try:
-                return self._auth_manager.prepare_headers(base)
+                return self._auth_manager.prepare_headers(base)  # type: ignore[attr-defined]
             except Exception:
                 return base or {}
         return base or {}
@@ -356,7 +356,7 @@ class PipelineContext:
     def auth_session(self, url: Optional[str] = None):
         if self._auth_manager:
             try:
-                return self._auth_manager.get_session(url)
+                return self._auth_manager.get_session(url)  # type: ignore[attr-defined]
             except Exception:
                 return None
         return None
@@ -366,7 +366,7 @@ class PipelineContext:
     ) -> List[Dict[str, object]]:
         if self._auth_manager:
             try:
-                return self._auth_manager.export_cookies(default_domain)
+                return self._auth_manager.export_cookies(default_domain)  # type: ignore[attr-defined]
             except Exception:
                 return []
         return []
@@ -374,7 +374,7 @@ class PipelineContext:
     def auth_cookie_header(self) -> Optional[str]:
         if self._auth_manager:
             try:
-                return self._auth_manager.cookie_header()
+                return self._auth_manager.cookie_header()  # type: ignore[attr-defined]
             except Exception:
                 return None
         return None
@@ -588,7 +588,7 @@ class PipelineContext:
             fs.write_json(self._cache_path, self._delta_cache)
         if self._auth_manager:
             try:
-                self._auth_manager.close()
+                self._auth_manager.close()  # type: ignore[attr-defined]
             except Exception:
                 pass
         silence_logger(self.logger)

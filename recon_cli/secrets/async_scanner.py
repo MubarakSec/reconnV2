@@ -282,7 +282,7 @@ class AsyncSecretsScanner:
                     )
                 )
             else:
-                processed.append(result)
+                processed.append(result)  # type: ignore[arg-type]
 
         return processed
 

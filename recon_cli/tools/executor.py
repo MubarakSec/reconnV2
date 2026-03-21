@@ -758,7 +758,7 @@ class _CommandSession:
             running = self.running
         if not running or (master_fd is None and write_stream is None):
             raise CommandError(f"Session not running: {self.alias}")
-        write_fd = master_fd if master_fd is not None else write_stream.fileno()
+        write_fd = master_fd if master_fd is not None else write_stream.fileno()  # type: ignore[attr-defined]
         try:
             total_written = 0
             while total_written < len(encoded):
@@ -1101,7 +1101,7 @@ class CommandExecutor:
         trace_scope = CURRENT_TRACE_SCOPE.get()
         trace_span: Optional[PipelineTraceSpan] = None
 
-        async def _run() -> subprocess.CompletedProcess:
+        async def _run() -> subprocess.CompletedProcess:  # type: ignore[return]
             if trace_scope:
                 CURRENT_TRACE_SCOPE.set(trace_scope)
 

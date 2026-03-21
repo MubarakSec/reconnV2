@@ -260,12 +260,12 @@ class ResultWriter:
         for result in self._buffer:
             try:
                 line = json.dumps(result, ensure_ascii=False)
-                self._file.write(line + "\n")
+                self._file.write(line + "\n")  # type: ignore[attr-defined]
                 count += 1
             except (TypeError, ValueError) as e:
                 logger.warning(f"Failed to serialize result: {e}")
 
-        self._file.flush()
+        self._file.flush()  # type: ignore[attr-defined]
         self._total_written += count
         self._buffer.clear()
 

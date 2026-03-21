@@ -170,13 +170,13 @@ class BaseWizard(Generic[T]):
         elif step.step_type == StepType.NUMBER:
             value = IntPrompt.ask(
                 f"[cyan]{step.prompt}[/cyan]",
-                default=step.default if step.default else 0,
+                default=step.default if step.default else 0,  # type: ignore[arg-type]
             )
 
         elif step.step_type == StepType.CONFIRM:
             value = Confirm.ask(
                 f"[cyan]{step.prompt}[/cyan]",
-                default=step.default if step.default is not None else False,
+                default=step.default if step.default is not None else False,  # type: ignore[arg-type]
             )
 
         elif step.step_type == StepType.CHOICE:

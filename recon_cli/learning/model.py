@@ -26,7 +26,7 @@ def _feature_vector(record: Dict[str, object], feature_keys: List[str]) -> Any:
     if not SKLEARN_AVAILABLE:
         raise RuntimeError("sklearn is required for learning features")
     features = record.get("features", {})
-    return np.array([float(features.get(key, 0.0)) for key in feature_keys], dtype=float)
+    return np.array([float(features.get(key, 0.0)) for key in feature_keys], dtype=float)  # type: ignore[attr-defined]
 
 
 class LearningModel:

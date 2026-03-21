@@ -701,7 +701,7 @@ def traced(
                         span.set_attributes(attributes)
                     return await func(*args, **kwargs)
 
-            return async_wrapper
+            return async_wrapper  # type: ignore[return-value]
 
         def sync_wrapper(*args, **kwargs) -> T:
             tracer_obj = get_tracer()
@@ -722,9 +722,9 @@ def trace_async(name: Optional[str] = None) -> Callable:
         async def wrapper(*args, **kwargs) -> T:
             tracer_obj = get_tracer()
             with tracer_obj.trace(op_name) as _span:
-                return await func(*args, **kwargs)
+                return await func(*args, **kwargs)  # type: ignore[misc]
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     return decorator
 

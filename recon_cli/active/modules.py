@@ -70,7 +70,7 @@ def _top_urls(
     candidates = [
         entry
         for entry in url_entries
-        if int(entry.get("score", 0)) >= min_score and not entry.get("noise")
+        if int(entry.get("score", 0) or 0) >= min_score and not entry.get("noise")  # type: ignore[call-overload]
     ]
     candidates.sort(key=lambda entry: entry.get("score", 0), reverse=True)
     return candidates[:limit]
@@ -146,7 +146,7 @@ def run_backup_hunt(
                     "status_code": status,
                     "length": length_value,
                     "tags": ["active", "backup", "high-risk"],
-                    "score": max(85, int(entry.get("score", 0)) + 20),
+                    "score": max(85, int(entry.get("score", 0) or 0) + 20),  # type: ignore[call-overload]
                     "artifact": None,
                     "note": f"Discovered backup variant of {url}",
                     "preview": snippet,
@@ -257,7 +257,7 @@ def run_js_secret_harvest(
         entry
         for entry in url_entries
         if isinstance(entry.get("url"), str)
-        and entry.get("url").lower().endswith(".js")
+        and entry.get("url").lower().endswith(".js")  # type: ignore[attr-defined]
         and entry.get("status_code") in {200, 302}
     ]
     js_candidates = js_candidates[:40]
@@ -266,7 +266,7 @@ def run_js_secret_harvest(
     for entry in js_candidates:
         url = entry["url"]
         try:
-            resp = session.get(url, timeout=6)
+            resp = session.get(url, timeout=6)  # type: ignore[arg-type]
         except requests.RequestException:
             continue
         if resp.status_code != 200:
@@ -288,11 +288,11 @@ def run_js_secret_harvest(
                 {
                     "type": "finding",
                     "source": "active-js-secrets",
-                    "hostname": urlparse(url).hostname,
+                    "hostname": urlparse(url).hostname,  # type: ignore[call-overload]
                     "description": "Potential secret leaked in JavaScript",
                     "details": {"url": url, "hits": matches},
                     "tags": ["active", "secret", "high-risk"],
-                    "score": max(95, int(entry.get("score", 0)) + 30),
+                    "score": max(95, int(entry.get("score", 0) or 0) + 30),  # type: ignore[call-overload]
                     "priority": "critical",
                 }
             )
@@ -323,7 +323,7 @@ def execute_module(
     if handler is None:
         raise ValueError(f"Unknown active module: {name}")
     if handler in {run_backup_hunt, run_js_secret_harvest}:
-        return handler(url_entries, session)
+        return handler(url_entries, session)  # type: ignore[operator]
     if handler in {run_cors_checks, run_response_diff}:
-        return handler(hosts, session)
+        return handler(hosts, session)  # type: ignore[operator]
     raise ValueError(f"Unhandled active module: {name}")

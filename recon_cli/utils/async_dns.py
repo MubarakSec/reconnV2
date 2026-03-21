@@ -130,7 +130,7 @@ class DNSCache:
             "size": len(self._cache),
             "hits": self._hits,
             "misses": self._misses,
-            "hit_rate": self._hits / max(1, self._hits + self._misses),
+            "hit_rate": self._hits / max(1, self._hits + self._misses),  # type: ignore[dict-item]
         }
 
 
@@ -402,7 +402,7 @@ class AsyncDNSResolver:
                     )
                 )
             else:
-                processed.append(result)
+                processed.append(result)  # type: ignore[arg-type]
 
         return processed
 
@@ -477,7 +477,7 @@ class AsyncDNSResolver:
         """إحصائيات"""
         stats = self._stats.copy()
         if self._cache:
-            stats["cache"] = self._cache.stats
+            stats["cache"] = self._cache.stats  # type: ignore[assignment]
         return stats
 
 

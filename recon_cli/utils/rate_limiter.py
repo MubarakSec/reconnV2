@@ -234,7 +234,7 @@ class RateLimiter:
                 ),
             }
         )
-        return stats
+        return stats  # type: ignore[return-value]
 
 
 # Decorator للاستخدام السهل

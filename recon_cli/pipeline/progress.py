@@ -369,7 +369,7 @@ class PipelineProgress:
         # Update progress bar
         if name in self._task_ids and self._progress:
             self._progress.update(
-                self._task_ids[name],
+                self._task_ids[name],  # type: ignore[arg-type]
                 completed=stage.completed,
                 total=stage.total,
             )
@@ -384,7 +384,7 @@ class PipelineProgress:
 
             if name in self._task_ids and self._progress:
                 self._progress.update(
-                    self._task_ids[name],
+                    self._task_ids[name],  # type: ignore[arg-type]
                     completed=stage.total,
                 )
 
@@ -461,7 +461,7 @@ class DownloadProgress:
         """Update download progress."""
         if self._progress and self._task_id is not None:
             self._progress.update(
-                self._task_id,
+                self._task_id,  # type: ignore[arg-type]
                 completed=completed,
                 speed=speed,
             )
@@ -504,15 +504,15 @@ class MultiProgress:
         """Update task progress."""
         if self._progress and name in self._task_ids:
             if completed is not None:
-                self._progress.update(self._task_ids[name], completed=completed)
+                self._progress.update(self._task_ids[name], completed=completed)  # type: ignore[arg-type]
             if advance:
-                self._progress.advance(self._task_ids[name], advance)
+                self._progress.advance(self._task_ids[name], advance)  # type: ignore[arg-type]
 
     def complete(self, name: str) -> None:
         """Mark task as complete."""
         if self._progress and name in self._task_ids:
             task = self._progress.tasks[self._task_ids[name]]
-            self._progress.update(self._task_ids[name], completed=task.total)
+            self._progress.update(self._task_ids[name], completed=task.total)  # type: ignore[arg-type]
 
 
 @asynccontextmanager

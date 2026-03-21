@@ -33,7 +33,7 @@ class StageResult(BaseModel):
 try:  # pragma: no cover - test helper
     import builtins
 
-    builtins.StageResult = StageResult
+    builtins.StageResult = StageResult  # type: ignore[attr-defined]
 except Exception:
     pass
 

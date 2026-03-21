@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class CronField:
 
     def _parse(self, expr: str) -> set:
         """تحليل التعبير"""
-        values = set()
+        values: Set[int] = set()
 
         # Replace names
         for name, val in self.names.items():
@@ -79,7 +79,7 @@ class CronField:
                     start = int(range_part)
                     end = self.max_val
 
-                values.update(range(start, end + 1, step))
+                values.update(range(start, end + 1, step))  # type: ignore[call-overload]
             elif "-" in part:
                 # Range: 1-5
                 start, end = map(int, part.split("-"))

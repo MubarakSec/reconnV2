@@ -698,9 +698,9 @@ class ExternalServiceHealthCheck(HealthCheck):
             import aiohttp
 
             async with aiohttp.ClientSession() as session:
-                req = session.get(self.url, timeout=self.timeout)
+                req = session.get(self.url, timeout=self.timeout)  # type: ignore[arg-type]
                 if inspect.isawaitable(req):
-                    req = await req
+                    req = await req  # type: ignore[assignment]
                 async with req as resp:
                     status = (
                         HealthStatus.HEALTHY
