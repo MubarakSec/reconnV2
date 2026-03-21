@@ -40,6 +40,28 @@ PROFILES=()
 ACTIVE_MODULES=()
 SCANNERS=("nuclei" "wpscan")
 
+# ... (after NC declaration)
+ENV_FILE="$SCRIPT_DIR/.env"
+
+save_to_env() {
+    local key="$1"
+    local value="$2"
+    if [ ! -f "$ENV_FILE" ]; then
+        touch "$ENV_FILE"
+    fi
+    if grep -q "^${key}=" "$ENV_FILE"; then
+        # Update existing
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+        else
+            sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+        fi
+    else
+        # Append new
+        echo "${key}=${value}" >> "$ENV_FILE"
+    fi
+}
+
 pause_screen() {
     echo ""
     echo -ne "${YELLOW}Press Enter to continue...${NC}"
@@ -276,19 +298,28 @@ prompt_auth() {
             local token=""
             echo -ne "${CYAN}Bearer token: ${NC}"
             read -r token
-            [ -n "$token" ] && AUTH_ENV+=("RECON_AUTH_BEARER=$token")
+            if [ -n "$token" ]; then
+                AUTH_ENV+=("RECON_AUTH_BEARER=$token")
+                save_to_env "RECON_AUTH_BEARER" "$token"
+            fi
             ;;
         2)
             local headers=""
             echo -ne "${CYAN}Headers: ${NC}"
             read -r headers
-            [ -n "$headers" ] && AUTH_ENV+=("RECON_AUTH_HEADERS=$headers")
+            if [ -n "$headers" ]; then
+                AUTH_ENV+=("RECON_AUTH_HEADERS=$headers")
+                save_to_env "RECON_AUTH_HEADERS" "$headers"
+            fi
             ;;
         3)
             local cookies=""
             echo -ne "${CYAN}Cookies: ${NC}"
             read -r cookies
-            [ -n "$cookies" ] && AUTH_ENV+=("RECON_AUTH_COOKIES=$cookies")
+            if [ -n "$cookies" ]; then
+                AUTH_ENV+=("RECON_AUTH_COOKIES=$cookies")
+                save_to_env "RECON_AUTH_COOKIES" "$cookies"
+            fi
             ;;
         4)
             local login_url=""
@@ -342,8 +373,14 @@ prompt_auth() {
             echo -ne "${CYAN}Basic auth password: ${NC}"
             read -rs pass
             echo ""
-            [ -n "$user" ] && AUTH_ENV+=("RECON_AUTH_BASIC_USER=$user")
-            [ -n "$pass" ] && AUTH_ENV+=("RECON_AUTH_BASIC_PASS=$pass")
+            if [ -n "$user" ]; then
+                AUTH_ENV+=("RECON_AUTH_BASIC_USER=$user")
+                save_to_env "RECON_AUTH_BASIC_USER" "$user"
+            fi
+            if [ -n "$pass" ]; then
+                AUTH_ENV+=("RECON_AUTH_BASIC_PASS=$pass")
+                save_to_env "RECON_AUTH_BASIC_PASS" "$pass"
+            fi
             ;;
         6)
             local profile_name=""

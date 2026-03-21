@@ -2092,34 +2092,29 @@ def start_telegram_bot(
     ),
 ) -> None:
     """Start the interactive Telegram Bot listener."""
-    config_path = config.CONFIG_DIR / "telegram.json"
-    saved_config = fs.read_json(config_path, default={})
-
+    updated_env = False
     if not token:
-        token = saved_config.get("token")
-        if not token:
-            typer.secho("🤖 Telegram Bot Token not found.", fg=typer.colors.YELLOW)
-            token = typer.prompt("Please enter your Telegram Bot Token")
-            saved_config["token"] = token
+        typer.secho("🤖 Telegram Bot Token not found.", fg=typer.colors.YELLOW)
+        token = typer.prompt("Please enter your Telegram Bot Token")
+        _save_to_env("RECON_TELEGRAM_TOKEN", token)
+        updated_env = True
 
     if not chat_id:
-        chat_id = saved_config.get("chat_id")
-        if not chat_id:
-            typer.secho("🆔 Telegram Chat ID not found.", fg=typer.colors.YELLOW)
-            typer.secho(
-                "Tip: If you don't know your ID, enter 'discover' below.", dim=True
-            )
-            chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
-            if chat_id != "discover":
-                saved_config["chat_id"] = chat_id
+        typer.secho("🆔 Telegram Chat ID not found.", fg=typer.colors.YELLOW)
+        typer.secho(
+            "Tip: If you don't know your ID, enter 'discover' below.", dim=True
+        )
+        chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
+        if chat_id != "discover":
+            _save_to_env("RECON_TELEGRAM_CHAT_ID", chat_id)
+            updated_env = True
+
+    if updated_env:
+        typer.secho("✅ Credentials saved to .env file.", fg=typer.colors.GREEN)
 
     if not token or not chat_id:
         rich_print("[bold red]Error:[/bold red] Missing Telegram token or chat ID.")
         raise typer.Exit(code=1)
-
-    # Save if we updated anything
-    if saved_config.get("token") == token or saved_config.get("chat_id") == chat_id:
-        fs.write_json(config_path, saved_config, redacted=False)
 
     from recon_cli.utils.telegram_bot import TelegramBot
 
@@ -2134,13 +2129,32 @@ def start_telegram_bot(
     else:
         rich_print(f"Locked to Chat IDs: {chat_id}")
 
-    rich_print(f"\n[dim]Config saved to: {config_path}[/dim]")
-
     try:
         asyncio.run(bot.start())
     except KeyboardInterrupt:
         bot.stop()
         rich_print("\n[yellow]Bot stopped.[/yellow]")
+
+
+def _save_to_env(key: str, value: str) -> None:
+    """Helper to save a key-value pair to the .env file."""
+    env_path = config.RECON_HOME / ".env"
+    if not env_path.exists():
+        env_path.touch()
+    
+    content = env_path.read_text(encoding="utf-8")
+    pattern = re.compile(f"^{re.escape(key)}=.*", re.MULTILINE)
+    
+    if pattern.search(content):
+        # Update existing
+        new_content = pattern.sub(f"{key}={value}", content)
+    else:
+        # Append new
+        if content and not content.endswith("\n"):
+            content += "\n"
+        new_content = content + f"{key}={value}\n"
+    
+    env_path.write_text(new_content, encoding="utf-8")
 
 
 @app.command("quickstart")
