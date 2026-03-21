@@ -79,7 +79,7 @@ class APISettings(BaseModel):
     @field_validator("host")
     @classmethod
     def validate_host(cls, v: str) -> str:
-        if v not in ("0.0.0.0", "127.0.0.1", "localhost") and not v.startswith(
+        if v not in ("0.0.0.0", "127.0.0.1", "localhost") and not v.startswith( # nosec B104
             "192.168."
         ):
             # Allow any IP but warn about public binding

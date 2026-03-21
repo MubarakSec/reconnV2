@@ -28,10 +28,8 @@ from recon_cli.utils.circuit_breaker import (
 from recon_cli.utils.pipeline_trace import (
     PipelineTraceSpan,
     CURRENT_TRACE_SCOPE,
-    PipelineTraceScope,
     current_parent_span_id,
     current_trace_recorder,
-    bind_trace_scope,
 )
 from recon_cli.utils.sanitizer import redact as redact_text
 from recon_cli.utils import time as time_utils
@@ -1099,7 +1097,6 @@ class CommandExecutor:
         final_returncode: Optional[int] = None
         attempt_used = 0
 
-        recorder = current_trace_recorder()
         parent_span_id = current_parent_span_id()
         trace_scope = CURRENT_TRACE_SCOPE.get()
         trace_span: Optional[PipelineTraceSpan] = None

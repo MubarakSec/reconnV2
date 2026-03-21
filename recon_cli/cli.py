@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import asyncio
 import json
 import logging
