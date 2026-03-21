@@ -184,11 +184,11 @@ def _analyze_results(
     }
 
     for result in results:
-        result_type = result.get("type", "unknown")
-        stats["by_type"][result_type] = stats["by_type"].get(result_type, 0) + 1  # type: ignore[index]
+        result_type = result.get("type", "unknown")  # type: ignore[attr-defined]
+        stats["by_type"][result_type] = stats["by_type"].get(result_type, 0) + 1  # type: ignore[index, attr-defined]
 
-        source = result.get("source", "unknown")
-        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1  # type: ignore[index]
+        source = result.get("source", "unknown")  # type: ignore[attr-defined]
+        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1  # type: ignore[index, attr-defined]
 
         if "hostname" in result:
             stats["hostnames"].add(result["hostname"])  # type: ignore[attr-defined]

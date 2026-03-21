@@ -47,25 +47,26 @@ class ConnectionPool:
     - Automatic retry with backoff
     - Timeout management
     """
+_instance: Optional["ConnectionPool"] = None
+_sessions: Dict[str, Any] = {}
+_initialized: bool = False
 
-    _instance: Optional["ConnectionPool"] = None
-    _sessions: Dict[str, Any] = {}
+def __new__(cls, config: Optional[PoolConfig] = None):
+    if cls._instance is None:
+        cls._instance = super().__new__(cls)
+        cls._instance._initialized = False
+    return cls._instance
 
-    def __new__(cls, config: Optional[PoolConfig] = None):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+def __init__(self, config: Optional[PoolConfig] = None):
+    if getattr(self, "_initialized", False):
+        return
 
-    def __init__(self, config: Optional[PoolConfig] = None):
-        if self._initialized:
-            return
-
-        self.config = config or PoolConfig()
-        self._sessions = {}
-        self._initialized = True
-
-    def get_session(self, base_url: Optional[str] = None) -> Any:
+    self.config = config or PoolConfig()
+    self._sessions = {}
+    self._initialized = True
+...
+        # Set default timeout
+        session.request = self._timeout_wrapper(session.request)  # type: ignore[method-assign]
         """Get or create a session for the given base URL."""
         if not REQUESTS_AVAILABLE:
             return None
