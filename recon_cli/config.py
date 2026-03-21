@@ -901,7 +901,9 @@ class RuntimeConfig:
     telegram_token: Optional[str] = os.environ.get("RECON_TELEGRAM_TOKEN")
     telegram_chat_id: Optional[str] = os.environ.get("RECON_TELEGRAM_CHAT_ID")
     telegram_timeout: int = int(os.environ.get("RECON_TELEGRAM_TIMEOUT", 5))
-    securitytrails_api_key: Optional[str] = os.environ.get("RECON_SECURITYTRAILS_API_KEY")
+    securitytrails_api_key: Optional[str] = os.environ.get(
+        "RECON_SECURITYTRAILS_API_KEY"
+    )
     github_token: Optional[str] = os.environ.get("RECON_GITHUB_TOKEN")
     viewdns_api_key: Optional[str] = os.environ.get("RECON_VIEWDNS_API_KEY")
     seclists_root: Path = DEFAULT_SECLISTS_ROOT

@@ -6,11 +6,12 @@ from collections import Counter
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Iterable, List, Optional, TYPE_CHECKING
 from urllib.parse import parse_qsl, urlparse
 
 if TYPE_CHECKING:
     from recon_cli.utils.event_bus import PipelineEventBus
+    from recon_cli.jobs.manager import JobManager
 
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.jsonl import JsonlWriter, iter_jsonl

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import atexit
-import base64
 import errno
 import hashlib
 import json
@@ -16,15 +15,24 @@ import shutil
 import subprocess
 import threading
 import time
-import unicodedata
 import uuid
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple, Any, Callable, Sequence, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Any
 
-from recon_cli.utils.circuit_breaker import CircuitBreakerConfig, registry as circuit_registry
-from recon_cli.utils.pipeline_trace import PipelineTraceSpan, CURRENT_TRACE_SCOPE, PipelineTraceScope, current_parent_span_id, current_trace_recorder, bind_trace_scope
+from recon_cli.utils.circuit_breaker import (
+    CircuitBreakerConfig,
+    registry as circuit_registry,
+)
+from recon_cli.utils.pipeline_trace import (
+    PipelineTraceSpan,
+    CURRENT_TRACE_SCOPE,
+    PipelineTraceScope,
+    current_parent_span_id,
+    current_trace_recorder,
+    bind_trace_scope,
+)
 from recon_cli.utils.sanitizer import redact as redact_text
 from recon_cli.utils import time as time_utils
 
@@ -47,7 +55,7 @@ Example:
 _MODULE_LOGGER = logging.getLogger(__name__)
 _SESSION_LOCK = threading.RLock()
 _SESSION_COUNTER = 0
-_SESSIONS: Dict[str, '_CommandSession'] = {}
+_SESSIONS: Dict[str, "_CommandSession"] = {}
 _SESSION_ALIASES: Dict[str, str] = {}
 _DEFAULT_SESSION_MAX_OUTPUT_CHARS = 262144
 _MIN_SESSION_MAX_OUTPUT_CHARS = 128
@@ -79,7 +87,15 @@ _SENSITIVE_FILE_MARKERS = (
 
 _NETWORK_SHELL_EXECUTABLES = {"nc", "ncat", "netcat", "socat", "telnet", "ssh"}
 _INLINE_CODE_FLAGS = {"-c", "-e", "-r", "--eval", "--command"}
-_SHELL_TARGET_MARKERS = ("/bin/sh", "/bin/bash", "cmd.exe", "powershell", "pwsh", "/bin/zsh", "/bin/dash")
+_SHELL_TARGET_MARKERS = (
+    "/bin/sh",
+    "/bin/bash",
+    "cmd.exe",
+    "powershell",
+    "pwsh",
+    "/bin/zsh",
+    "/bin/dash",
+)
 _REVERSE_SHELL_SCRIPT_MARKERS = (
     "socket",
     "connect(",
@@ -96,13 +112,25 @@ _REVERSE_SHELL_SCRIPT_MARKERS = (
     "nc -e",
     "nc -c",
 )
-_EXECUTION_MARKERS = ("exec(", "eval(", "os.system(", "subprocess.", "pty.spawn", "system(", "popen(", "shell_exec(")
+_EXECUTION_MARKERS = (
+    "exec(",
+    "eval(",
+    "os.system(",
+    "subprocess.",
+    "pty.spawn",
+    "system(",
+    "popen(",
+    "shell_exec(",
+)
+
 
 class CommandError(RuntimeError):
     """استثناء لأخطاء تنفيذ الأوامر"""
+
     def __init__(self, message: str, returncode: Optional[int] = None):
         super().__init__(message)
         self.returncode = returncode
+
 
 @dataclass
 class ToolExecutionPolicy:
@@ -113,6 +141,7 @@ class ToolExecutionPolicy:
     backoff_multiplier: float = 2.0
     circuit_failure_threshold: int = 5
     circuit_open_timeout: int = 60
+
 
 @dataclass(frozen=True)
 class CommandSessionInfo:
@@ -133,54 +162,85 @@ class CommandSessionInfo:
     output_retained_chars: int = 0
     max_output_chars: int = _DEFAULT_SESSION_MAX_OUTPUT_CHARS
 
-def _guard_command_or_raise(cmd_list: List[str], env: Optional[Mapping[str, str]] = None) -> None:
+
+def _guard_command_or_raise(
+    cmd_list: List[str], env: Optional[Mapping[str, str]] = None
+) -> None:
     if os.environ.get("RECON_EXECUTOR_GUARDRAILS", "true").lower() == "false":
         return
     if not cmd_list:
         return
-    
+
     executable = Path(cmd_list[0]).name.lower()
     joined = " ".join(cmd_list).lower()
 
     if any(ord(c) > 127 for c in executable):
         raise CommandError(f"Blocked Unicode-homograph executable name: {executable}")
 
-    if executable in {"bash", "sh", "zsh", "dash"} and any("c" in arg.strip("-") for arg in cmd_list[1:] if arg.startswith("-")):
+    if executable in {"bash", "sh", "zsh", "dash"} and any(
+        "c" in arg.strip("-") for arg in cmd_list[1:] if arg.startswith("-")
+    ):
         raise CommandError("Blocked: inline shell commands are not allowed")
 
-    if executable in {"python", "python3", "perl", "ruby", "php"} and any(arg in _INLINE_CODE_FLAGS or arg.startswith("-c") for arg in cmd_list[1:]):
+    if executable in {"python", "python3", "perl", "ruby", "php"} and any(
+        arg in _INLINE_CODE_FLAGS or arg.startswith("-c") for arg in cmd_list[1:]
+    ):
         if any(marker in joined for marker in _EXECUTION_MARKERS) or "base64" in joined:
             raise CommandError("Blocked: inline decoder/execution payload")
-    
+
     if executable in _NETWORK_SHELL_EXECUTABLES:
         if any(marker in joined for marker in _SHELL_TARGET_MARKERS):
             raise CommandError(f"Blocked potential reverse shell via {executable}")
 
     if executable in {"curl", "wget"}:
-        if any(token in joined for token in ("$(env)", "`env`", "$(", "`", "${", "%env%", "!env!")):
-            raise CommandError(f"Blocked {executable} command containing shell-style expansion payload")
-        
+        if any(
+            token in joined
+            for token in ("$(env)", "`env`", "$(", "`", "${", "%env%", "!env!")
+        ):
+            raise CommandError(
+                f"Blocked {executable} command containing shell-style expansion payload"
+            )
+
         for part in cmd_list[1:]:
             if part.startswith("@"):
                 filename = part[1:].lower()
                 if any(marker in filename for marker in _SENSITIVE_FILE_MARKERS):
-                    raise CommandError(f"Blocked {executable} command referencing a sensitive local file via @ notation")
-            
-            if part in {"-d", "--data", "--data-binary", "--upload-file", "-t", "-T", "--post-file"}:
+                    raise CommandError(
+                        f"Blocked {executable} command referencing a sensitive local file via @ notation"
+                    )
+
+            if part in {
+                "-d",
+                "--data",
+                "--data-binary",
+                "--upload-file",
+                "-t",
+                "-T",
+                "--post-file",
+            }:
                 idx = cmd_list.index(part)
                 if idx + 1 < len(cmd_list):
                     next_arg = cmd_list[idx + 1]
-                    if next_arg.startswith("@") and any(marker in next_arg.lower() for marker in _SENSITIVE_FILE_MARKERS):
-                         raise CommandError(f"Blocked {executable} command referencing a sensitive local file payload")
+                    if next_arg.startswith("@") and any(
+                        marker in next_arg.lower() for marker in _SENSITIVE_FILE_MARKERS
+                    ):
+                        raise CommandError(
+                            f"Blocked {executable} command referencing a sensitive local file payload"
+                        )
 
     if executable in {"nc", "ncat", "netcat", "telnet"}:
         if any(arg in {"-e", "-c", "--exec", "--sh-exec"} for arg in cmd_list[1:]):
-            raise CommandError(f"Blocked {executable} reverse-shell style execution payload")
+            raise CommandError(
+                f"Blocked {executable} reverse-shell style execution payload"
+            )
 
     if executable == "socat":
         if any(marker in joined for marker in ("exec:", "system:", "pty", "stderr")):
             if any(marker in joined for marker in ("tcp:", "udp:", "sctp:")):
-                raise CommandError("Blocked socat potential reverse-shell execution payload")
+                raise CommandError(
+                    "Blocked socat potential reverse-shell execution payload"
+                )
+
 
 def _projectdiscovery_httpx_available(path: str) -> bool:
     try:
@@ -189,27 +249,35 @@ def _projectdiscovery_httpx_available(path: str) -> bool:
     except Exception:
         return False
 
+
 def _command_preview(cmd: List[str], redact: bool = True) -> str:
-    if not cmd: return ""
+    if not cmd:
+        return ""
     preview = shlex.join(cmd)
     return redact_text(preview) if redact else preview
 
-def _resolve_policy(cmd: List[str], timeout_override: Optional[int] = None) -> ToolExecutionPolicy:
+
+def _resolve_policy(
+    cmd: List[str], timeout_override: Optional[int] = None
+) -> ToolExecutionPolicy:
     name = Path(cmd[0]).name.lower()
     policy = ToolExecutionPolicy(tool_class="generic", timeout=300)
-    
+
     if "nmap" in name:
         policy = ToolExecutionPolicy(tool_class="scanner", timeout=1800, retries=1)
     elif "nuclei" in name:
-        policy = ToolExecutionPolicy(tool_class="scanner", timeout=3600, circuit_failure_threshold=3)
+        policy = ToolExecutionPolicy(
+            tool_class="scanner", timeout=3600, circuit_failure_threshold=3
+        )
     elif "ffuf" in name or "feroxbuster" in name:
         policy = ToolExecutionPolicy(tool_class="fuzzer", timeout=7200)
     elif "httpx" in name:
         policy = ToolExecutionPolicy(tool_class="scanner", timeout=300, retries=1)
-    
+
     if timeout_override:
         policy.timeout = timeout_override
     return policy
+
 
 def _start_command_trace_span(
     command: Iterable[str],
@@ -229,7 +297,7 @@ def _start_command_trace_span(
 
     if recorder is None:
         return None
-    
+
     if parent_span_id is None:
         parent_span_id = current_parent_span_id()
         if parent_span_id is None:
@@ -245,15 +313,18 @@ def _start_command_trace_span(
         "capture_output": bool(capture_output),
         "command_preview": _command_preview(cmd_list, redact=redact),
     }
-    if cwd is not None: attributes["cwd"] = str(cwd)
-    if output_path is not None: attributes["output_path"] = str(output_path)
-    
+    if cwd is not None:
+        attributes["cwd"] = str(cwd)
+    if output_path is not None:
+        attributes["output_path"] = str(output_path)
+
     return recorder.start_span(
         f"tool:{tool_name}",
         span_type="tool_exec",
         parent_span_id=parent_span_id,
         attributes=attributes,
     )
+
 
 def _finish_command_trace_span(
     span: Optional[PipelineTraceSpan],
@@ -270,12 +341,33 @@ def _finish_command_trace_span(
         attributes["returncode"] = int(returncode)
     span.finish(status=status, error=error, attributes=attributes)
 
+
 _SUSPICIOUS_OUTPUT_RULES = (
-    ("instruction-like content", re.compile(r"ignore\s+(all\s+)?(previous|prior)\s+instructions?", re.IGNORECASE)),
-    ("tool reprogramming language", re.compile(r"(follow|obey)\s+(these|the|following)\s+(instructions?|directives?)", re.IGNORECASE)),
-    ("prompt disclosure language", re.compile(r"(system prompt|developer message|tool instructions?)", re.IGNORECASE)),
-    ("command-substitution exfiltration hint", re.compile(r"(\$\(\s*env\s*\)|`[^`]*env[^`]*`|run\s+\$\(env\))", re.IGNORECASE)),
+    (
+        "instruction-like content",
+        re.compile(
+            r"ignore\s+(all\s+)?(previous|prior)\s+instructions?", re.IGNORECASE
+        ),
+    ),
+    (
+        "tool reprogramming language",
+        re.compile(
+            r"(follow|obey)\s+(these|the|following)\s+(instructions?|directives?)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "prompt disclosure language",
+        re.compile(
+            r"(system prompt|developer message|tool instructions?)", re.IGNORECASE
+        ),
+    ),
+    (
+        "command-substitution exfiltration hint",
+        re.compile(r"(\$\(\s*env\s*\)|`[^`]*env[^`]*`|run\s+\$\(env\))", re.IGNORECASE),
+    ),
 )
+
 
 def _detect_suspicious_output(text: str) -> tuple[Optional[str], str]:
     sample = text[:4096]
@@ -318,6 +410,7 @@ def _report_suspicious_output(
         )
     return True
 
+
 def _report_suspicious_output_in_file(
     logger,
     trace_span: Optional[PipelineTraceSpan],
@@ -327,16 +420,22 @@ def _report_suspicious_output_in_file(
     try:
         with output_path.open("r", encoding="utf-8", errors="ignore") as handle:
             for line in handle:
-                if _report_suspicious_output(logger, trace_span, command, source="file", text=line):
+                if _report_suspicious_output(
+                    logger, trace_span, command, source="file", text=line
+                ):
                     return True
     except OSError:
         return False
     return False
 
+
 def _session_output_limit(max_output_chars: Optional[int] = None) -> int:
     if max_output_chars is not None:
         return max(_MIN_SESSION_MAX_OUTPUT_CHARS, int(max_output_chars))
-    raw_value = os.environ.get("RECON_EXECUTOR_SESSION_MAX_OUTPUT_CHARS", str(_DEFAULT_SESSION_MAX_OUTPUT_CHARS))
+    raw_value = os.environ.get(
+        "RECON_EXECUTOR_SESSION_MAX_OUTPUT_CHARS",
+        str(_DEFAULT_SESSION_MAX_OUTPUT_CHARS),
+    )
     try:
         return max(_MIN_SESSION_MAX_OUTPUT_CHARS, int(raw_value))
     except (TypeError, ValueError):
@@ -346,7 +445,9 @@ def _session_output_limit(max_output_chars: Optional[int] = None) -> int:
 def _session_finished_limit(max_finished: Optional[int] = None) -> int:
     if max_finished is not None:
         return max(_MIN_SESSION_MAX_FINISHED, int(max_finished))
-    raw_value = os.environ.get("RECON_EXECUTOR_SESSION_MAX_FINISHED", str(_DEFAULT_SESSION_MAX_FINISHED))
+    raw_value = os.environ.get(
+        "RECON_EXECUTOR_SESSION_MAX_FINISHED", str(_DEFAULT_SESSION_MAX_FINISHED)
+    )
     try:
         return max(_MIN_SESSION_MAX_FINISHED, int(raw_value))
     except (TypeError, ValueError):
@@ -369,6 +470,7 @@ def _session_finished_ttl(max_age_seconds: Optional[float] = None) -> Optional[f
     except (TypeError, ValueError):
         return _DEFAULT_SESSION_FINISHED_TTL_SECONDS
     return parsed if parsed > 0 else None
+
 
 class _CommandSession:
     def __init__(
@@ -475,7 +577,9 @@ class _CommandSession:
             self.trace_span.set_attribute("transport", self._transport)
             self.trace_span.set_attribute("session_id", self.session_id)
             self.trace_span.set_attribute("session_alias", self.alias)
-            self.trace_span.set_attribute("session_max_output_chars", self._max_output_chars)
+            self.trace_span.set_attribute(
+                "session_max_output_chars", self._max_output_chars
+            )
             if self.pid is not None:
                 self.trace_span.set_attribute("pid", self.pid)
             self.trace_span.add_event(
@@ -509,7 +613,9 @@ class _CommandSession:
             else:
                 unread_prefix = 0
             self.last_activity = time.time()
-            should_report_truncation = self._dropped_output_chars > 0 and not self._output_truncation_reported
+            should_report_truncation = (
+                self._dropped_output_chars > 0 and not self._output_truncation_reported
+            )
             retained_chars = len(self._output_buffer)
         if should_report_truncation:
             self._output_truncation_reported = True
@@ -538,7 +644,9 @@ class _CommandSession:
                 text=chunk,
             )
 
-    def _finalize(self, *, status: str, error: Optional[str], returncode: Optional[int]) -> None:
+    def _finalize(
+        self, *, status: str, error: Optional[str], returncode: Optional[int]
+    ) -> None:
         with self._lock:
             if self.finished_at is not None:
                 return
@@ -571,8 +679,12 @@ class _CommandSession:
                 self.logger.debug("Error closing session write stream", exc_info=True)
         if self.trace_span is not None and self._dropped_output_chars > 0:
             self.trace_span.set_attribute("session_output_truncated", True)
-            self.trace_span.set_attribute("session_dropped_output_chars", self._dropped_output_chars)
-            self.trace_span.set_attribute("session_retained_output_chars", len(self._output_buffer))
+            self.trace_span.set_attribute(
+                "session_dropped_output_chars", self._dropped_output_chars
+            )
+            self.trace_span.set_attribute(
+                "session_retained_output_chars", len(self._output_buffer)
+            )
         self._done.set()
         _finish_command_trace_span(
             self.trace_span,
@@ -657,7 +769,9 @@ class _CommandSession:
                     raise OSError("short PTY write")
                 total_written += written
         except OSError as exc:
-            raise CommandError(f"Failed to write to session {self.alias}: {exc}") from exc
+            raise CommandError(
+                f"Failed to write to session {self.alias}: {exc}"
+            ) from exc
         self.last_activity = time.time()
         if self.trace_span is not None:
             preview = _command_preview([data], redact=True)
@@ -696,7 +810,9 @@ class _CommandSession:
                 try:
                     process.kill()
                 except Exception:
-                    self.logger.debug("Failed to kill process %d", process.pid, exc_info=True)
+                    self.logger.debug(
+                        "Failed to kill process %d", process.pid, exc_info=True
+                    )
         self.wait(timeout=1.0)
 
     def snapshot(self, *, clear_output: bool = False) -> CommandSessionInfo:
@@ -759,7 +875,11 @@ def _remove_session_registry_entry(session: _CommandSession) -> None:
 
 
 def _finished_sort_key(session: _CommandSession) -> tuple[str, str, str]:
-    finished_monotonic = session._finished_monotonic if session._finished_monotonic is not None else float("inf")
+    finished_monotonic = (
+        session._finished_monotonic
+        if session._finished_monotonic is not None
+        else float("inf")
+    )
     started_at = session.started_at or ""
     return (f"{finished_monotonic:020.6f}", started_at, session.session_id)
 
@@ -783,7 +903,9 @@ def _prune_finished_sessions(
     limit = _session_finished_limit(max_finished)
     ttl_seconds = _session_finished_ttl(max_age_seconds)
     with _SESSION_LOCK:
-        finished_sessions = [session for session in _SESSIONS.values() if not session.running]
+        finished_sessions = [
+            session for session in _SESSIONS.values() if not session.running
+        ]
         if not finished_sessions:
             return 0
         stale_sessions: List[_CommandSession] = []
@@ -791,11 +913,17 @@ def _prune_finished_sessions(
         if ttl_seconds is not None:
             now_monotonic = time.monotonic()
             for session in finished_sessions:
-                age_seconds = _finished_session_age_seconds(session, now_monotonic=now_monotonic)
+                age_seconds = _finished_session_age_seconds(
+                    session, now_monotonic=now_monotonic
+                )
                 if age_seconds is not None and age_seconds >= ttl_seconds:
                     stale_sessions.append(session)
                     stale_ids.add(session.session_id)
-        retained_finished = [session for session in finished_sessions if session.session_id not in stale_ids]
+        retained_finished = [
+            session
+            for session in finished_sessions
+            if session.session_id not in stale_ids
+        ]
         if len(retained_finished) > limit:
             retained_finished.sort(key=_finished_sort_key)
             prune_count = len(retained_finished) - limit
@@ -843,17 +971,30 @@ atexit.register(_cleanup_sessions_on_exit)
 
 class CommandCache:
     """تخزين مؤقت لنتائج الأوامر"""
+
     def __init__(self, cache_dir: Path):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_key(self, cmd: List[str], cwd: Optional[Path] = None, env: Optional[Mapping[str, str]] = None) -> str:
+    def _get_key(
+        self,
+        cmd: List[str],
+        cwd: Optional[Path] = None,
+        env: Optional[Mapping[str, str]] = None,
+    ) -> str:
         parts = [str(c) for c in cmd]
-        if cwd: parts.append(str(cwd))
-        if env: parts.append(json.dumps(dict(env), sort_keys=True))
+        if cwd:
+            parts.append(str(cwd))
+        if env:
+            parts.append(json.dumps(dict(env), sort_keys=True))
         return hashlib.sha256(" ".join(parts).encode()).hexdigest()
 
-    def get(self, cmd: List[str], cwd: Optional[Path] = None, env: Optional[Mapping[str, str]] = None) -> Optional[subprocess.CompletedProcess]:
+    def get(
+        self,
+        cmd: List[str],
+        cwd: Optional[Path] = None,
+        env: Optional[Mapping[str, str]] = None,
+    ) -> Optional[subprocess.CompletedProcess]:
         key = self._get_key(cmd, cwd, env)
         path = self.cache_dir / f"{key}.json"
         if not path.exists():
@@ -864,12 +1005,17 @@ class CommandCache:
                 args=cmd,
                 returncode=data["returncode"],
                 stdout=data["stdout"],
-                stderr=data["stderr"]
+                stderr=data["stderr"],
             )
         except Exception:
             return None
 
-    def set(self, result: subprocess.CompletedProcess, cwd: Optional[Path] = None, env: Optional[Mapping[str, str]] = None) -> None:
+    def set(
+        self,
+        result: subprocess.CompletedProcess,
+        cwd: Optional[Path] = None,
+        env: Optional[Mapping[str, str]] = None,
+    ) -> None:
         if result.returncode != 0:
             return
         key = self._get_key(list(result.args), cwd, env)
@@ -878,12 +1024,15 @@ class CommandCache:
             "returncode": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
         path.write_text(json.dumps(data), encoding="utf-8")
 
+
 class CommandExecutor:
-    def __init__(self, logger: Optional[logging.Logger] = None, cache: Optional[Any] = None):
+    def __init__(
+        self, logger: Optional[logging.Logger] = None, cache: Optional[Any] = None
+    ):
         self.logger = logger or _MODULE_LOGGER
         self.cache = cache
 
@@ -919,7 +1068,7 @@ class CommandExecutor:
     ) -> subprocess.CompletedProcess:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
-        
+
         resolved_path = self.resolve_tool(cmd_list[0])
         if resolved_path:
             cmd_list[0] = resolved_path
@@ -927,12 +1076,15 @@ class CommandExecutor:
         if self.cache:
             cached = self.cache.get(cmd_list, cwd, env)
             if cached:
-                self.logger.info("Using cached result for: %s", _command_preview(cmd_list, redact=redact))
+                self.logger.info(
+                    "Using cached result for: %s",
+                    _command_preview(cmd_list, redact=redact),
+                )
                 return cached
 
         message = _command_preview(cmd_list, redact=redact)
         policy = _resolve_policy(cmd_list, timeout_override=timeout)
-        
+
         breaker = circuit_registry.get_or_create(
             f"executor:{policy.tool_class}",
             CircuitBreakerConfig(
@@ -954,51 +1106,90 @@ class CommandExecutor:
         async def _run() -> subprocess.CompletedProcess:
             if recorder:
                 CURRENT_TRACE_SCOPE.set(PipelineTraceScope(recorder, parent_span_id))
-            
-            nonlocal final_status, final_error, final_returncode, attempt_used, trace_span
+
+            nonlocal \
+                final_status, \
+                final_error, \
+                final_returncode, \
+                attempt_used, \
+                trace_span
             trace_span = _start_command_trace_span(
-                cmd_list, policy=policy, redact=redact, check=check,
-                capture_output=capture_output, cwd=cwd, context=context, parent_span_id=parent_span_id
+                cmd_list,
+                policy=policy,
+                redact=redact,
+                check=check,
+                capture_output=capture_output,
+                cwd=cwd,
+                context=context,
+                parent_span_id=parent_span_id,
             )
-            
+
             try:
                 for attempt in range(1, attempts + 1):
                     attempt_used = attempt
-                    if trace_span: trace_span.add_event("tool.attempt", {"attempt": attempt})
+                    if trace_span:
+                        trace_span.add_event("tool.attempt", {"attempt": attempt})
                     if not breaker.allow_request():
                         raise CommandError(f"Circuit open for {policy.tool_class}")
-                    
+
                     try:
                         loop = asyncio.get_running_loop()
+
                         def _run_in_thread():
                             with bind_trace_scope(recorder, parent_span_id):
                                 return subprocess.run(
-                                    cmd_list, cwd=str(cwd) if cwd else None,
-                                    env=dict(env) if env else None, timeout=policy.timeout,
-                                    capture_output=capture_output, text=True, encoding="utf-8",
-                                    errors="replace", check=check
+                                    cmd_list,
+                                    cwd=str(cwd) if cwd else None,
+                                    env=dict(env) if env else None,
+                                    timeout=policy.timeout,
+                                    capture_output=capture_output,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                    check=check,
                                 )
+
                         completed = await loop.run_in_executor(None, _run_in_thread)
-                        
-                        if capture_output and "IGNORE PREVIOUS INSTRUCTIONS" in completed.stdout:
-                            self.logger.warning("Potential prompt-injection content detected in output")
-                            
+
+                        if (
+                            capture_output
+                            and "IGNORE PREVIOUS INSTRUCTIONS" in completed.stdout
+                        ):
+                            self.logger.warning(
+                                "Potential prompt-injection content detected in output"
+                            )
+
                         final_returncode = completed.returncode
-                        final_status = "completed" if completed.returncode == 0 else "failed"
+                        final_status = (
+                            "completed" if completed.returncode == 0 else "failed"
+                        )
                         if completed.returncode == 0:
                             breaker.record_success()
-                            if self.cache: self.cache.set(completed, cwd, env)
+                            if self.cache:
+                                self.cache.set(completed, cwd, env)
                         else:
                             breaker.record_failure()
                         return completed
                     except subprocess.TimeoutExpired as exc:
                         breaker.record_failure()
-                        if attempt >= attempts: raise CommandError(f"Timeout after {policy.timeout}s") from exc
-                        time.sleep(policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1)))
+                        if attempt >= attempts:
+                            raise CommandError(
+                                f"Timeout after {policy.timeout}s"
+                            ) from exc
+                        time.sleep(
+                            policy.backoff_seconds
+                            * (policy.backoff_multiplier ** (attempt - 1))
+                        )
                     except subprocess.CalledProcessError as exc:
                         breaker.record_failure()
-                        if attempt >= attempts: raise CommandError(f"Command failed ({exc.returncode})", exc.returncode) from exc
-                        time.sleep(policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1)))
+                        if attempt >= attempts:
+                            raise CommandError(
+                                f"Command failed ({exc.returncode})", exc.returncode
+                            ) from exc
+                        time.sleep(
+                            policy.backoff_seconds
+                            * (policy.backoff_multiplier ** (attempt - 1))
+                        )
             except Exception as e:
                 final_error = str(e)
                 raise
@@ -1010,7 +1201,13 @@ class CommandExecutor:
             except RuntimeError:
                 return asyncio.run(_run())
         finally:
-            _finish_command_trace_span(trace_span, status=final_status, error=final_error, attempts=attempt_used, returncode=final_returncode)
+            _finish_command_trace_span(
+                trace_span,
+                status=final_status,
+                error=final_error,
+                attempts=attempt_used,
+                returncode=final_returncode,
+            )
 
     def run_to_file(
         self,
@@ -1077,7 +1274,9 @@ class CommandExecutor:
             for attempt in range(1, attempts + 1):
                 attempt_used = attempt
                 if trace_span is not None:
-                    trace_span.add_event("tool.attempt", {"attempt": attempt, "max_attempts": attempts})
+                    trace_span.add_event(
+                        "tool.attempt", {"attempt": attempt, "max_attempts": attempts}
+                    )
                 if not breaker.allow_request():
                     final_error = f"Circuit open for tool class '{policy.tool_class}'"
                     raise CommandError(str(final_error))
@@ -1096,7 +1295,9 @@ class CommandExecutor:
                             timeout=policy.timeout,
                         )
                     final_returncode = completed.returncode
-                    final_status = "completed" if completed.returncode == 0 else "failed"
+                    final_status = (
+                        "completed" if completed.returncode == 0 else "failed"
+                    )
                     if completed.returncode == 0:
                         final_error = None
                         breaker.record_success()
@@ -1104,7 +1305,9 @@ class CommandExecutor:
                     final_error = f"Command exited with {completed.returncode}"
                     breaker.record_failure()
                     if attempt < attempts:
-                        delay = policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1))
+                        delay = policy.backoff_seconds * (
+                            policy.backoff_multiplier ** (attempt - 1)
+                        )
                         self.logger.warning(
                             "Retrying command after exit %s in %.1fs (%s/%s)",
                             completed.returncode,
@@ -1118,9 +1321,13 @@ class CommandExecutor:
                 except subprocess.TimeoutExpired as exc:
                     breaker.record_failure()
                     final_error = f"Command timeout after {policy.timeout}s"
-                    self.logger.error("Command timed out after %ss: %s", policy.timeout, message)
+                    self.logger.error(
+                        "Command timed out after %ss: %s", policy.timeout, message
+                    )
                     if attempt < attempts:
-                        delay = policy.backoff_seconds * (policy.backoff_multiplier ** (attempt - 1))
+                        delay = policy.backoff_seconds * (
+                            policy.backoff_multiplier ** (attempt - 1)
+                        )
                         self.logger.warning(
                             "Retrying command after timeout in %.1fs (%s/%s)",
                             delay,
@@ -1143,19 +1350,24 @@ class CommandExecutor:
 
             if redact:
                 tmp_path = output_path.with_suffix(f"{output_path.suffix}.redacted")
-                with output_path.open("r", encoding="utf-8", errors="ignore") as src, tmp_path.open(
-                    "w", encoding="utf-8"
-                ) as dst:
+                with (
+                    output_path.open("r", encoding="utf-8", errors="ignore") as src,
+                    tmp_path.open("w", encoding="utf-8") as dst,
+                ):
                     for line in src:
                         redacted = redact_text(line) if line else line
                         dst.write(redacted or "")
                 tmp_path.replace(output_path)
 
-            _report_suspicious_output_in_file(self.logger, trace_span, cmd_list, output_path)
+            _report_suspicious_output_in_file(
+                self.logger, trace_span, cmd_list, output_path
+            )
 
             completed.stdout = ""
             if completed.returncode != 0:
-                self.logger.warning("Command exited with %s (non-zero)", completed.returncode)
+                self.logger.warning(
+                    "Command exited with %s (non-zero)", completed.returncode
+                )
             return completed
         finally:
             _finish_command_trace_span(
@@ -1180,13 +1392,16 @@ class CommandExecutor:
         cmd_list = [str(part) for part in command]
         _guard_command_or_raise(cmd_list, env)
         resolved = self.resolve_tool(cmd_list[0])
-        if resolved: cmd_list[0] = resolved
-        
-        policy = _resolve_policy(cmd_list, timeout_override=timeout)
+        if resolved:
+            cmd_list[0] = resolved
+
         # Simplified async run for now
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, lambda: self.run(cmd_list, cwd, env, timeout, check, capture_output, redact, context)
+            None,
+            lambda: self.run(
+                cmd_list, cwd, env, timeout, check, capture_output, redact, context
+            ),
         )
 
     def start_session(
@@ -1235,7 +1450,9 @@ class CommandExecutor:
         self.logger.info("Started session %s for %s", session.alias, message)
         return session.snapshot(clear_output=False)
 
-    def read_session(self, session_identifier: str, *, clear_output: bool = True) -> CommandSessionInfo:
+    def read_session(
+        self, session_identifier: str, *, clear_output: bool = True
+    ) -> CommandSessionInfo:
         session = _resolve_session(session_identifier)
         if not session.running:
             _prune_finished_sessions()
@@ -1291,7 +1508,9 @@ class CommandExecutor:
         _prune_finished_sessions()
         with _SESSION_LOCK:
             sessions = list(_SESSIONS.values())
-        snapshots = [session.snapshot(clear_output=clear_output) for session in sessions]
+        snapshots = [
+            session.snapshot(clear_output=clear_output) for session in sessions
+        ]
         if include_finished:
             return snapshots
         return [item for item in snapshots if item.running]
@@ -1309,7 +1528,9 @@ class CommandExecutor:
         }
         if terminate_running:
             with _SESSION_LOCK:
-                running_sessions = [session for session in _SESSIONS.values() if session.running]
+                running_sessions = [
+                    session for session in _SESSIONS.values() if session.running
+                ]
             for session in running_sessions:
                 try:
                     session.terminate()

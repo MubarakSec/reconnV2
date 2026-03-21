@@ -70,7 +70,9 @@ class ScoringStage(Stage):
                     enrichment_artifact.read_text(encoding="utf-8")
                 )
             except Exception:
-                context.logger.debug("Failed to load IP enrichment artifact", exc_info=True)
+                context.logger.debug(
+                    "Failed to load IP enrichment artifact", exc_info=True
+                )
                 enrichment_map = {}
 
         soft_404_hosts = set(

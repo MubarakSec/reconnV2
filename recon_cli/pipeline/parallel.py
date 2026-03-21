@@ -16,7 +16,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from recon_cli.utils.pipeline_trace import current_trace_recorder, current_parent_span_id
+from recon_cli.utils.pipeline_trace import (
+    current_trace_recorder,
+    current_parent_span_id,
+)
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
@@ -307,7 +310,14 @@ class ParallelStageExecutor:
                 recorder = current_trace_recorder()
                 parent_span_id = current_parent_span_id()
                 if recorder is not None:
-                    recorder.emit("parallel.batch.started", {"group": group_idx + 1, "stages": batch, "parent_span_id": parent_span_id})
+                    recorder.emit(
+                        "parallel.batch.started",
+                        {
+                            "group": group_idx + 1,
+                            "stages": batch,
+                            "parent_span_id": parent_span_id,
+                        },
+                    )
 
                 # Run batch in parallel
                 tasks = []
@@ -318,7 +328,14 @@ class ParallelStageExecutor:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 if recorder is not None:
-                    recorder.emit("parallel.batch.finished", {"group": group_idx + 1, "stages": batch, "parent_span_id": parent_span_id})
+                    recorder.emit(
+                        "parallel.batch.finished",
+                        {
+                            "group": group_idx + 1,
+                            "stages": batch,
+                            "parent_span_id": parent_span_id,
+                        },
+                    )
 
                 # Store results
                 for name, result in zip(batch, results):

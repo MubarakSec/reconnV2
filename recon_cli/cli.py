@@ -858,7 +858,9 @@ def doctor(
         help="Attempt to install missing dependencies (python packages, playwright browsers, interactsh-client)",
     ),
     exit_on_fail: bool = typer.Option(
-        True, "--exit-on-fail/--no-exit-on-fail", help="Exit with code 1 if issues are found"
+        True,
+        "--exit-on-fail/--no-exit-on-fail",
+        help="Exit with code 1 if issues are found",
     ),
 ) -> None:
     """Run quick environment & source sanity checks."""
@@ -1212,11 +1214,31 @@ def doctor(
     typer.echo("")
     typer.echo("== API Key Health ==")
     api_keys = [
-        ("SecurityTrails", config.RUNTIME_CONFIG.securitytrails_api_key, "Required for historical DNS origin discovery"),
-        ("GitHub Token", config.RUNTIME_CONFIG.github_token, "Required for GitHub repository secret scanning"),
-        ("ViewDNS", config.RUNTIME_CONFIG.viewdns_api_key, "Used for reverse WHOIS lookups"),
-        ("WPScan", config.RUNTIME_CONFIG.wpscan_api_token, "Required for deep WordPress vulnerability scanning"),
-        ("Telegram Bot", config.RUNTIME_CONFIG.telegram_token, "Required for Telegram notifications and bot control"),
+        (
+            "SecurityTrails",
+            config.RUNTIME_CONFIG.securitytrails_api_key,
+            "Required for historical DNS origin discovery",
+        ),
+        (
+            "GitHub Token",
+            config.RUNTIME_CONFIG.github_token,
+            "Required for GitHub repository secret scanning",
+        ),
+        (
+            "ViewDNS",
+            config.RUNTIME_CONFIG.viewdns_api_key,
+            "Used for reverse WHOIS lookups",
+        ),
+        (
+            "WPScan",
+            config.RUNTIME_CONFIG.wpscan_api_token,
+            "Required for deep WordPress vulnerability scanning",
+        ),
+        (
+            "Telegram Bot",
+            config.RUNTIME_CONFIG.telegram_token,
+            "Required for Telegram notifications and bot control",
+        ),
     ]
     for name, key, description in api_keys:
         status = "ok" if key else "missing"
@@ -2072,27 +2094,27 @@ def start_telegram_bot(
     """Start the interactive Telegram Bot listener."""
     config_path = config.CONFIG_DIR / "telegram.json"
     saved_config = fs.read_json(config_path, default={})
-    
+
     if not token:
         token = saved_config.get("token")
         if not token:
             typer.secho("🤖 Telegram Bot Token not found.", fg=typer.colors.YELLOW)
             token = typer.prompt("Please enter your Telegram Bot Token")
             saved_config["token"] = token
-    
+
     if not chat_id:
         chat_id = saved_config.get("chat_id")
         if not chat_id:
             typer.secho("🆔 Telegram Chat ID not found.", fg=typer.colors.YELLOW)
-            typer.secho("Tip: If you don't know your ID, enter 'discover' below.", dim=True)
+            typer.secho(
+                "Tip: If you don't know your ID, enter 'discover' below.", dim=True
+            )
             chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
             if chat_id != "discover":
                 saved_config["chat_id"] = chat_id
 
     if not token or not chat_id:
-        rich_print(
-            "[bold red]Error:[/bold red] Missing Telegram token or chat ID."
-        )
+        rich_print("[bold red]Error:[/bold red] Missing Telegram token or chat ID.")
         raise typer.Exit(code=1)
 
     # Save if we updated anything
@@ -2106,10 +2128,12 @@ def start_telegram_bot(
     rich_print("[bold green]Starting Telegram Bot...[/bold green]")
     if chat_id == "discover":
         rich_print("[bold cyan]🔍 DISCOVERY MODE ENABLED[/bold cyan]")
-        rich_print("Message your bot on Telegram now, and your Chat ID will be printed here.")
+        rich_print(
+            "Message your bot on Telegram now, and your Chat ID will be printed here."
+        )
     else:
         rich_print(f"Locked to Chat IDs: {chat_id}")
-    
+
     rich_print(f"\n[dim]Config saved to: {config_path}[/dim]")
 
     try:

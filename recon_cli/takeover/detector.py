@@ -36,23 +36,89 @@ TAKEOVER_FINGERPRINTS = [
         "cname": ["azureedge.net"],
         "responses": ["Error 404 - Web site not configured"],
     },
-    {"provider": "netlify", "cname": ["netlify.app", "netlify.com"], "responses": ["Not Found - Request ID"]},
-    {"provider": "vercel", "cname": ["vercel.app", "now.sh"], "responses": ["The deployment you are looking for"]},
-    {"provider": "shopify", "cname": ["myshopify.com", "shops.myshopify.com"], "responses": ["Sorry, this shop is currently unavailable."]},
-    {"provider": "zendesk", "cname": ["zendesk.com"], "responses": ["Help Center Closed", "Oops, this page no longer exists"]},
-    {"provider": "hubspot", "cname": ["hubspot.net", "hs-sites.com"], "responses": ["Domain not configured", "does not exist in our system"]},
-    {"provider": "ghost", "cname": ["ghost.io"], "responses": ["The thing you were looking for is no longer here"]},
+    {
+        "provider": "netlify",
+        "cname": ["netlify.app", "netlify.com"],
+        "responses": ["Not Found - Request ID"],
+    },
+    {
+        "provider": "vercel",
+        "cname": ["vercel.app", "now.sh"],
+        "responses": ["The deployment you are looking for"],
+    },
+    {
+        "provider": "shopify",
+        "cname": ["myshopify.com", "shops.myshopify.com"],
+        "responses": ["Sorry, this shop is currently unavailable."],
+    },
+    {
+        "provider": "zendesk",
+        "cname": ["zendesk.com"],
+        "responses": ["Help Center Closed", "Oops, this page no longer exists"],
+    },
+    {
+        "provider": "hubspot",
+        "cname": ["hubspot.net", "hs-sites.com"],
+        "responses": ["Domain not configured", "does not exist in our system"],
+    },
+    {
+        "provider": "ghost",
+        "cname": ["ghost.io"],
+        "responses": ["The thing you were looking for is no longer here"],
+    },
     {"provider": "surge_sh", "cname": ["surge.sh"], "responses": ["project not found"]},
-    {"provider": "fly_io", "cname": ["fly.dev", "fly.io"], "responses": ["404 Not Found"]},
-    {"provider": "readme_io", "cname": ["readme.io", "readmessl.com"], "responses": ["Project doesnt exist"]},
-    {"provider": "cargo", "cname": ["cargocollective.com"], "responses": ["If you're moving your domain away from Cargo"]},
-    {"provider": "intercom", "cname": ["intercom.io", "custom.intercom.help"], "responses": ["This page is reserved for artistic content"]},
-    {"provider": "strikingly", "cname": ["strikingly.com", "s.strikinglydns.com"], "responses": ["But if you're looking to build your own website"]},
-    {"provider": "wordpress_com", "cname": ["wordpress.com"], "responses": ["Do you want to register"]},
-    {"provider": "smartjobboard", "cname": ["smartjobboard.com"], "responses": ["This job board website is either expired or its domain name is invalid."]},
-    {"provider": "helpjuice", "cname": ["helpjuice.com"], "responses": ["We could not find what you're looking for."]},
-    {"provider": "unbounce", "cname": ["unbouncepages.com"], "responses": ["The requested URL was not found on this server."]},
-    {"provider": "campaignmonitor", "cname": ["createsend.com", "industryemails.com"], "responses": ["Double check the URL"]},
+    {
+        "provider": "fly_io",
+        "cname": ["fly.dev", "fly.io"],
+        "responses": ["404 Not Found"],
+    },
+    {
+        "provider": "readme_io",
+        "cname": ["readme.io", "readmessl.com"],
+        "responses": ["Project doesnt exist"],
+    },
+    {
+        "provider": "cargo",
+        "cname": ["cargocollective.com"],
+        "responses": ["If you're moving your domain away from Cargo"],
+    },
+    {
+        "provider": "intercom",
+        "cname": ["intercom.io", "custom.intercom.help"],
+        "responses": ["This page is reserved for artistic content"],
+    },
+    {
+        "provider": "strikingly",
+        "cname": ["strikingly.com", "s.strikinglydns.com"],
+        "responses": ["But if you're looking to build your own website"],
+    },
+    {
+        "provider": "wordpress_com",
+        "cname": ["wordpress.com"],
+        "responses": ["Do you want to register"],
+    },
+    {
+        "provider": "smartjobboard",
+        "cname": ["smartjobboard.com"],
+        "responses": [
+            "This job board website is either expired or its domain name is invalid."
+        ],
+    },
+    {
+        "provider": "helpjuice",
+        "cname": ["helpjuice.com"],
+        "responses": ["We could not find what you're looking for."],
+    },
+    {
+        "provider": "unbounce",
+        "cname": ["unbouncepages.com"],
+        "responses": ["The requested URL was not found on this server."],
+    },
+    {
+        "provider": "campaignmonitor",
+        "cname": ["createsend.com", "industryemails.com"],
+        "responses": ["Double check the URL"],
+    },
 ]
 
 REQUEST_TIMEOUT = 6
@@ -106,7 +172,7 @@ class TakeoverDetector:
                 except httpx.RequestError:
                     continue
                 body = (resp.text or "")[:2000]
-                
+
                 # Check for parking page first
                 if self.check_parking(body):
                     return TakeoverFinding(
@@ -115,7 +181,7 @@ class TakeoverDetector:
                         evidence="Parking page signature detected",
                         status_code=int(resp.status_code or 0),
                         matched_url=url,
-                        finding_type="parking_page"
+                        finding_type="parking_page",
                     )
 
                 for fp in TAKEOVER_FINGERPRINTS:
@@ -129,6 +195,6 @@ class TakeoverDetector:
                                 evidence=snippet,
                                 status_code=int(resp.status_code or 0),
                                 matched_url=url,
-                                finding_type="subdomain_takeover"
+                                finding_type="subdomain_takeover",
                             )
         return None

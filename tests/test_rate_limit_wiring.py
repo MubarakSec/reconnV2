@@ -73,8 +73,23 @@ def _write_url(path: Path, url: str, status_code: int = 200):
 
 def test_rate_limiter_used_in_waf_probe(monkeypatch, tmp_path: Path):
     record = make_record(tmp_path, {"enable_waf_probe": True})
-    _write_url(record.paths.results_jsonl, "https://example.com/", status_code=403)
+    _write_url(record.paths.results_jsonl, "http://example.com/", status_code=403)
+    
     context = PipelineContext(record=record, manager=DummyManager())
+    context.runtime_config.enable_waf_probe = True
+    # Ensure the URL is allowed by scope logic
+    monkeypatch.setattr(context, "url_allowed", lambda *_: True)
+    
+    # Force the context to return our seeded result
+    seeded_result = {
+        "type": "url",
+        "url": "http://example.com/",
+        "hostname": "example.com",
+        "status_code": 403,
+        "score": 10,
+    }
+    # Return an iterator
+    monkeypatch.setattr(context, "iter_results", lambda: iter([seeded_result]))
 
     class DummyResponse:
         def __init__(self, status):

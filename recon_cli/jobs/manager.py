@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from recon_cli import config
-
-logger = logging.getLogger(__name__)
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.utils import fs, time as time_utils
 from recon_cli.utils.last_run import clear_job_pointers, refresh_job_pointers
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -61,9 +61,14 @@ class JobManager:
         self.running_dir = self.jobs_root / "running"
         self.finished_dir = self.jobs_root / "finished"
         self.failed_dir = self.jobs_root / "failed"
-        
+
         # Ensure directories exist
-        for d in [self.queued_dir, self.running_dir, self.finished_dir, self.failed_dir]:
+        for d in [
+            self.queued_dir,
+            self.running_dir,
+            self.finished_dir,
+            self.failed_dir,
+        ]:
             d.mkdir(parents=True, exist_ok=True)
 
     def _sanitize_target(self, target: str) -> str:

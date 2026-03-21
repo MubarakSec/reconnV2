@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 
 import aiohttp
 from recon_cli.jobs.manager import JobManager
-from recon_cli.jobs.models import JobSpec
 from recon_cli.jobs import summary as jobs_summary
 
 logger = logging.getLogger(__name__)
@@ -21,9 +20,11 @@ class TelegramBot:
     def __init__(self, token: str, allowed_chat_id: str):
         self.token = token
         # Support comma-separated list of IDs
-        self.allowed_chat_ids = {str(i).strip() for i in str(allowed_chat_id).split(",") if str(i).strip()}
+        self.allowed_chat_ids = {
+            str(i).strip() for i in str(allowed_chat_id).split(",") if str(i).strip()
+        }
         self.discovery_mode = "discover" in self.allowed_chat_ids
-        
+
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.manager = JobManager()
         self.offset = 0
@@ -61,14 +62,18 @@ class TelegramBot:
 
     async def handle_command(self, chat_id: str, text: str) -> None:
         s_chat_id = str(chat_id)
-        
+
         if s_chat_id not in self.allowed_chat_ids:
             if self.discovery_mode:
-                msg = f"🔍 *Discovery Mode*: Incoming message from ID: `{s_chat_id}`"
-                print(f"\n[bold cyan]TELEGRAM DISCOVERY:[/bold cyan] Received message from Chat ID: {s_chat_id}")
-                await self.send_message(s_chat_id, f"🆔 Your Telegram Chat ID is: `{s_chat_id}`\n\nTo authorize this ID, restart the bot with this ID added to the Chat ID list.")
+                print(
+                    f"\n[bold cyan]TELEGRAM DISCOVERY:[/bold cyan] Received message from Chat ID: {s_chat_id}"
+                )
+                await self.send_message(
+                    s_chat_id,
+                    f"🆔 Your Telegram Chat ID is: `{s_chat_id}`\n\nTo authorize this ID, restart the bot with this ID added to the Chat ID list.",
+                )
                 return
-            
+
             logger.warning("Unauthorized access attempt from chat_id: %s", s_chat_id)
             await self.send_message(
                 s_chat_id, "⚠️ Unauthorized. This bot is locked to specific chat IDs."
@@ -150,7 +155,9 @@ class TelegramBot:
         profile = args[1] if len(args) > 1 else "passive"
 
         try:
-            record = self.manager.create_job(target=target, profile=profile, initiator="telegram")
+            record = self.manager.create_job(
+                target=target, profile=profile, initiator="telegram"
+            )
             await self.send_message(
                 chat_id, f"✅ Scan queued!\nJob ID: `{record.metadata.job_id}`"
             )
@@ -203,9 +210,13 @@ class TelegramBot:
 
     async def start(self) -> None:
         self.running = True
-        logger.info("Telegram Bot started. Authorized IDs: %s", ", ".join(self.allowed_chat_ids))
+        logger.info(
+            "Telegram Bot started. Authorized IDs: %s", ", ".join(self.allowed_chat_ids)
+        )
         if self.discovery_mode:
-            logger.info("Discovery Mode is ENABLED. Message the bot to see your Chat ID.")
+            logger.info(
+                "Discovery Mode is ENABLED. Message the bot to see your Chat ID."
+            )
 
         while self.running:
             updates = await self.get_updates()

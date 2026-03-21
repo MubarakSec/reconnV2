@@ -33,13 +33,15 @@ class ResolveStage(Stage):
 
         # Add IP targets directly to results without resolution
         for ip in ip_targets:
-            context.results.append({
-                "type": "asset",
-                "source": "input",
-                "hostname": ip,
-                "ip": ip,
-                "record_type": "A",
-            })
+            context.results.append(
+                {
+                    "type": "asset",
+                    "source": "input",
+                    "hostname": ip,
+                    "ip": ip,
+                    "record_type": "A",
+                }
+            )
 
         total_hosts = len(hosts)
         if total_hosts == 0:

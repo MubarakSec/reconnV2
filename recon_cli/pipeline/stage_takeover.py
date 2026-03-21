@@ -110,7 +110,7 @@ class TakeoverStage(Stage):
             providers = self._match_providers(cname_chain)
             if providers:
                 cname_matches += 1
-            
+
             try:
                 finding = await detector.check_host(
                     host, providers=providers if providers else None
@@ -124,7 +124,10 @@ class TakeoverStage(Stage):
             claimability = self._assess_claimability(
                 finding.provider, providers, dns_state
             )
-            if claimability["level"] == "low" and finding.finding_type == "subdomain_takeover":
+            if (
+                claimability["level"] == "low"
+                and finding.finding_type == "subdomain_takeover"
+            ):
                 suppressed_low_confidence += 1
                 continue
             payload = {
@@ -132,7 +135,9 @@ class TakeoverStage(Stage):
                 "finding_type": finding.finding_type,
                 "source": "takeover-check",
                 "hostname": finding.hostname,
-                "description": f"Potential {finding.finding_type.replace('_', ' ')} detected ({claimability['level']} claimability)" if finding.finding_type == "subdomain_takeover" else "Parked domain / Domain for sale detected",
+                "description": f"Potential {finding.finding_type.replace('_', ' ')} detected ({claimability['level']} claimability)"
+                if finding.finding_type == "subdomain_takeover"
+                else "Parked domain / Domain for sale detected",
                 "details": {
                     "provider": finding.provider,
                     "evidence": finding.evidence,
@@ -177,6 +182,7 @@ class TakeoverStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         import asyncio
+
         asyncio.run(self.run_async(context))
 
     def _resolve_cname_chain(self, hostname: str, timeout: int) -> List[str]:
@@ -257,7 +263,7 @@ class TakeoverStage(Stage):
                 "priority": "critical",
                 "severity": "critical",
             }
-        
+
         # If we have a provider match but it's not dangling, it's a high confidence "resolved" takeover (edge case)
         if dns_provider_match and not dns_dangling:
             return {
@@ -296,6 +302,7 @@ class TakeoverStage(Stage):
     def _has_wildcard_dns(self, domain: str, timeout: int) -> bool:
         """Detect wildcard DNS by resolving a random nonexistent subdomain."""
         import uuid
+
         test_host = f"{uuid.uuid4().hex[:8]}.{domain}"
         return self._target_has_address(test_host, timeout)
 

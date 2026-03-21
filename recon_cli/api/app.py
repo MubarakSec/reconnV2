@@ -1,7 +1,3 @@
-"""
-ReconnV2 REST API - FastAPI Application
-"""
-
 from __future__ import annotations
 
 import json
@@ -11,6 +7,19 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from recon_cli import config
+from recon_cli.jobs.manager import JobManager
+from recon_cli.jobs.lifecycle import JobLifecycle
+from recon_cli.jobs.results import JobResults
+from recon_cli.jobs.summary import JobSummary
+from recon_cli.users import Permission
+from recon_cli.utils.metrics import metrics as metrics_registry
+from recon_cli.utils import validation
+
+"""
+ReconnV2 REST API - FastAPI Application
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +34,6 @@ except ImportError:
     FASTAPI_AVAILABLE = False
     FastAPI = None
     BaseModel = object
-
-from recon_cli import config
-from recon_cli.jobs.manager import JobManager
-from recon_cli.jobs.lifecycle import JobLifecycle
-from recon_cli.jobs.results import JobResults
-from recon_cli.jobs.summary import JobSummary
-from recon_cli.users import Permission
-from recon_cli.utils.metrics import metrics as metrics_registry
-from recon_cli.utils import validation
 
 
 class _JobsBaseProxy:
@@ -715,7 +715,9 @@ def create_app(manager: Optional[JobManager] = None) -> "FastAPI":
         await _require_capability(x_api_key, Permission.JOBS_CREATE.value)
         manager = app.state.manager
 
-        target = _normalize_targets_or_400([request.target], allow_ip=request.allow_ip)[0]
+        target = _normalize_targets_or_400([request.target], allow_ip=request.allow_ip)[
+            0
+        ]
         profile = _normalize_profile_or_400(request.profile)
         scanners = _normalize_token_list_or_400(
             request.scanners,

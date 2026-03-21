@@ -197,7 +197,9 @@ class CloudAssetDiscoveryStage(Stage):
                     enrichment_artifact.read_text(encoding="utf-8")
                 )
             except Exception:
-                context.logger.warning("Failed to load enrichment map; continuing with empty map")
+                context.logger.warning(
+                    "Failed to load enrichment map; continuing with empty map"
+                )
                 enrichment_map = {}
             for entries in enrichment_map.values():
                 if not isinstance(entries, list):

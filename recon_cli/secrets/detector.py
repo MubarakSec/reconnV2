@@ -1,37 +1,18 @@
 from __future__ import annotations
 
-"""
-Secrets Detector Module - كشف الأسرار والبيانات الحساسة
-
-يكتشف الأسرار المخزنة بشكل خاطئ في الكود مثل:
-- AWS Access Keys و Secret Keys
-- Slack Tokens
-- Google API Keys
-- JWT Tokens
-- RSA Private Keys
-- أي secret/token/api_key عام
-
-يستخدم:
-1. Pattern Matching (Regex) للأنماط المعروفة
-2. Shannon Entropy لاكتشاف السلاسل العشوائية
-
-Example:
-    >>> detector = SecretsDetector()
-    >>> matches = detector.scan_text("const API_KEY = 'AKIAIOSFODNN7EXAMPLE'")
-    >>> for m in matches:
-    ...     print(f"{m.pattern}: confidence={m.confidence}")
-"""
-
-import json
 import math
 import re
 import hashlib
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import requests
+
+"""
+Secrets Detector Module - كشف الأسرار والبيانات الحساسة
+...
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +25,26 @@ logger = logging.getLogger(__name__)
 SECRETS_PATTERNS = [
     # AWS Access Key: يبدأ بـ AKIA متبوعاً بـ 16 حرف
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    
     # AWS Secret Key: عادة في assignment مع كلمة secret
-    ("aws_secret_key", re.compile(r"(?i)aws(.{0,4})?secret(.{0,4})?=\s*['\"]([A-Za-z0-9/+]{40})['\"]")),
-    
+    (
+        "aws_secret_key",
+        re.compile(r"(?i)aws(.{0,4})?secret(.{0,4})?=\s*['\"]([A-Za-z0-9/+]{40})['\"]"),
+    ),
     # Slack Token: يبدأ بـ xoxp/xoxb/xoxa/xoxo
     ("slack_token", re.compile(r"xox[pboa]\-[A-Za-z0-9-]{10,48}")),
-    
     # Google API Key: يبدأ بـ AIza
     ("google_api_key", re.compile(r"AIza[0-9A-Za-z\-_]{35}")),
-    
     # JWT Token: Base64 encoded JSON يبدأ بـ eyJ
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_=-]{10,}")),
-    
     # RSA Private Key: الهيدر المعروف
     ("rsa_private", re.compile(r"-----BEGIN RSA PRIVATE KEY-----")),
-    
     # Generic Secret: أي متغير يحتوي api/secret/token/key مع قيمة طويلة
-    ("generic_secret", re.compile(r"(?i)(api|secret|token|key)[\w-]{0,10}\s*[:=]\s*['\"][A-Za-z0-9_\-/]{16,}['\"]")),
+    (
+        "generic_secret",
+        re.compile(
+            r"(?i)(api|secret|token|key)[\w-]{0,10}\s*[:=]\s*['\"][A-Za-z0-9_\-/]{16,}['\"]"
+        ),
+    ),
 ]
 
 # امتدادات الملفات النصية التي يُحتمل أن تحتوي أسرار
@@ -74,30 +57,31 @@ USER_AGENT = "recon-cli-secrets/0.1"
 #                     Shannon Entropy
 # ═══════════════════════════════════════════════════════════
 
+
 def shannon_entropy(data: str) -> float:
     """
     حساب Shannon Entropy لسلسلة نصية.
-    
+
     Shannon Entropy تقيس مدى "عشوائية" النص:
     - نص عادي (مثل "hello") له entropy منخفضة (~2-3 bits)
     - نص عشوائي (مثل API keys) له entropy عالية (~4-5 bits)
-    
+
     الصيغة الرياضية:
         H = -Σ p(x) * log2(p(x))
-    
+
     حيث p(x) هي احتمالية ظهور كل حرف.
-    
+
     Args:
         data: السلسلة النصية للتحليل
-        
+
     Returns:
         قيمة الـ entropy بالـ bits (0.0 إلى ~8.0)
-        
+
     Example:
         >>> shannon_entropy("aaaa")      # منخفضة: 0.0
         >>> shannon_entropy("abcd")      # متوسطة: 2.0
         >>> shannon_entropy("aB3$xY9!")  # عالية: ~3.0
-        
+
     لماذا 3.5 كحد أدنى للأسرار؟
     - الكلمات الإنجليزية العادية: ~2.5-3.0
     - الأسرار والـ tokens: ~3.5-5.0
@@ -105,23 +89,23 @@ def shannon_entropy(data: str) -> float:
     """
     if not data:
         return 0.0
-    
+
     # Step 1: حساب تكرار كل حرف
     freq: Dict[str, int] = {}
     for char in data:
         freq[char] = freq.get(char, 0) + 1
-    
+
     # Step 2: حساب الـ entropy
     entropy = 0.0
     length = len(data)
-    
+
     for count in freq.values():
         # p = احتمالية ظهور الحرف
         p = count / length
         # إضافة مساهمة هذا الحرف في الـ entropy
         # نستخدم -= لأن log2(p) سالب عندما p < 1
         entropy -= p * math.log2(p)
-    
+
     return entropy
 
 
@@ -129,11 +113,12 @@ def shannon_entropy(data: str) -> float:
 #                     Data Classes
 # ═══════════════════════════════════════════════════════════
 
+
 @dataclass
 class SecretMatch:
     """
     نتيجة مطابقة سر.
-    
+
     Attributes:
         pattern: اسم النمط المطابق (مثل "aws_access_key")
         value_hash: SHA256 hash للقيمة (لا نحفظ القيمة الفعلية!)
@@ -142,6 +127,7 @@ class SecretMatch:
         start: موقع البداية في النص
         end: موقع النهاية في النص
     """
+
     pattern: str
     value_hash: str
     length: int
@@ -153,7 +139,7 @@ class SecretMatch:
     def confidence(self) -> str:
         """
         تحديد مستوى الثقة في أن هذا سر حقيقي.
-        
+
         المستويات:
         - high: أنماط مؤكدة (RSA keys, AWS keys)
         - medium: entropy عالية (>= 3.5)
@@ -193,7 +179,10 @@ class SecretsDetector:
             if resp.status_code != 200:
                 return None
             content_type = resp.headers.get("Content-Type", "")
-            if "text" not in content_type and not url.split("?")[0].split(".")[-1].lower() in TEXT_LIKE_EXTENSIONS:
+            if (
+                "text" not in content_type
+                and url.split("?")[0].split(".")[-1].lower() not in TEXT_LIKE_EXTENSIONS
+            ):
                 return None
             resp.encoding = resp.encoding or "utf-8"
             return resp.text
@@ -206,7 +195,9 @@ class SecretsDetector:
             for match in pattern.finditer(text):
                 value = match.group(0)
                 entropy = shannon_entropy(value)
-                value_hash = hashlib.sha256(value.encode("utf-8", "ignore")).hexdigest()[:16]
+                value_hash = hashlib.sha256(
+                    value.encode("utf-8", "ignore")
+                ).hexdigest()[:16]
                 matches.append(
                     SecretMatch(
                         pattern=name,
@@ -219,7 +210,9 @@ class SecretsDetector:
                 )
         return matches
 
-    def scan_urls(self, urls: Iterable[str], limit: int) -> Dict[str, List[SecretMatch]]:
+    def scan_urls(
+        self, urls: Iterable[str], limit: int
+    ) -> Dict[str, List[SecretMatch]]:
         results: Dict[str, List[SecretMatch]] = {}
         count = 0
         for url in urls:
@@ -234,7 +227,9 @@ class SecretsDetector:
             count += 1
         return results
 
-    def scan_text_artifacts(self, items: Dict[str, str]) -> Dict[str, List[SecretMatch]]:
+    def scan_text_artifacts(
+        self, items: Dict[str, str]
+    ) -> Dict[str, List[SecretMatch]]:
         results: Dict[str, List[SecretMatch]] = {}
         for key, text in items.items():
             matches = self.scan_text(text)

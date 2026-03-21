@@ -145,7 +145,9 @@ class AuthMatrixStage(Stage):
             try:
                 requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
             except Exception:
-                context.logger.debug("Failed to disable urllib3 warnings", exc_info=True)
+                context.logger.debug(
+                    "Failed to disable urllib3 warnings", exc_info=True
+                )
 
         timeout = int(getattr(runtime, "idor_timeout", 10))
         stats = context.record.metadata.stats.setdefault(

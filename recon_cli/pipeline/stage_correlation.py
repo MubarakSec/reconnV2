@@ -37,8 +37,11 @@ class CorrelationStage(Stage):
         if trimmed_path.exists():
             try:
                 from recon_cli.utils.jsonl import read_jsonl
+
                 results = read_jsonl(trimmed_path)
-                context.logger.info("Correlation using trimmed results (%s)", trimmed_path.name)
+                context.logger.info(
+                    "Correlation using trimmed results (%s)", trimmed_path.name
+                )
             except Exception as e:
                 context.logger.debug("Failed to read trimmed results: %s", e)
 

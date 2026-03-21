@@ -63,7 +63,9 @@ class PassiveEnumerationStage(Stage):
             subfinder_hosts = self._run_subfinder(context, targets_file, tool_timeout)
 
             # 3. Amass
-            amass_hosts = self._run_amass(context, targets_file, tool_timeout, amass_out)
+            amass_hosts = self._run_amass(
+                context, targets_file, tool_timeout, amass_out
+            )
         else:
             logger.info("Skipping passive subdomain discovery (targets are all IPs)")
 
@@ -74,17 +76,23 @@ class PassiveEnumerationStage(Stage):
         for hostname in sorted(subfinder_hosts):
             try:
                 normalized = validation.normalize_hostname(hostname)
-                tracker.append({"type": "hostname", "source": "subfinder", "hostname": normalized})
+                tracker.append(
+                    {"type": "hostname", "source": "subfinder", "hostname": normalized}
+                )
             except ValueError:
                 continue
         for hostname in sorted(amass_hosts):
             try:
                 normalized = validation.normalize_hostname(hostname)
-                tracker.append({"type": "hostname", "source": "amass", "hostname": normalized})
+                tracker.append(
+                    {"type": "hostname", "source": "amass", "hostname": normalized}
+                )
             except ValueError:
                 continue
         for hostname in sorted(seed_hosts):
-            tracker.append({"type": "hostname", "source": "input", "hostname": hostname})
+            tracker.append(
+                {"type": "hostname", "source": "input", "hostname": hostname}
+            )
 
         # 6. Final Host Consolidation and Artifact Generation
         passive_hosts_set: set[str] = set()
@@ -101,12 +109,16 @@ class PassiveEnumerationStage(Stage):
 
         passive_hosts = sorted(passive_hosts_set)
         if passive_hosts:
-            passive_hosts_out.write_text("\n".join(passive_hosts) + "\n", encoding="utf-8")
-        
+            passive_hosts_out.write_text(
+                "\n".join(passive_hosts) + "\n", encoding="utf-8"
+            )
+
         context.record.metadata.stats["passive_hostnames"] = len(passive_hosts)
         context.manager.update_metadata(context.record)
 
-    def _run_subfinder(self, context: PipelineContext, targets_file: Any, tool_timeout: int) -> set[str]:
+    def _run_subfinder(
+        self, context: PipelineContext, targets_file: Any, tool_timeout: int
+    ) -> set[str]:
         logger = context.logger
         executor = context.executor
         subfinder_hosts: set[str] = set()
@@ -121,9 +133,13 @@ class PassiveEnumerationStage(Stage):
                     check=False,
                     timeout=tool_timeout,
                 )
-                output = (completed.stdout or "") if hasattr(completed, "stdout") else ""
+                output = (
+                    (completed.stdout or "") if hasattr(completed, "stdout") else ""
+                )
                 if output:
-                    lines = [line.strip() for line in output.splitlines() if line.strip()]
+                    lines = [
+                        line.strip() for line in output.splitlines() if line.strip()
+                    ]
                     subfinder_hosts.update(lines)
                     subfinder_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
                     logger.info("subfinder found %d subdomains", len(lines))
@@ -138,7 +154,13 @@ class PassiveEnumerationStage(Stage):
             note_missing_tool(context, "subfinder")
         return subfinder_hosts
 
-    def _run_amass(self, context: PipelineContext, targets_file: Any, tool_timeout: int, amass_out: Any) -> set[str]:
+    def _run_amass(
+        self,
+        context: PipelineContext,
+        targets_file: Any,
+        tool_timeout: int,
+        amass_out: Any,
+    ) -> set[str]:
         logger = context.logger
         executor = context.executor
         amass_hosts: set[str] = set()
@@ -170,8 +192,11 @@ class PassiveEnumerationStage(Stage):
                                         amass_hosts.add(name.strip())
                                         continue
                             except json.JSONDecodeError:
-                                logger.debug("Invalid JSON in amass output: %s", line.strip()[:100])
-                            
+                                logger.debug(
+                                    "Invalid JSON in amass output: %s",
+                                    line.strip()[:100],
+                                )
+
                             host = line.strip()
                             if host:
                                 amass_hosts.add(host)
@@ -184,7 +209,13 @@ class PassiveEnumerationStage(Stage):
             note_missing_tool(context, "amass")
         return amass_hosts
 
-    def _run_wayback(self, context: PipelineContext, targets: list[str], tool_timeout: int, wayback_out: Any) -> None:
+    def _run_wayback(
+        self,
+        context: PipelineContext,
+        targets: list[str],
+        tool_timeout: int,
+        wayback_out: Any,
+    ) -> None:
         logger = context.logger
         executor = context.executor
         artifacts = context.record.paths
@@ -211,10 +242,14 @@ class PassiveEnumerationStage(Stage):
         if not wayback_targets:
             return
 
-        max_wayback_urls = max(0, int(getattr(context.runtime_config, "wayback_max_urls", 0) or 0))
-        max_wayback_per_target = max(0, int(getattr(context.runtime_config, "wayback_max_per_target", 0) or 0))
+        max_wayback_urls = max(
+            0, int(getattr(context.runtime_config, "wayback_max_urls", 0) or 0)
+        )
+        max_wayback_per_target = max(
+            0, int(getattr(context.runtime_config, "wayback_max_per_target", 0) or 0)
+        )
         fair_share = bool(getattr(context.runtime_config, "wayback_fair_share", True))
-        
+
         wayback_total = 0
         wrote_any = False
         wayback_targets_processed = 0
@@ -231,55 +266,85 @@ class PassiveEnumerationStage(Stage):
                         max_wayback_urls,
                     )
                     break
-                
+
                 wayback_targets_processed += 1
                 target_budget = max_wayback_per_target
                 if fair_share and max_wayback_urls:
                     remaining_targets = len(wayback_targets) - idx + 1
                     remaining_budget = max(0, max_wayback_urls - wayback_total)
                     if remaining_targets > 0 and remaining_budget > 0:
-                        fair_budget = max(1, (remaining_budget + remaining_targets - 1) // remaining_targets)
+                        fair_budget = max(
+                            1,
+                            (remaining_budget + remaining_targets - 1)
+                            // remaining_targets,
+                        )
                         if target_budget <= 0:
                             target_budget = fair_budget
                         else:
                             target_budget = min(target_budget, fair_budget)
 
                 if wayback_cmd:
-                    logger.info("Running %s (%s/%s): %s%s", wayback_cmd, idx, len(wayback_targets), target, f" [budget={target_budget} URLs]" if target_budget > 0 else "")
+                    logger.info(
+                        "Running %s (%s/%s): %s%s",
+                        wayback_cmd,
+                        idx,
+                        len(wayback_targets),
+                        target,
+                        f" [budget={target_budget} URLs]" if target_budget > 0 else "",
+                    )
                     start = time.monotonic()
                     wayback_tmp.unlink(missing_ok=True)
                     try:
-                        executor.run_to_file([wayback_cmd, target], wayback_tmp, timeout=tool_timeout, redact=False)
+                        executor.run_to_file(
+                            [wayback_cmd, target],
+                            wayback_tmp,
+                            timeout=tool_timeout,
+                            redact=False,
+                        )
                         elapsed = time.monotonic() - start
                     except CommandError:
                         logger.warning("%s failed for %s", wayback_cmd, target)
                         continue
                     except Exception as exc:
-                        logger.error("Unexpected error in %s for %s: %s", wayback_cmd, target, exc)
+                        logger.error(
+                            "Unexpected error in %s for %s: %s",
+                            wayback_cmd,
+                            target,
+                            exc,
+                        )
                         continue
-                    
+
                     if not wayback_tmp.exists():
-                        logger.debug("%s returned no output for %s", wayback_cmd, target)
+                        logger.debug(
+                            "%s returned no output for %s", wayback_cmd, target
+                        )
                         continue
-                    
+
                     url_added = 0
                     budget_reached = False
-                    with wayback_tmp.open("r", encoding="utf-8", errors="ignore") as handle:
+                    with wayback_tmp.open(
+                        "r", encoding="utf-8", errors="ignore"
+                    ) as handle:
                         for line in handle:
                             url = line.strip()
-                            if not url: continue
+                            if not url:
+                                continue
                             parsed = urlparse(url)
-                            if not parsed.scheme or not parsed.netloc: continue
+                            if not parsed.scheme or not parsed.netloc:
+                                continue
                             host = parsed.hostname
                             hostname = None
                             if host:
                                 try:
                                     hostname = validation.normalize_hostname(host)
                                 except ValueError:
-                                    logger.debug("Failed to normalize hostname: %s", host)
-                            
-                            if not context.url_allowed(url): continue
-                            
+                                    logger.debug(
+                                        "Failed to normalize hostname: %s", host
+                                    )
+
+                            if not context.url_allowed(url):
+                                continue
+
                             payload = {
                                 "type": "url",
                                 "source": wayback_cmd,
@@ -290,32 +355,50 @@ class PassiveEnumerationStage(Stage):
                             url_added += 1
                             out_handle.write(url + "\n")
                             wrote_any = True
-                            
+
                             if target_budget and url_added >= target_budget:
                                 budget_reached = True
                                 break
-                            if max_wayback_urls and (wayback_total + url_added) >= max_wayback_urls:
+                            if (
+                                max_wayback_urls
+                                and (wayback_total + url_added) >= max_wayback_urls
+                            ):
                                 global_cap_hit = True
                                 break
-                    
+
                     wayback_total += url_added
-                    logger.info("%s finished for %s in %.1fs (%d URLs%s)", wayback_cmd, target, elapsed, url_added, ", budget reached" if budget_reached else "")
+                    logger.info(
+                        "%s finished for %s in %.1fs (%d URLs%s)",
+                        wayback_cmd,
+                        target,
+                        elapsed,
+                        url_added,
+                        ", budget reached" if budget_reached else "",
+                    )
                     wayback_tmp.unlink(missing_ok=True)
 
                 else:
                     # FALLBACK API
-                    logger.info("Using Wayback API fallback (%s/%s): %s%s", idx, len(wayback_targets), target, f" [budget={target_budget} URLs]" if target_budget > 0 else "")
+                    logger.info(
+                        "Using Wayback API fallback (%s/%s): %s%s",
+                        idx,
+                        len(wayback_targets),
+                        target,
+                        f" [budget={target_budget} URLs]" if target_budget > 0 else "",
+                    )
                     start = time.monotonic()
                     limit = target_budget if target_budget > 0 else 10000
                     urls = self._run_wayback_api_fallback(context, target, limit)
                     elapsed = time.monotonic() - start
-                    
+
                     url_added = 0
                     budget_reached = False
                     for url in urls:
-                        if not url: continue
+                        if not url:
+                            continue
                         parsed = urlparse(url)
-                        if not parsed.scheme or not parsed.netloc: continue
+                        if not parsed.scheme or not parsed.netloc:
+                            continue
                         host = parsed.hostname
                         hostname = None
                         if host:
@@ -323,9 +406,10 @@ class PassiveEnumerationStage(Stage):
                                 hostname = validation.normalize_hostname(host)
                             except ValueError:
                                 logger.debug("Failed to normalize hostname: %s", host)
-                        
-                        if not context.url_allowed(url): continue
-                        
+
+                        if not context.url_allowed(url):
+                            continue
+
                         payload = {
                             "type": "url",
                             "source": "wayback_api",
@@ -336,16 +420,25 @@ class PassiveEnumerationStage(Stage):
                         url_added += 1
                         out_handle.write(url + "\n")
                         wrote_any = True
-                        
+
                         if target_budget and url_added >= target_budget:
                             budget_reached = True
                             break
-                        if max_wayback_urls and (wayback_total + url_added) >= max_wayback_urls:
+                        if (
+                            max_wayback_urls
+                            and (wayback_total + url_added) >= max_wayback_urls
+                        ):
                             global_cap_hit = True
                             break
-                    
+
                     wayback_total += url_added
-                    logger.info("Wayback API finished for %s in %.1fs (%d URLs%s)", target, elapsed, url_added, ", budget reached" if budget_reached else "")
+                    logger.info(
+                        "Wayback API finished for %s in %.1fs (%d URLs%s)",
+                        target,
+                        elapsed,
+                        url_added,
+                        ", budget reached" if budget_reached else "",
+                    )
 
                 if max_wayback_urls and wayback_total >= max_wayback_urls:
                     wayback_targets_skipped = len(wayback_targets) - idx
@@ -353,28 +446,41 @@ class PassiveEnumerationStage(Stage):
 
         # Stats update
         stats = context.record.metadata.stats.setdefault("wayback", {})
-        stats.update({
-            "tool": wayback_cmd or "wayback_api",
-            "targets_total": len(wayback_targets),
-            "targets_processed": wayback_targets_processed,
-            "targets_skipped": wayback_targets_skipped,
-            "urls_ingested": wayback_total,
-            "max_urls": max_wayback_urls,
-            "max_per_target": max_wayback_per_target,
-            "fair_share": fair_share,
-            "global_cap_hit": bool(global_cap_hit or (max_wayback_urls and wayback_total >= max_wayback_urls)),
-        })
+        stats.update(
+            {
+                "tool": wayback_cmd or "wayback_api",
+                "targets_total": len(wayback_targets),
+                "targets_processed": wayback_targets_processed,
+                "targets_skipped": wayback_targets_skipped,
+                "urls_ingested": wayback_total,
+                "max_urls": max_wayback_urls,
+                "max_per_target": max_wayback_per_target,
+                "fair_share": fair_share,
+                "global_cap_hit": bool(
+                    global_cap_hit
+                    or (max_wayback_urls and wayback_total >= max_wayback_urls)
+                ),
+            }
+        )
         context.manager.update_metadata(context.record)
-        
+
         if not wrote_any and wayback_out.exists():
             wayback_out.unlink(missing_ok=True)
-        
+
         if not wayback_cmd:
             logger.info("waybackurls/gau not available; used API fallback")
         else:
-            logger.info("%s summary: processed=%d skipped=%d ingested=%d", wayback_cmd, wayback_targets_processed, wayback_targets_skipped, wayback_total)
+            logger.info(
+                "%s summary: processed=%d skipped=%d ingested=%d",
+                wayback_cmd,
+                wayback_targets_processed,
+                wayback_targets_skipped,
+                wayback_total,
+            )
 
-    def _run_wayback_api_fallback(self, context: PipelineContext, domain: str, limit: int) -> list[str]:
+    def _run_wayback_api_fallback(
+        self, context: PipelineContext, domain: str, limit: int
+    ) -> list[str]:
         """
         Fallback for Wayback Machine using the CDX API directly.
         """
@@ -392,4 +498,3 @@ class PassiveEnumerationStage(Stage):
         except Exception as exc:
             logger.warning("Wayback CDX API fallback failed for %s: %s", domain, exc)
             return []
-

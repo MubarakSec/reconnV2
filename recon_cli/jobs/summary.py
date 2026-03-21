@@ -4,8 +4,11 @@ import os
 from datetime import datetime
 
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from recon_cli.jobs.manager import JobManager
 
 from recon_cli.utils.jsonl import iter_jsonl
 
@@ -71,9 +74,7 @@ def _priority_rank(value: object) -> int:
 def _ranking_key(entry: dict) -> tuple[int, int, int, int]:
     tags_raw = entry.get("tags", [])
     tags = (
-        {str(tag).lower() for tag in tags_raw}
-        if isinstance(tags_raw, list)
-        else set()
+        {str(tag).lower() for tag in tags_raw} if isinstance(tags_raw, list) else set()
     )
     confirmed = 1 if _is_confirmed(entry) else 0
     non_repetitive = 0 if "auth:repetitive" in tags else 1
@@ -174,7 +175,7 @@ def generate_summary_data(record) -> Dict[str, Any]:
 def generate_summary(context) -> None:
     record = context.record
     data = generate_summary_data(record)
-    
+
     metadata = record.metadata
     spec = record.spec
 
@@ -270,7 +271,9 @@ def generate_summary(context) -> None:
     ]
     if high_priority_candidates:
         lines.append("")
-        lines.append(f"== HIGH PRIORITY CANDIDATES ({len(high_priority_candidates)}) ==")
+        lines.append(
+            f"== HIGH PRIORITY CANDIDATES ({len(high_priority_candidates)}) =="
+        )
         for entry in high_priority_candidates[:SUMMARY_TOP]:
             label = _format_finding_label(entry)
             score = entry.get("score", 0)
@@ -288,7 +291,7 @@ def generate_summary(context) -> None:
         lines.append(
             f"Verified Ratio    : {data['verified_ratio']:.2%} ({data['verified_count']}/{data['findings_total']})"
         )
-    
+
     status_counter = data["status_counter"]
     if status_counter:
         lines.append("")
@@ -306,8 +309,12 @@ def generate_summary(context) -> None:
 
     lines.append("")
     lines.append("== Quality ==")
-    lines.append(f"Noise ratio     : {noise_ratio:.2%} (noise {noise_count} / urls {total_urls})")
-    lines.append(f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})")
+    lines.append(
+        f"Noise ratio     : {noise_ratio:.2%} (noise {noise_count} / urls {total_urls})"
+    )
+    lines.append(
+        f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})"
+    )
 
     top_urls = data["top_urls"]
     if top_urls:
@@ -326,12 +333,18 @@ def generate_summary(context) -> None:
     if confirmed_findings:
         next_actions.append("Manually verify and report the confirmed vulnerabilities.")
     if high_priority_candidates:
-        next_actions.append("Perform deeper manual analysis on high-priority candidates.")
+        next_actions.append(
+            "Perform deeper manual analysis on high-priority candidates."
+        )
     if data["counts"].get("api_spec", 0) > 0:
-        next_actions.append("Examine discovered API specifications for sensitive endpoints.")
+        next_actions.append(
+            "Examine discovered API specifications for sensitive endpoints."
+        )
     if data["counts"].get("finding", 0) > 0:
-        next_actions.append("Review all findings in the web dashboard for detailed evidence.")
-    
+        next_actions.append(
+            "Review all findings in the web dashboard for detailed evidence."
+        )
+
     if next_actions:
         lines.append("")
         lines.append("== NEXT ACTIONS ==")
@@ -347,13 +360,16 @@ def generate_summary(context) -> None:
     noise_count = data["noise_count"]
     findings_total = data["findings_total"]
     verified_count = data["verified_count"]
-    
+
     dupe_seen = 0
     dupe_count = 0
-    if hasattr(context, "results") and getattr(context.results, "stats", None) is not None:
+    if (
+        hasattr(context, "results")
+        and getattr(context.results, "stats", None) is not None
+    ):
         dupe_seen = int(context.results.stats.get("records_seen", 0))
         dupe_count = int(context.results.stats.get("records_duplicate", 0))
-    
+
     noise_ratio = (noise_count / total_urls) if total_urls else 0.0
     verified_ratio = data["verified_ratio"]
     duplicate_ratio = (dupe_count / dupe_seen) if dupe_seen else 0.0
@@ -377,6 +393,7 @@ def generate_summary(context) -> None:
 class JobSummary:
     def __init__(self, manager: Optional[JobManager] = None) -> None:
         from recon_cli.jobs.manager import JobManager
+
         self.manager = manager or JobManager()
 
     def get_summary(self, job_id: str) -> Optional[Dict[str, Any]]:

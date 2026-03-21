@@ -11,6 +11,7 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.enrich import classify_provider
 
+
 class OriginDiscoveryStage(Stage):
     """
     Advanced Origin IP Discovery Stage
@@ -21,12 +22,17 @@ class OriginDiscoveryStage(Stage):
     4. Verifying if discovered IPs serve the target domain via Host header.
     5. Filtering out known CDN/Cloud IP ranges.
     """
+
     name = "origin_discovery"
 
-    async def _probe_origin_via_host_header(self, ip: str, domain: str, timeout: int = 5) -> bool:
+    async def _probe_origin_via_host_header(
+        self, ip: str, domain: str, timeout: int = 5
+    ) -> bool:
         """Verifies if the IP address responds to the domain's Host header."""
         urls = [f"http://{ip}", f"https://{ip}"]
-        async with httpx.AsyncClient(verify=False, timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            verify=False, timeout=timeout, follow_redirects=True
+        ) as client:
             for url in urls:
                 try:
                     resp = await client.get(url, headers={"Host": domain})
@@ -38,10 +44,14 @@ class OriginDiscoveryStage(Stage):
                     continue
         return False
 
-    async def _resolve_async(self, hostname: str, resolver: dns.resolver.Resolver) -> List[str]:
+    async def _resolve_async(
+        self, hostname: str, resolver: dns.resolver.Resolver
+    ) -> List[str]:
         try:
             loop = asyncio.get_running_loop()
-            answers = await loop.run_in_executor(None, lambda: resolver.resolve(hostname, 'A'))
+            answers = await loop.run_in_executor(
+                None, lambda: resolver.resolve(hostname, "A")
+            )
             return [str(rdata) for rdata in answers]
         except Exception:
             return []
@@ -71,17 +81,31 @@ class OriginDiscoveryStage(Stage):
         if not root_domains:
             return
 
-        context.logger.info("Starting advanced origin IP discovery on %d root domains", len(root_domains))
-        
+        context.logger.info(
+            "Starting advanced origin IP discovery on %d root domains",
+            len(root_domains),
+        )
+
         origin_findings: List[Dict[str, Any]] = []
         resolver = dns.resolver.Resolver()
         resolver.timeout = 3
         resolver.lifetime = 3
 
-        origin_subdomains = ["direct", "origin", "ftp", "cpanel", "mail", "webmail", "dev", "test", "staging", "admin"]
+        origin_subdomains = [
+            "direct",
+            "origin",
+            "ftp",
+            "cpanel",
+            "mail",
+            "webmail",
+            "dev",
+            "test",
+            "staging",
+            "admin",
+        ]
 
         for domain in root_domains:
-            potential_ips: Dict[str, str] = {} # ip -> method
+            potential_ips: Dict[str, str] = {}  # ip -> method
 
             # 0. Historical DNS (SecurityTrails)
             st_key = getattr(context.runtime_config, "securitytrails_api_key", None)
@@ -98,15 +122,20 @@ class OriginDiscoveryStage(Stage):
                                     if ip:
                                         potential_ips[ip] = "SecurityTrails History"
                 except Exception as e:
-                    context.logger.debug("SecurityTrails lookup failed for %s: %s", domain, e)
+                    context.logger.debug(
+                        "SecurityTrails lookup failed for %s: %s", domain, e
+                    )
 
             # 1. TXT / SPF Records
             try:
-                answers = resolver.resolve(domain, 'TXT')
+                answers = resolver.resolve(domain, "TXT")
                 for rdata in answers:
                     txt_record = rdata.to_text().lower()
                     if "v=spf1" in txt_record:
-                        ips = re.findall(r"ip4:([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})", txt_record)
+                        ips = re.findall(
+                            r"ip4:([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})",
+                            txt_record,
+                        )
                         for ip in ips:
                             potential_ips[ip] = "SPF Record"
             except Exception:
@@ -114,13 +143,17 @@ class OriginDiscoveryStage(Stage):
 
             # 2. MX Records
             try:
-                answers = resolver.resolve(domain, 'MX')
+                answers = resolver.resolve(domain, "MX")
                 for rdata in answers:
-                    mx_host = str(rdata.exchange).rstrip('.')
+                    mx_host = str(rdata.exchange).rstrip(".")
                     if domain in mx_host:
                         try:
                             loop = asyncio.get_running_loop()
-                            mx_ips = (await loop.run_in_executor(None, lambda: socket.gethostbyname_ex(mx_host)))[2]
+                            mx_ips = (
+                                await loop.run_in_executor(
+                                    None, lambda: socket.gethostbyname_ex(mx_host)
+                                )
+                            )[2]
                             for ip in mx_ips:
                                 potential_ips[ip] = f"MX Record ({mx_host})"
                         except socket.error:
@@ -129,7 +162,10 @@ class OriginDiscoveryStage(Stage):
                 pass
 
             # 3. Common Subdomains (Parallel)
-            sub_tasks = [self._resolve_async(f"{sub}.{domain}", resolver) for sub in origin_subdomains]
+            sub_tasks = [
+                self._resolve_async(f"{sub}.{domain}", resolver)
+                for sub in origin_subdomains
+            ]
             sub_results = await asyncio.gather(*sub_tasks)
             for i, ips in enumerate(sub_results):
                 for ip in ips:
@@ -142,23 +178,31 @@ class OriginDiscoveryStage(Stage):
                 if is_cdn:
                     context.logger.debug("Skipping CDN IP %s found via %s", ip, method)
                     continue
-                
-                context.logger.debug("Verifying potential origin IP %s found via %s", ip, method)
-                
+
+                context.logger.debug(
+                    "Verifying potential origin IP %s found via %s", ip, method
+                )
+
                 if await self._probe_origin_via_host_header(ip, domain):
                     # Flag it
-                    origin_findings.append({
-                        "type": "finding",
-                        "finding_type": "origin_ip_leak",
-                        "source": "origin-discovery",
-                        "hostname": domain,
-                        "description": f"Verified origin IP bypass detected via {method}: {ip}",
-                        "severity": "high" if "MX" in method or "SPF" in method else "medium",
-                        "details": {"ip": ip, "method": method, "verified": True}
-                    })
+                    origin_findings.append(
+                        {
+                            "type": "finding",
+                            "finding_type": "origin_ip_leak",
+                            "source": "origin-discovery",
+                            "hostname": domain,
+                            "description": f"Verified origin IP bypass detected via {method}: {ip}",
+                            "severity": "high"
+                            if "MX" in method or "SPF" in method
+                            else "medium",
+                            "details": {"ip": ip, "method": method, "verified": True},
+                        }
+                    )
 
         if origin_findings:
-            context.logger.info("Found %d VERIFIED origin IP leaks", len(origin_findings))
+            context.logger.info(
+                "Found %d VERIFIED origin IP leaks", len(origin_findings)
+            )
             for finding in origin_findings:
                 context.results.append(finding)
         else:

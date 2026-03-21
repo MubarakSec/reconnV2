@@ -110,18 +110,30 @@ class NmapStage(Stage):
                 cmd.extend(["-p", str(ports)])
             elif top_ports:
                 cmd.extend(["--top-ports", str(top_ports)])
-            
+
             if nmap_scripts:
                 cmd.extend(["--script", str(nmap_scripts)])
-            
+
             if nmap_args:
-                forbidden = {"--script", "-iL", "--interactive", "--privileged", "--unprivileged", "-o", "--stylesheet"}
+                forbidden = {
+                    "--script",
+                    "-iL",
+                    "--interactive",
+                    "--privileged",
+                    "--unprivileged",
+                    "-o",
+                    "--stylesheet",
+                }
                 try:
                     args_list = shlex.split(str(nmap_args))
                     dangerous = [a for a in args_list if any(f in a for f in forbidden)]
                     if dangerous:
-                        context.logger.warning("Dangerous nmap_args detected and stripped: %s", dangerous)
-                        args_list = [a for a in args_list if not any(f in a for f in forbidden)]
+                        context.logger.warning(
+                            "Dangerous nmap_args detected and stripped: %s", dangerous
+                        )
+                        args_list = [
+                            a for a in args_list if not any(f in a for f in forbidden)
+                        ]
                     cmd.extend(args_list)
                 except ValueError:
                     context.logger.warning("Invalid nmap_args; ignoring: %s", nmap_args)
@@ -247,7 +259,9 @@ class NmapStage(Stage):
             if nmap_args:
                 try:
                     args_list = shlex.split(str(nmap_args))
-                    args_list = [a for a in args_list if not any(f in a for f in forbidden)]
+                    args_list = [
+                        a for a in args_list if not any(f in a for f in forbidden)
+                    ]
                     udp_cmd.extend(args_list)
                 except ValueError:
                     pass

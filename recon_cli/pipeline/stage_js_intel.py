@@ -231,20 +231,37 @@ class JSIntelligenceStage(Stage):
             session = context.auth_session(js_url)
             headers = context.auth_headers({"User-Agent": "recon-cli js-intel"})
 
-            content = self._fetch_content(js_url, session, headers, timeout, limiter, verify_tls)
+            content = self._fetch_content(
+                js_url, session, headers, timeout, limiter, verify_tls
+            )
             if not content:
                 continue
 
             extraction = _JSSurfaceExtraction()
             self._process_js_file(
-                js_url, surface_base_url, content, extraction,
-                hidden_param_hints, include_hidden, include_dynamic
+                js_url,
+                surface_base_url,
+                content,
+                extraction,
+                hidden_param_hints,
+                include_hidden,
+                include_dynamic,
             )
 
             source_map = self._process_source_map(
-                js_url, surface_base_url, content, extraction,
-                hidden_param_hints, session, headers, timeout, limiter,
-                include_hidden, include_dynamic, verify_tls, context.logger
+                js_url,
+                surface_base_url,
+                content,
+                extraction,
+                hidden_param_hints,
+                session,
+                headers,
+                timeout,
+                limiter,
+                include_hidden,
+                include_dynamic,
+                verify_tls,
+                context.logger,
             )
 
             endpoints = self._normalize_candidates(extraction.endpoints)
@@ -286,7 +303,9 @@ class JSIntelligenceStage(Stage):
                 }
             )
 
-            self._emit_endpoint_results(context, js_url, combined_candidates, discovered_urls, signaled_hosts)
+            self._emit_endpoint_results(
+                context, js_url, combined_candidates, discovered_urls, signaled_hosts
+            )
 
         if artifacts:
             artifact_path = context.record.paths.artifact("js_intel.json")
@@ -322,7 +341,9 @@ class JSIntelligenceStage(Stage):
             stats["high_value_strings"] = len(high_value_strings)
             context.manager.update_metadata(context.record)
 
-    def _collect_js_candidates(self, items: list, context: PipelineContext) -> tuple[list[str], dict[str, str]]:
+    def _collect_js_candidates(
+        self, items: list, context: PipelineContext
+    ) -> tuple[list[str], dict[str, str]]:
         js_url_bases: Dict[str, str] = {}
         js_urls: List[str] = []
         direct_js_urls: List[str] = []
@@ -368,8 +389,17 @@ class JSIntelligenceStage(Stage):
             )
         return js_urls, js_url_bases
 
-    def _fetch_content(self, url: str, session, headers: dict, timeout: int, limiter, verify_tls: bool = True):
+    def _fetch_content(
+        self,
+        url: str,
+        session,
+        headers: dict,
+        timeout: int,
+        limiter,
+        verify_tls: bool = True,
+    ):
         import requests
+
         if limiter and not limiter.wait_for_slot(url, timeout=timeout):
             return None
         try:
@@ -402,7 +432,16 @@ class JSIntelligenceStage(Stage):
 
         return resp.text
 
-    def _process_js_file(self, js_url: str, surface_base_url: str, content: str, extraction, hidden_param_hints: dict, include_hidden: bool, include_dynamic: bool = True):
+    def _process_js_file(
+        self,
+        js_url: str,
+        surface_base_url: str,
+        content: str,
+        extraction,
+        hidden_param_hints: dict,
+        include_hidden: bool,
+        include_dynamic: bool = True,
+    ):
         new_extraction = self._extract_surface_from_blob(
             content,
             base_url=surface_base_url,
@@ -413,8 +452,24 @@ class JSIntelligenceStage(Stage):
             for hint in self._extract_param_hints(content):
                 hidden_param_hints[hint].add(js_url)
 
-    def _process_source_map(self, js_url: str, surface_base_url: str, content: str, extraction, hidden_param_hints: dict, session, headers: dict, timeout: int, limiter, include_hidden: bool, include_dynamic: bool = True, verify_tls: bool = True, logger = None):
+    def _process_source_map(
+        self,
+        js_url: str,
+        surface_base_url: str,
+        content: str,
+        extraction,
+        hidden_param_hints: dict,
+        session,
+        headers: dict,
+        timeout: int,
+        limiter,
+        include_hidden: bool,
+        include_dynamic: bool = True,
+        verify_tls: bool = True,
+        logger=None,
+    ):
         import requests
+
         map_match = self.SOURCEMAP_PATTERN.search(content)
         if not map_match:
             return None
@@ -422,7 +477,9 @@ class JSIntelligenceStage(Stage):
         source_map = urljoin(js_url, map_match.group(1))
         if limiter and not limiter.wait_for_slot(source_map, timeout=timeout):
             if logger:
-                logger.debug(f"Limiter timeout waiting for source map slot: {source_map}")
+                logger.debug(
+                    f"Limiter timeout waiting for source map slot: {source_map}"
+                )
             return source_map
 
         try:
@@ -450,7 +507,9 @@ class JSIntelligenceStage(Stage):
                     map_data = json.loads(map_resp.text)
                 except json.JSONDecodeError as e:
                     if logger:
-                        logger.debug(f"Failed to decode source map JSON from {source_map}: {e}")
+                        logger.debug(
+                            f"Failed to decode source map JSON from {source_map}: {e}"
+                        )
                     map_data = {}
 
                 sources_content = map_data.get("sourcesContent") or []
@@ -475,7 +534,14 @@ class JSIntelligenceStage(Stage):
 
         return source_map
 
-    def _emit_endpoint_results(self, context: PipelineContext, js_url: str, combined_candidates: list, tags_results: list, signaled_hosts: set):
+    def _emit_endpoint_results(
+        self,
+        context: PipelineContext,
+        js_url: str,
+        combined_candidates: list,
+        tags_results: list,
+        signaled_hosts: set,
+    ):
         for endpoint in combined_candidates:
             try:
                 parsed = urlparse(endpoint)

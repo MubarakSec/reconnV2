@@ -12,7 +12,6 @@ from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.tools.executor import CommandError
 
 
-
 class FuzzStage(Stage):
     name = "fuzzing"
 
@@ -192,7 +191,6 @@ class FuzzStage(Stage):
                             per_host_limit,
                             tag="param-fuzz",
                         )
-
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts = defaultdict(int)
@@ -460,7 +458,9 @@ class FuzzStage(Stage):
                     )
                     retried = True
                 except CommandError as retry_exc:
-                    context.logger.error("ffuf retry failed for %s: %s", host, retry_exc)
+                    context.logger.error(
+                        "ffuf retry failed for %s: %s", host, retry_exc
+                    )
             if not retried:
                 context.logger.warning(
                     "ffuf failed for %s",
@@ -483,10 +483,11 @@ class FuzzStage(Stage):
         try:
             data = json.loads(artifact.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            context.logger.error("Failed to decode ffuf results for %s: %s", artifact, exc)
+            context.logger.error(
+                "Failed to decode ffuf results for %s: %s", artifact, exc
+            )
             return
         for result in data.get("results", []):
-
             payload = {
                 "type": "url",
                 "source": "ffuf",

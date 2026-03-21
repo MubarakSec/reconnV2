@@ -59,6 +59,7 @@ pipeline:
   enable_github_recon: true
   enable_nmap: false           # تحتاج صلاحيات root لبعض الخصائص
   enable_takeover: true
+  enable_waf_probe: true
 
   # الحد الأقصى للعمليات المتزامنة
   max_concurrent: 50

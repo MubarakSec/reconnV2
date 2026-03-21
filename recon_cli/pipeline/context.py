@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Pattern, Set, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Pattern, Set, TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:

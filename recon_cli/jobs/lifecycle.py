@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 import asyncio
 
-from recon_cli import config
 from recon_cli.jobs.manager import JobManager, JobRecord
 
 
@@ -22,7 +21,7 @@ class JobLifecycle:
             self.manager = JobManager(home=Path(jobs_dir).parent)
         else:
             self.manager = JobManager()
-        
+
         self.jobs_dir = jobs_dir or self.manager.jobs_root
 
     def create_job(
