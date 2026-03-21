@@ -79,9 +79,22 @@ def test_idor_candidate_selection_prioritizes_and_limits_per_host(tmp_path: Path
     stage = IDORStage()
 
     items = [
-        {"type": "url", "url": "https://api.example.com/assets/app.js?id=1", "score": 90},
-        {"type": "url", "url": "https://api.example.com/api/v1/users?id=1", "score": 20, "tags": ["api"]},
-        {"type": "url", "url": "https://api.example.com/profile?user_id=2", "score": 25},
+        {
+            "type": "url",
+            "url": "https://api.example.com/assets/app.js?id=1",
+            "score": 90,
+        },
+        {
+            "type": "url",
+            "url": "https://api.example.com/api/v1/users?id=1",
+            "score": 20,
+            "tags": ["api"],
+        },
+        {
+            "type": "url",
+            "url": "https://api.example.com/profile?user_id=2",
+            "score": 25,
+        },
         {"type": "url", "url": "https://billing.example.net/account/1", "score": 15},
     ]
 
@@ -90,7 +103,14 @@ def test_idor_candidate_selection_prioritizes_and_limits_per_host(tmp_path: Path
     assert len(candidates) == 2
     assert "https://api.example.com/assets/app.js?id=1" not in urls
     assert any("/api/v1/users" in url for url in urls)
-    assert sum(1 for candidate in candidates if (candidate.parsed.hostname or "").lower() == "api.example.com") == 1
+    assert (
+        sum(
+            1
+            for candidate in candidates
+            if (candidate.parsed.hostname or "").lower() == "api.example.com"
+        )
+        == 1
+    )
     context.close()
 
 
@@ -124,7 +144,9 @@ def test_auth_matrix_detects_cross_token_subject_exposure():
     assert "token_b_subject_matches_token_a" in reasons
 
 
-def test_auth_matrix_collect_urls_prioritizes_sensitive_and_spreads_hosts(tmp_path: Path):
+def test_auth_matrix_collect_urls_prioritizes_sensitive_and_spreads_hosts(
+    tmp_path: Path,
+):
     runtime_overrides = {
         "auth_matrix_max_targets": 2,
         "auth_matrix_max_per_host": 1,
@@ -132,9 +154,22 @@ def test_auth_matrix_collect_urls_prioritizes_sensitive_and_spreads_hosts(tmp_pa
     record = _make_record(tmp_path, runtime_overrides)
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         for payload in [
-            {"type": "url", "url": "https://api.example.com/static/app.js?user_id=1", "score": 99},
-            {"type": "url", "url": "https://api.example.com/api/users/1", "score": 20, "tags": ["api"]},
-            {"type": "url", "url": "https://shop.example.org/account?user_id=5", "score": 18},
+            {
+                "type": "url",
+                "url": "https://api.example.com/static/app.js?user_id=1",
+                "score": 99,
+            },
+            {
+                "type": "url",
+                "url": "https://api.example.com/api/users/1",
+                "score": 20,
+                "tags": ["api"],
+            },
+            {
+                "type": "url",
+                "url": "https://shop.example.org/account?user_id=5",
+                "score": 18,
+            },
             {"type": "url", "url": "https://api.example.com/health", "score": 50},
         ]:
             json.dump(payload, handle, separators=(",", ":"))
@@ -160,8 +195,16 @@ def test_graphql_sensitive_query_generation_uses_schema():
                     {
                         "name": "Query",
                         "fields": [
-                            {"name": "users", "type": {"kind": "OBJECT", "name": "User"}, "args": []},
-                            {"name": "health", "type": {"kind": "SCALAR", "name": "String"}, "args": []},
+                            {
+                                "name": "users",
+                                "type": {"kind": "OBJECT", "name": "User"},
+                                "args": [],
+                            },
+                            {
+                                "name": "health",
+                                "type": {"kind": "SCALAR", "name": "String"},
+                                "args": [],
+                            },
                         ],
                     },
                     {
@@ -282,9 +325,27 @@ def test_graphql_detects_unauthenticated_sensitive_exposure():
 def test_api_schema_prioritization_prefers_auth_and_user_paths():
     stage = ApiSchemaProbeStage()
     endpoints = [
-        {"path": "/health", "method": "get", "params": [], "body_fields": [], "requires_auth": False},
-        {"path": "/users/{id}", "method": "get", "params": [{"name": "id", "in": "path"}], "body_fields": [], "requires_auth": True},
-        {"path": "/metrics", "method": "get", "params": [], "body_fields": [], "requires_auth": False},
+        {
+            "path": "/health",
+            "method": "get",
+            "params": [],
+            "body_fields": [],
+            "requires_auth": False,
+        },
+        {
+            "path": "/users/{id}",
+            "method": "get",
+            "params": [{"name": "id", "in": "path"}],
+            "body_fields": [],
+            "requires_auth": True,
+        },
+        {
+            "path": "/metrics",
+            "method": "get",
+            "params": [],
+            "body_fields": [],
+            "requires_auth": False,
+        },
     ]
     prioritized = stage._prioritize_endpoints(endpoints)
     assert prioritized[0]["path"] == "/users/{id}"
@@ -304,8 +365,13 @@ def test_api_schema_probe_global_budget_and_safe_writes(monkeypatch, tmp_path: P
     }
     record = _make_record(tmp_path, runtime_overrides)
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
-        for spec_url in ("https://spec.example.com/openapi-1.json", "https://spec.example.com/openapi-2.json"):
-            json.dump({"type": "api_spec", "url": spec_url}, handle, separators=(",", ":"))
+        for spec_url in (
+            "https://spec.example.com/openapi-1.json",
+            "https://spec.example.com/openapi-2.json",
+        ):
+            json.dump(
+                {"type": "api_spec", "url": spec_url}, handle, separators=(",", ":")
+            )
             handle.write("\n")
 
     context = PipelineContext(record=record, manager=DummyManager())
@@ -363,13 +429,28 @@ def test_api_schema_probe_global_budget_and_safe_writes(monkeypatch, tmp_path: P
 
     def fake_get(url, timeout=None, allow_redirects=None, headers=None, verify=None):
         if url.startswith("https://spec.example.com/openapi-"):
-            return _FakeResponse(200, json.dumps(spec_payload), {"Content-Type": "application/json"})
+            return _FakeResponse(
+                200, json.dumps(spec_payload), {"Content-Type": "application/json"}
+            )
         return _FakeResponse(404, "", {"Content-Type": "application/json"})
 
-    def fake_request(method, url, timeout=None, allow_redirects=None, headers=None, verify=None, json=None, data=None):
+    def fake_request(
+        method,
+        url,
+        timeout=None,
+        allow_redirects=None,
+        headers=None,
+        verify=None,
+        json=None,
+        data=None,
+    ):
         called_methods.append(str(method).upper())
         status_code = 200 if str(method).upper() in {"GET", "HEAD", "OPTIONS"} else 401
-        return _FakeResponse(status_code, "{}", {"Content-Type": "application/json", "Content-Length": "2"})
+        return _FakeResponse(
+            status_code,
+            "{}",
+            {"Content-Type": "application/json", "Content-Length": "2"},
+        )
 
     import requests
 
@@ -420,7 +501,9 @@ def test_extended_validation_hard_probe_cap(monkeypatch, tmp_path: Path):
         text = ""
         headers = {"Location": "https://example.com/recon"}
 
-    monkeypatch.setattr(stage, "_request_with_retries", lambda *args, **kwargs: _FakeResponse())
+    monkeypatch.setattr(
+        stage, "_request_with_retries", lambda *args, **kwargs: _FakeResponse()
+    )
 
     stage.run(context)
 
@@ -430,7 +513,9 @@ def test_extended_validation_hard_probe_cap(monkeypatch, tmp_path: Path):
     assert stats.get("max_total_probes") == 3
 
 
-def test_cloud_discovery_enforces_max_checks_when_no_assets(monkeypatch, tmp_path: Path):
+def test_cloud_discovery_enforces_max_checks_when_no_assets(
+    monkeypatch, tmp_path: Path
+):
     runtime_overrides = {
         "enable_cloud_discovery": True,
         "cloud_max_checks": 5,
@@ -443,7 +528,9 @@ def test_cloud_discovery_enforces_max_checks_when_no_assets(monkeypatch, tmp_pat
     context = PipelineContext(record=record, manager=DummyManager())
     stage = CloudAssetDiscoveryStage()
 
-    monkeypatch.setattr(stage, "_generate_candidates", lambda _: [f"bucket-{i}" for i in range(10)])
+    monkeypatch.setattr(
+        stage, "_generate_candidates", lambda _: [f"bucket-{i}" for i in range(10)]
+    )
 
     class _FakeResponse:
         def __init__(self) -> None:
@@ -499,7 +586,9 @@ def test_js_intel_uses_runtime_crawl_javascript_files(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         requests,
         "get",
-        lambda *args, **kwargs: _FakeResponse("const a='https://api.example.com/v1/users';"),
+        lambda *args, **kwargs: _FakeResponse(
+            "const a='https://api.example.com/v1/users';"
+        ),
     )
 
     stage.run(context)
@@ -508,11 +597,17 @@ def test_js_intel_uses_runtime_crawl_javascript_files(monkeypatch, tmp_path: Pat
     assert stats.get("files") == 1
     assert stats.get("endpoints", 0) >= 1
 
-    urls = [entry.get("url") for entry in read_jsonl(record.paths.results_jsonl) if entry.get("source") == "js-intel"]
+    urls = [
+        entry.get("url")
+        for entry in read_jsonl(record.paths.results_jsonl)
+        if entry.get("source") == "js-intel"
+    ]
     assert "https://api.example.com/v1/users" in urls
 
 
-def test_js_intel_skips_out_of_scope_javascript_and_endpoints(monkeypatch, tmp_path: Path):
+def test_js_intel_skips_out_of_scope_javascript_and_endpoints(
+    monkeypatch, tmp_path: Path
+):
     runtime_overrides = {
         "enable_js_intel": True,
         "js_intel_max_files": 10,
@@ -565,10 +660,18 @@ def test_js_intel_skips_out_of_scope_javascript_and_endpoints(monkeypatch, tmp_p
     stage.run(context)
 
     assert requested == ["https://cdn.example.com/app.js"]
-    artifact_rows = json.loads(record.paths.artifact("js_intel.json").read_text(encoding="utf-8"))
-    assert any("api.example.com" in endpoint for endpoint in artifact_rows[0]["endpoints"])
+    artifact_rows = json.loads(
+        record.paths.artifact("js_intel.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        "api.example.com" in endpoint for endpoint in artifact_rows[0]["endpoints"]
+    )
     assert all("google" not in endpoint for endpoint in artifact_rows[0]["endpoints"])
-    urls = [entry.get("url") for entry in read_jsonl(record.paths.results_jsonl) if entry.get("source") == "js-intel"]
+    urls = [
+        entry.get("url")
+        for entry in read_jsonl(record.paths.results_jsonl)
+        if entry.get("source") == "js-intel"
+    ]
     assert any("api.example.com" in str(url) for url in urls)
     assert all("google" not in str(url) for url in urls)
 
@@ -632,9 +735,15 @@ def test_scanner_stage_filters_out_of_scope_hosts(monkeypatch, tmp_path: Path):
     context = PipelineContext(record=record, manager=DummyManager())
     calls: list[list[str]] = []
 
-    monkeypatch.setattr(stage_scanner_module.CommandExecutor, "available", staticmethod(lambda _command: True))
+    monkeypatch.setattr(
+        stage_scanner_module.CommandExecutor,
+        "available",
+        staticmethod(lambda _command: True),
+    )
 
-    def fake_run_nuclei_batch(_executor, _logger, targets, _scanner_dir, _timeout, **_kwargs):
+    def fake_run_nuclei_batch(
+        _executor, _logger, targets, _scanner_dir, _timeout, **_kwargs
+    ):
         calls.append(list(targets))
         return stage_scanner_module.scanner_integrations.ScannerExecution(
             findings=[],
@@ -642,7 +751,11 @@ def test_scanner_stage_filters_out_of_scope_hosts(monkeypatch, tmp_path: Path):
             stats={"targets": len(targets), "findings": 0},
         )
 
-    monkeypatch.setattr(stage_scanner_module.scanner_integrations, "run_nuclei_batch", fake_run_nuclei_batch)
+    monkeypatch.setattr(
+        stage_scanner_module.scanner_integrations,
+        "run_nuclei_batch",
+        fake_run_nuclei_batch,
+    )
 
     ScannerStage().run(context)
 
@@ -672,7 +785,11 @@ def test_scoring_caps_generic_auth_challenge_noise(tmp_path: Path):
     stage = ScoringStage()
     stage.run(context)
 
-    rows = [entry for entry in read_jsonl(record.paths.results_jsonl) if entry.get("type") == "url"]
+    rows = [
+        entry
+        for entry in read_jsonl(record.paths.results_jsonl)
+        if entry.get("type") == "url"
+    ]
     assert len(rows) == 1
     row = rows[0]
     assert "auth:challenge" in row.get("tags", [])
@@ -692,7 +809,12 @@ def test_scoring_downranks_repetitive_auth_surface_clusters(tmp_path: Path):
                     "url": f"https://h{idx}.example.com/account/login",
                     "hostname": f"h{idx}.example.com",
                     "status_code": 403,
-                    "tags": ["service:api", "surface:login", "surface:admin", "probe++"],
+                    "tags": [
+                        "service:api",
+                        "surface:login",
+                        "surface:admin",
+                        "probe++",
+                    ],
                     "score": 0,
                 },
                 handle,
@@ -704,7 +826,11 @@ def test_scoring_downranks_repetitive_auth_surface_clusters(tmp_path: Path):
     stage = ScoringStage()
     stage.run(context)
 
-    rows = [entry for entry in read_jsonl(record.paths.results_jsonl) if entry.get("type") == "url"]
+    rows = [
+        entry
+        for entry in read_jsonl(record.paths.results_jsonl)
+        if entry.get("type") == "url"
+    ]
     assert len(rows) == 12
     assert all("auth:repetitive" in row.get("tags", []) for row in rows)
     assert all(row.get("score", 0) <= 45 for row in rows)

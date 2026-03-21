@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
@@ -69,16 +68,22 @@ def test_cms_scan_prefers_droopescan_for_joomla(monkeypatch, tmp_path: Path):
             raise AssertionError("joomscan should not be used")
         return False
 
-    monkeypatch.setattr(stage_mod.CommandExecutor, "available", staticmethod(fake_available))
+    monkeypatch.setattr(
+        stage_mod.CommandExecutor, "available", staticmethod(fake_available)
+    )
 
     cms_dir = context.record.paths.ensure_subdir("cms")
-    result = stage._run_scan(context, "joomla", "example.com", "https://example.com", 10, cms_dir)
+    result = stage._run_scan(
+        context, "joomla", "example.com", "https://example.com", 10, cms_dir
+    )
     assert result["tool"] == "droopescan"
     assert dummy_executor.commands
     assert dummy_executor.commands[0][:3] == ["droopescan", "scan", "joomla"]
 
 
-def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(monkeypatch, tmp_path: Path):
+def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(
+    monkeypatch, tmp_path: Path
+):
     from recon_cli.pipeline import stage_cms_scan as stage_mod
 
     record = make_record(tmp_path, {"enable_cms_scan": True})
@@ -91,7 +96,11 @@ def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(monkeypatch, tmp_
 
     class DummyResult:
         def __init__(self):
-            self.findings = [DummyFinding({"type": "finding", "details": {"template_id": "joomla-test"}})]
+            self.findings = [
+                DummyFinding(
+                    {"type": "finding", "details": {"template_id": "joomla-test"}}
+                )
+            ]
             self.artifact_path = None
 
     class DummyIntegrations:
@@ -110,9 +119,13 @@ def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(monkeypatch, tmp_
             return True
         return False
 
-    monkeypatch.setattr(stage_mod.CommandExecutor, "available", staticmethod(fake_available))
+    monkeypatch.setattr(
+        stage_mod.CommandExecutor, "available", staticmethod(fake_available)
+    )
 
     cms_dir = context.record.paths.ensure_subdir("cms")
-    result = stage._run_scan(context, "joomla", "example.com", "https://example.com", 10, cms_dir)
+    result = stage._run_scan(
+        context, "joomla", "example.com", "https://example.com", 10, cms_dir
+    )
     assert result["tool"] == "nuclei"
     assert result["findings"]

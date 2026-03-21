@@ -36,7 +36,9 @@ def make_record(tmp_path: Path) -> JobRecord:
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
 
 
-def test_runtime_crawl_skips_when_playwright_browsers_missing(monkeypatch, tmp_path: Path):
+def test_runtime_crawl_skips_when_playwright_browsers_missing(
+    monkeypatch, tmp_path: Path
+):
     record = make_record(tmp_path)
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         payload = {

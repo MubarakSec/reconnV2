@@ -83,7 +83,9 @@ def test_stage_heartbeat_is_logged(tmp_path: Path):
 
     log_text = record.paths.pipeline_log.read_text(encoding="utf-8")
     assert "Stage slow_stage heartbeat: still running" in log_text
-    stage_heartbeat = record.metadata.stats.get("stage_heartbeats", {}).get("slow_stage", {})
+    stage_heartbeat = record.metadata.stats.get("stage_heartbeats", {}).get(
+        "slow_stage", {}
+    )
     assert int(stage_heartbeat.get("count", 0)) >= 1
     assert int(stage_heartbeat.get("last_elapsed_seconds", 0)) >= 1
 
@@ -132,7 +134,9 @@ def test_checkpointed_stage_records_skip_reason(tmp_path: Path):
     context.close()
 
     assert ran is False
-    skip_entry = record.metadata.stats.get("stage_skips", {}).get("checkpointed_stage", {})
+    skip_entry = record.metadata.stats.get("stage_skips", {}).get(
+        "checkpointed_stage", {}
+    )
     assert skip_entry.get("reason") == "checkpointed"
     assert int(skip_entry.get("count", 0)) >= 1
 
@@ -148,6 +152,8 @@ def test_stage_stop_request_raises_and_records_skip(tmp_path: Path):
         stage.run(context)
     context.close()
 
-    skip_entry = record.metadata.stats.get("stage_skips", {}).get("stop_aware_stage", {})
+    skip_entry = record.metadata.stats.get("stage_skips", {}).get(
+        "stop_aware_stage", {}
+    )
     assert skip_entry.get("reason") == "stop_requested"
     assert int(skip_entry.get("count", 0)) >= 1

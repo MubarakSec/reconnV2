@@ -1,4 +1,3 @@
-import json
 import asyncio
 from pathlib import Path
 
@@ -52,15 +51,21 @@ def test_pipeline_records_failure(tmp_path: Path):
     ctx.mark_finished = lambda *_, **__: None
     ctx.mark_error = lambda msg: setattr(record.metadata, "error", msg)
     ctx.close = lambda *_, **__: None
-    ctx.logger = type("L", (), {
-        "info": lambda *a, **k: None,
-        "warning": lambda *a, **k: None,
-        "exception": lambda *a, **k: None,
-    })()
+    ctx.logger = type(
+        "L",
+        (),
+        {
+            "info": lambda *a, **k: None,
+            "warning": lambda *a, **k: None,
+            "exception": lambda *a, **k: None,
+        },
+    )()
     ctx.max_retries = 0
     ctx.results = None
     ctx.targets = []
-    ctx.runtime_config = type("RC", (), {"retry_backoff_base": 1, "retry_backoff_factor": 2})()
+    ctx.runtime_config = type(
+        "RC", (), {"retry_backoff_base": 1, "retry_backoff_factor": 2}
+    )()
     ctx.force = False
     ctx.increment_attempt = lambda *_: None
     ctx.checkpoint = lambda *_: None

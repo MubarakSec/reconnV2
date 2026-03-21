@@ -55,24 +55,26 @@ def test_report_generator_html_escapes_untrusted_values() -> None:
                         "description": "<img src=x onerror=alert(2)>",
                     }
                 ],
-                "hosts": [{"hostname": 'bad"><script>alert(3)</script>', "open_ports": [80]}],
+                "hosts": [
+                    {"hostname": 'bad"><script>alert(3)</script>', "open_ports": [80]}
+                ],
             },
             format=ReportFormat.HTML,
         )
     )
 
     assert "<script>alert(2)</script>" not in html
-    assert '<img src=x onerror=alert(2)>' not in html
+    assert "<img src=x onerror=alert(2)>" not in html
     assert 'bad"><script>alert(3)</script>' not in html
     assert "&lt;script&gt;alert(2)&lt;/script&gt;" in html
     assert "&lt;img src=x onerror=alert(2)&gt;" in html
-    assert 'bad&quot;&gt;&lt;script&gt;alert(3)&lt;/script&gt;' in html
+    assert "bad&quot;&gt;&lt;script&gt;alert(3)&lt;/script&gt;" in html
 
 
 def test_executive_summary_html_escapes_untrusted_values() -> None:
-    summary = ExecutiveSummaryGenerator(author='<b>ops</b>').generate(
+    summary = ExecutiveSummaryGenerator(author="<b>ops</b>").generate(
         {
-            "targets": ['<script>alert(4)</script>'],
+            "targets": ["<script>alert(4)</script>"],
             "findings": [
                 {
                     "type": "finding",
@@ -100,7 +102,7 @@ def test_pdf_reporter_html_content_escapes_untrusted_values() -> None:
         {
             "target": "<script>alert(5)</script>",
             "created_at": "2026-03-10T00:00:00",
-            "profile": '<img src=x onerror=alert(5)>',
+            "profile": "<img src=x onerror=alert(5)>",
         },
         [
             {
@@ -117,4 +119,4 @@ def test_pdf_reporter_html_content_escapes_untrusted_values() -> None:
     assert 'bad"><script>alert(6)</script>' not in html
     assert "&lt;script&gt;alert(5)&lt;/script&gt;" in html
     assert "&lt;img src=x onerror=alert(5)&gt;" in html
-    assert 'bad&quot;&gt;&lt;script&gt;alert(6)&lt;/script&gt;' in html
+    assert "bad&quot;&gt;&lt;script&gt;alert(6)&lt;/script&gt;" in html

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
 """
 Integration Tests for API
 
 اختبارات تكامل للـ API
 """
-
-import asyncio
-import json
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 # ═══════════════════════════════════════════════════════════
 #                     Import Modules
@@ -21,6 +20,7 @@ import pytest
 try:
     from fastapi.testclient import TestClient
     from recon_cli.api.app import create_app
+
     HAS_API = True
 except (ImportError, RuntimeError):
     HAS_API = False
@@ -36,6 +36,7 @@ pytestmark = [
 #                     Fixtures
 # ═══════════════════════════════════════════════════════════
 
+
 @pytest.fixture
 def api_client():
     """عميل API"""
@@ -44,8 +45,14 @@ def api_client():
         mock_val.return_value = {
             "id": "admin",
             "username": "admin",
-            "permissions": ["api:admin", "api:access", "jobs:create", "jobs:run", "jobs:delete"],
-            "scopes": ["*"]
+            "permissions": [
+                "api:admin",
+                "api:access",
+                "jobs:create",
+                "jobs:run",
+                "jobs:delete",
+            ],
+            "scopes": ["*"],
         }
         app = create_app()
         client = TestClient(app)
@@ -83,28 +90,29 @@ def sample_job_data() -> dict:
 #                     Health Endpoint Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestHealthEndpoint:
     """اختبارات Health Endpoint"""
-    
+
     def test_health_endpoint(self, api_client: TestClient):
         """Health endpoint"""
         response = api_client.get("/api/health")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "status" in data
-    
+
     def test_health_returns_healthy(self, api_client: TestClient):
         """Health يرجع صحي"""
         response = api_client.get("/api/health")
-        
+
         data = response.json()
         assert data["status"] in ["healthy", "unhealthy"]
-    
+
     def test_health_includes_components(self, api_client: TestClient):
         """Health يتضمن المكونات"""
         response = api_client.get("/api/health")
-        
+
         data = response.json()
         assert "checks" in data
         assert isinstance(data["checks"], dict)
@@ -114,24 +122,25 @@ class TestHealthEndpoint:
 #                     Version Endpoint Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestVersionEndpoint:
     """اختبارات Version Endpoint"""
-    
+
     def test_version_endpoint(self, api_client: TestClient):
         """Version endpoint"""
         response = api_client.get("/api/version")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "version" in data
-    
+
     def test_version_format(self, api_client: TestClient):
         """تنسيق الإصدار"""
         response = api_client.get("/api/version")
-        
+
         data = response.json()
         version = data["version"]
-        
+
         # Should be semver format
         parts = version.split(".")
         assert len(parts) >= 2
@@ -141,19 +150,20 @@ class TestVersionEndpoint:
 #                     Jobs API Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestJobsAPI:
     """اختبارات Jobs API"""
-    
+
     def test_list_jobs(self, api_client: TestClient):
         """قائمة المهام"""
         response = api_client.get("/api/jobs")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert set(data) == {"jobs", "total"}
         assert isinstance(data["jobs"], list)
         assert isinstance(data["total"], int)
-    
+
     def test_create_job(self, api_client: TestClient, sample_job_data: dict):
         """إنشاء مهمة"""
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
@@ -162,18 +172,20 @@ class TestJobsAPI:
                 "permissions": ["api:access", "jobs:create"],
                 "scopes": [],
             }
-            with patch("recon_cli.jobs.lifecycle.JobLifecycle.create_job") as mock_create:
+            with patch(
+                "recon_cli.jobs.lifecycle.JobLifecycle.create_job"
+            ) as mock_create:
                 mock_create.return_value = "job-123"
-                
+
                 response = api_client.post(
                     "/api/jobs",
                     json=sample_job_data,
                     headers={"X-API-Key": "test-api-key"},
                 )
-                
+
                 assert response.status_code == 200
                 assert response.json() == {"job_id": "job-123", "status": "queued"}
-    
+
     def test_get_job(self, api_client: TestClient):
         """الحصول على مهمة"""
         with patch("recon_cli.jobs.lifecycle.JobLifecycle.get_job") as mock_get:
@@ -182,23 +194,23 @@ class TestJobsAPI:
                 "status": "running",
                 "created_at": datetime.now().isoformat(),
             }
-            
+
             response = api_client.get("/api/jobs/job-123")
-            
+
             assert response.status_code == 200
             assert response.json()["job_id"] == "job-123"
             assert response.json()["status"] == "running"
-    
+
     def test_get_nonexistent_job(self, api_client: TestClient):
         """الحصول على مهمة غير موجودة"""
         with patch("recon_cli.jobs.lifecycle.JobLifecycle.get_job") as mock_get:
             mock_get.return_value = None
-            
+
             response = api_client.get("/api/jobs/nonexistent-job")
-            
+
             assert response.status_code == 404
             assert "Job not found" in response.json()["detail"]
-    
+
     def test_delete_job(self, api_client: TestClient):
         """حذف مهمة"""
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
@@ -207,7 +219,9 @@ class TestJobsAPI:
                 "permissions": ["api:access", "jobs:delete"],
                 "scopes": [],
             }
-            with patch("recon_cli.jobs.lifecycle.JobLifecycle.delete_job") as mock_delete:
+            with patch(
+                "recon_cli.jobs.lifecycle.JobLifecycle.delete_job"
+            ) as mock_delete:
                 mock_delete.return_value = True
                 response = api_client.delete(
                     "/api/jobs/job-123",
@@ -221,9 +235,10 @@ class TestJobsAPI:
 #                     Job Results Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestJobResultsAPI:
     """اختبارات Job Results API"""
-    
+
     def test_get_job_results(self, api_client: TestClient):
         """الحصول على نتائج المهمة"""
         with patch("recon_cli.jobs.results.JobResults.get_results") as mock_results:
@@ -231,13 +246,13 @@ class TestJobResultsAPI:
                 {"type": "subdomain", "value": "www.example.com"},
                 {"type": "subdomain", "value": "api.example.com"},
             ]
-            
+
             response = api_client.get("/api/jobs/job-123/results")
-            
+
             assert response.status_code == 200
             assert response.json()["total"] == 2
             assert len(response.json()["results"]) == 2
-    
+
     def test_get_job_summary(self, api_client: TestClient):
         """الحصول على ملخص المهمة"""
         with patch("recon_cli.jobs.summary.JobSummary.get_summary") as mock_summary:
@@ -247,13 +262,13 @@ class TestJobResultsAPI:
                 "total_vulns": 3,
                 "duration_seconds": 120,
             }
-            
+
             response = api_client.get("/api/jobs/job-123/summary")
-            
+
             assert response.status_code == 200
             assert response.json()["total_targets"] == 5
             assert response.json()["total_vulns"] == 3
-    
+
     def test_get_job_logs(self, api_client: TestClient):
         """الحصول على سجلات المهمة"""
         response = api_client.get("/api/jobs/job-123/logs")
@@ -266,19 +281,20 @@ class TestJobResultsAPI:
 #                     Metrics Endpoint Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestMetricsEndpoint:
     """اختبارات Metrics Endpoint"""
-    
+
     def test_metrics_endpoint(self, api_client: TestClient):
         """Metrics endpoint"""
         response = api_client.get("/api/metrics")
-        
+
         assert response.status_code == 200
-    
+
     def test_metrics_prometheus_format(self, api_client: TestClient):
         """تنسيق Prometheus"""
         response = api_client.get("/api/metrics")
-        
+
         content_type = response.headers.get("content-type", "")
         assert "text/plain" in content_type
 
@@ -287,28 +303,29 @@ class TestMetricsEndpoint:
 #                     Authentication Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAPIAuthentication:
     """اختبارات المصادقة"""
-    
+
     def test_unauthenticated_access(self, api_client: TestClient):
         """وصول بدون مصادقة"""
         # Public endpoints should work
         response = api_client.get("/api/health")
         assert response.status_code == 200
-    
+
     def test_api_key_authentication(self, api_client: TestClient):
         """مصادقة بـ API key"""
         headers = {"X-API-Key": "test-api-key"}
-        
+
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
             mock_validate.return_value = {
                 "user_id": 1,
                 "permissions": ["api:access", "jobs:view"],
                 "scopes": [],
             }
-            
+
             response = api_client.get("/api/jobs", headers=headers)
-            
+
             assert response.status_code == 200
             mock_validate.assert_called_once_with("test-api-key")
 
@@ -317,15 +334,16 @@ class TestAPIAuthentication:
 #                     Error Handling Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAPIErrorHandling:
     """اختبارات معالجة الأخطاء"""
-    
+
     def test_404_response(self, api_client: TestClient):
         """استجابة 404"""
         response = api_client.get("/api/nonexistent-endpoint")
-        
+
         assert response.status_code == 404
-    
+
     def test_400_on_invalid_json(self, api_client: TestClient):
         """400 على JSON غير صالح"""
         response = api_client.post(
@@ -333,14 +351,14 @@ class TestAPIErrorHandling:
             content="invalid json",
             headers={"Content-Type": "application/json"},
         )
-        
+
         assert response.status_code == 422
-    
+
     def test_validation_error(self, api_client: TestClient):
         """خطأ التحقق"""
         invalid_data = {
             "targets": [],  # Empty targets should be invalid
-            "stages": [],   # Empty stages should be invalid
+            "stages": [],  # Empty stages should be invalid
         }
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_validate:
             mock_validate.return_value = {
@@ -353,16 +371,16 @@ class TestAPIErrorHandling:
                 json=invalid_data,
                 headers={"X-API-Key": "test-api-key"},
             )
-        
+
         assert response.status_code == 422
-    
+
     def test_internal_server_error(self, api_client: TestClient):
         """خطأ داخلي في الخادم"""
         with patch("recon_cli.jobs.lifecycle.JobLifecycle.list_jobs") as mock_list:
             mock_list.side_effect = Exception("Database error")
-            
+
             response = api_client.get("/api/jobs")
-            
+
             assert response.status_code == 500
             assert response.json()["detail"] == "Database error"
 
@@ -371,25 +389,26 @@ class TestAPIErrorHandling:
 #                     Pagination Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAPIPagination:
     """اختبارات الترقيم"""
-    
+
     def test_list_with_pagination(self, api_client: TestClient):
         """قائمة مع ترقيم"""
         response = api_client.get("/api/jobs?page=1&limit=10")
-        
+
         assert response.status_code == 200
-    
+
     def test_pagination_parameters(self, api_client: TestClient):
         """معاملات الترقيم"""
         response = api_client.get("/api/jobs?offset=0&limit=20")
-        
+
         assert response.status_code == 200
-    
+
     def test_default_pagination(self, api_client: TestClient):
         """ترقيم افتراضي"""
         response = api_client.get("/api/jobs")
-        
+
         assert response.status_code == 200
 
 
@@ -397,23 +416,24 @@ class TestAPIPagination:
 #                     Rate Limiting Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAPIRateLimiting:
     """اختبارات Rate Limiting"""
-    
+
     def test_rate_limit_headers(self, api_client: TestClient):
         """Headers الـ rate limit"""
         response = api_client.get("/api/jobs")
-        
+
         # May include rate limit headers
         # assert "X-RateLimit-Remaining" in response.headers
         assert response.status_code == 200
-    
+
     def test_rate_limit_exceeded(self, api_client: TestClient):
         """تجاوز الـ rate limit"""
         # Make many requests quickly
         for _ in range(100):
             response = api_client.get("/api/jobs")
-        
+
         assert response.status_code == 200
 
 
@@ -421,9 +441,10 @@ class TestAPIRateLimiting:
 #                     CORS Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAPICORS:
     """اختبارات CORS"""
-    
+
     def test_cors_preflight(self, api_client: TestClient):
         """CORS preflight"""
         response = api_client.options(
@@ -433,34 +454,39 @@ class TestAPICORS:
                 "Access-Control-Request-Method": "POST",
             },
         )
-        
+
         assert response.status_code == 200
-        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
-    
+        assert (
+            response.headers["access-control-allow-origin"] == "http://localhost:3000"
+        )
+
     def test_cors_headers(self, api_client: TestClient):
         """CORS headers"""
         response = api_client.get(
             "/api/health",
             headers={"Origin": "http://localhost:3000"},
         )
-        
+
         assert response.status_code == 200
-        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+        assert (
+            response.headers["access-control-allow-origin"] == "http://localhost:3000"
+        )
 
 
 # ═══════════════════════════════════════════════════════════
 #                     WebSocket Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAPIWebSocket:
     """اختبارات WebSocket"""
-    
+
     def test_websocket_connection(self, api_client: TestClient):
         """اتصال WebSocket"""
         with pytest.raises(Exception):
             with api_client.websocket_connect("/api/ws/jobs"):
                 pass
-    
+
     def test_websocket_job_updates(self, api_client: TestClient):
         """تحديثات المهام عبر WebSocket"""
         with pytest.raises(Exception):
@@ -472,35 +498,36 @@ class TestAPIWebSocket:
 #                     Async API Tests
 # ═══════════════════════════════════════════════════════════
 
+
 class TestAsyncAPI:
     """اختبارات API Async"""
-    
+
     @pytest.mark.asyncio
     async def test_async_client(self):
         """عميل async"""
         try:
             from httpx import AsyncClient
-            
+
             app = create_app()
-            
+
             async with AsyncClient(app=app, base_url="http://test") as client:
                 response = await client.get("/api/health")
                 assert response.status_code == 200
         except ImportError:
             pytest.skip("httpx not installed")
-    
+
     @pytest.mark.asyncio
     async def test_concurrent_requests(self):
         """طلبات متزامنة"""
         try:
             from httpx import AsyncClient
-            
+
             app = create_app()
-            
+
             async with AsyncClient(app=app, base_url="http://test") as client:
                 tasks = [client.get("/api/health") for _ in range(10)]
                 responses = await asyncio.gather(*tasks)
-                
+
                 assert all(r.status_code == 200 for r in responses)
         except ImportError:
             pytest.skip("httpx not installed")

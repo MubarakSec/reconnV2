@@ -4,7 +4,6 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -96,7 +95,9 @@ def test_doctor_reports_python_dependency_section():
 def test_doctor_reports_missing_external_tools(monkeypatch):
     runner = CliRunner()
 
-    monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(lambda _tool: False))
+    monkeypatch.setattr(
+        cli.CommandExecutor, "available", staticmethod(lambda _tool: False)
+    )
 
     result = runner.invoke(cli.app, ["doctor", "--no-exit-on-fail"])
     assert result.exit_code == 0
@@ -109,10 +110,16 @@ def test_doctor_reports_missing_external_tools(monkeypatch):
 def test_doctor_reports_tool_probe_errors(monkeypatch):
     runner = CliRunner()
 
-    monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(lambda tool: tool == "droopescan"))
+    monkeypatch.setattr(
+        cli.CommandExecutor,
+        "available",
+        staticmethod(lambda tool: tool == "droopescan"),
+    )
 
     def _fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Traceback: broken tool\n")
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="", stderr="Traceback: broken tool\n"
+        )
 
     monkeypatch.setattr("subprocess.run", _fake_run)
 
@@ -141,7 +148,12 @@ def test_doctor_fix_deps_attempts_installs(monkeypatch):
     def _fake_run(cmd, **kwargs):
         cmd_list = [str(part) for part in cmd]
         calls.append(cmd_list)
-        if len(cmd_list) >= 5 and cmd_list[:4] == [sys.executable, "-m", "pip", "install"]:
+        if len(cmd_list) >= 5 and cmd_list[:4] == [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+        ]:
             if cmd_list[4] == "dnspython":
                 state["dns"] = True
             elif cmd_list[4] == "playwright":
@@ -198,8 +210,16 @@ def test_trace_command_uses_last_pointer(tmp_path: Path, monkeypatch):
         "duration_ms": 125.4,
         "started_at": "2026-03-10T00:00:00Z",
         "finished_at": "2026-03-10T00:00:01Z",
-        "attributes": {"job_id": record.spec.job_id, "target": "example.com", "profile": "passive"},
-        "stats": {"span_count": 1, "event_count": 2, "span_counts_by_type": {"stage": 1}},
+        "attributes": {
+            "job_id": record.spec.job_id,
+            "target": "example.com",
+            "profile": "passive",
+        },
+        "stats": {
+            "span_count": 1,
+            "event_count": 2,
+            "span_counts_by_type": {"stage": 1},
+        },
         "spans": [
             {
                 "name": "http_probe",
@@ -214,8 +234,20 @@ def test_trace_command_uses_last_pointer(tmp_path: Path, monkeypatch):
     events_path.write_text(
         "\n".join(
             [
-                json.dumps({"timestamp": "2026-03-10T00:00:00Z", "name": "trace.started", "attributes": {}}),
-                json.dumps({"timestamp": "2026-03-10T00:00:01Z", "name": "trace.finished", "attributes": {"status": "finished"}}),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-10T00:00:00Z",
+                        "name": "trace.started",
+                        "attributes": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-10T00:00:01Z",
+                        "name": "trace.finished",
+                        "attributes": {"status": "finished"},
+                    }
+                ),
             ]
         )
         + "\n",
@@ -243,20 +275,37 @@ def test_trace_command_outputs_json_for_job(tmp_path: Path, monkeypatch):
                 "trace_id": "trace-job-456",
                 "status": "failed",
                 "error": "boom",
-                "attributes": {"job_id": record.spec.job_id, "target": "example.com", "profile": "passive"},
-                "stats": {"span_count": 1, "event_count": 1, "span_counts_by_type": {"stage": 1}},
+                "attributes": {
+                    "job_id": record.spec.job_id,
+                    "target": "example.com",
+                    "profile": "passive",
+                },
+                "stats": {
+                    "span_count": 1,
+                    "event_count": 1,
+                    "span_counts_by_type": {"stage": 1},
+                },
                 "spans": [],
             }
         ),
         encoding="utf-8",
     )
     events_path.write_text(
-        json.dumps({"timestamp": "2026-03-10T00:00:02Z", "name": "trace.finished", "attributes": {"status": "failed"}}) + "\n",
+        json.dumps(
+            {
+                "timestamp": "2026-03-10T00:00:02Z",
+                "name": "trace.finished",
+                "attributes": {"status": "failed"},
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["trace", record.spec.job_id, "--json", "--events", "1"])
+    result = runner.invoke(
+        cli.app, ["trace", record.spec.job_id, "--json", "--events", "1"]
+    )
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["trace"]["trace_id"] == "trace-job-456"
@@ -310,7 +359,15 @@ def test_export_hunter_mode_filters_and_limits(tmp_path: Path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(
         cli.app,
-        ["export", record.spec.job_id, "--format", "jsonl", "--hunter-mode", "--limit", "1"],
+        [
+            "export",
+            record.spec.job_id,
+            "--format",
+            "jsonl",
+            "--hunter-mode",
+            "--limit",
+            "1",
+        ],
     )
     assert result.exit_code == 0
     lines = [line for line in result.stdout.splitlines() if line.strip()]
@@ -372,7 +429,15 @@ def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(
         cli.app,
-        ["export", record.spec.job_id, "--format", "triage", "--verified-only", "--limit", "1"],
+        [
+            "export",
+            record.spec.job_id,
+            "--format",
+            "triage",
+            "--verified-only",
+            "--limit",
+            "1",
+        ],
     )
     assert result.exit_code == 0
     lines = [line for line in result.stdout.splitlines() if line.strip()]
@@ -389,7 +454,9 @@ def test_export_triage_outputs_required_fields(tmp_path: Path, monkeypatch):
     assert Path(payload["artifact_path"]).exists()
 
 
-def test_export_triage_generates_artifacts_for_verified_high_critical(tmp_path: Path, monkeypatch):
+def test_export_triage_generates_artifacts_for_verified_high_critical(
+    tmp_path: Path, monkeypatch
+):
     _configure_test_home(tmp_path, monkeypatch)
     manager = JobManager()
     record = manager.create_job(target="example.com", profile="passive")
@@ -426,7 +493,9 @@ def test_export_triage_generates_artifacts_for_verified_high_critical(tmp_path: 
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["export", record.spec.job_id, "--format", "triage"])
+    result = runner.invoke(
+        cli.app, ["export", record.spec.job_id, "--format", "triage"]
+    )
     assert result.exit_code == 0
     payloads = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
     by_title = {item["title"]: item for item in payloads}
@@ -452,9 +521,11 @@ def test_rerun_restart_clears_checkpoints_and_results(tmp_path: Path, monkeypatc
     record.metadata.checkpoints = {"dns": "2024-01-01T00:00:00Z"}
     manager.update_metadata(record)
 
-    record.paths.results_jsonl.write_text("{\"type\":\"finding\"}\n", encoding="utf-8")
+    record.paths.results_jsonl.write_text('{"type":"finding"}\n', encoding="utf-8")
     record.paths.results_txt.write_text("old\n", encoding="utf-8")
-    record.paths.trimmed_results_jsonl.write_text("{\"type\":\"finding\"}\n", encoding="utf-8")
+    record.paths.trimmed_results_jsonl.write_text(
+        '{"type":"finding"}\n', encoding="utf-8"
+    )
 
     monkeypatch.setattr(cli, "run_pipeline", lambda *_args, **_kwargs: None)
 
@@ -504,7 +575,9 @@ def test_rerun_rejects_restart_with_stages(tmp_path: Path, monkeypatch):
     record = manager.create_job(target="example.com", profile="passive")
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["rerun", record.spec.job_id, "--restart", "--stages", "vuln_scan"])
+    result = runner.invoke(
+        cli.app, ["rerun", record.spec.job_id, "--restart", "--stages", "vuln_scan"]
+    )
     assert result.exit_code == 2
     assert "--restart cannot be combined with --stages" in result.output
 
@@ -571,7 +644,9 @@ def test_report_hunter_mode_generates_actionable_html(tmp_path: Path, monkeypatc
     )
 
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["report", record.spec.job_id, "--format", "html", "--hunter-mode"])
+    result = runner.invoke(
+        cli.app, ["report", record.spec.job_id, "--format", "html", "--hunter-mode"]
+    )
     assert result.exit_code == 0
     html_path = record.paths.root / "report.html"
     assert html_path.exists()

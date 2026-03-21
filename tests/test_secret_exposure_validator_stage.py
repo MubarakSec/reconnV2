@@ -7,7 +7,9 @@ from pathlib import Path
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_secret_exposure_validator import SecretExposureValidatorStage
+from recon_cli.pipeline.stage_secret_exposure_validator import (
+    SecretExposureValidatorStage,
+)
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 
@@ -33,7 +35,9 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
         profile="full",
         runtime_overrides=runtime_overrides,
     )
-    metadata = JobMetadata(job_id="job-secret-validator", queued_at="2020-01-01T00:00:00Z")
+    metadata = JobMetadata(
+        job_id="job-secret-validator", queued_at="2020-01-01T00:00:00Z"
+    )
     fs.write_json(paths.spec_path, spec.to_dict())
     fs.write_json(paths.metadata_path, metadata.to_dict())
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
@@ -43,8 +47,10 @@ def _hash_value(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", "ignore")).hexdigest()[:16]
 
 
-def _write_secret_finding(path: Path, *, url: str, pattern: str, value: str, score: int = 85) -> None:
-    start_text = f"const sample = \"{value}\";"
+def _write_secret_finding(
+    path: Path, *, url: str, pattern: str, value: str, score: int = 85
+) -> None:
+    start_text = f'const sample = "{value}";'
     start = start_text.index(value)
     end = start + len(value)
     payload = {
@@ -91,11 +97,13 @@ def test_secret_validator_confirms_live_exposure(monkeypatch, tmp_path: Path):
             "secret_exposure_validator_per_host_rps": 0,
         },
     )
-    _write_secret_finding(record.paths.results_jsonl, url=url, pattern="aws_access_key", value=token)
+    _write_secret_finding(
+        record.paths.results_jsonl, url=url, pattern="aws_access_key", value=token
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_get(_url, **_kwargs):
-        return _FakeResponse(200, f"const sample = \"{token}\";")
+        return _FakeResponse(200, f'const sample = "{token}";')
 
     import requests
 
@@ -107,7 +115,8 @@ def test_secret_validator_confirms_live_exposure(monkeypatch, tmp_path: Path):
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "secret-validator" and item.get("finding_type") == "exposed_secret"
+        if item.get("source") == "secret-validator"
+        and item.get("finding_type") == "exposed_secret"
     ]
     assert len(findings) == 1
     assert findings[0].get("confidence_label") == "verified"
@@ -130,7 +139,9 @@ def test_secret_validator_marks_stale_when_not_present(monkeypatch, tmp_path: Pa
             "secret_exposure_validator_timeout": 1,
         },
     )
-    _write_secret_finding(record.paths.results_jsonl, url=url, pattern="aws_access_key", value=token)
+    _write_secret_finding(
+        record.paths.results_jsonl, url=url, pattern="aws_access_key", value=token
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_get(_url, **_kwargs):
@@ -146,7 +157,8 @@ def test_secret_validator_marks_stale_when_not_present(monkeypatch, tmp_path: Pa
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "secret-validator" and item.get("finding_type") == "exposed_secret"
+        if item.get("source") == "secret-validator"
+        and item.get("finding_type") == "exposed_secret"
     ]
     assert not findings
     stats = record.metadata.stats.get("secret_exposure_validator", {})
@@ -166,11 +178,13 @@ def test_secret_validator_filters_placeholder_tokens(monkeypatch, tmp_path: Path
             "secret_exposure_validator_timeout": 1,
         },
     )
-    _write_secret_finding(record.paths.results_jsonl, url=url, pattern="generic_secret", value=value)
+    _write_secret_finding(
+        record.paths.results_jsonl, url=url, pattern="generic_secret", value=value
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_get(_url, **_kwargs):
-        return _FakeResponse(200, f"const sample = \"{value}\";")
+        return _FakeResponse(200, f'const sample = "{value}";')
 
     import requests
 

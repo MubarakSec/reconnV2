@@ -1,7 +1,7 @@
 """Tests for cache.py"""
+
 import time
 import tempfile
-import pytest
 from pathlib import Path
 from recon_cli.utils.cache import (
     MemoryCache,
@@ -70,7 +70,7 @@ class TestMemoryCache:
         cache.get("key1")  # Hit
         cache.get("key1")  # Hit
         cache.get("missing")  # Miss
-        
+
         stats = cache.stats()
         assert stats["hits"] == 2
         assert stats["misses"] == 1
@@ -80,7 +80,7 @@ class TestMemoryCache:
         cache = MemoryCache()
         cache.set("dict", {"a": 1, "b": [2, 3]})
         cache.set("list", [1, 2, 3])
-        
+
         assert cache.get("dict") == {"a": 1, "b": [2, 3]}
         assert cache.get("list") == [1, 2, 3]
 
@@ -106,7 +106,7 @@ class TestDiskCache:
         with tempfile.TemporaryDirectory() as tmpdir:
             cache1 = DiskCache(Path(tmpdir))
             cache1.set("key1", "value1")
-            
+
             cache2 = DiskCache(Path(tmpdir))
             assert cache2.get("key1") == "value1"
 
@@ -160,10 +160,10 @@ class TestHybridCache:
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = HybridCache(Path(tmpdir))
             cache.set("key1", "value1")
-            
+
             # Clear disk cache manually
             cache._disk.clear()
-            
+
             # Should still find in memory
             assert cache.get("key1") == "value1"
 
@@ -172,10 +172,10 @@ class TestHybridCache:
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = HybridCache(Path(tmpdir))
             cache.set("key1", "value1")
-            
+
             # Clear memory cache
             cache._memory.clear()
-            
+
             # Should find on disk
             assert cache.get("key1") == "value1"
 
@@ -185,7 +185,7 @@ class TestHybridCache:
             cache = HybridCache(Path(tmpdir))
             cache.set("key1", "value1")
             cache.get("key1")  # Memory hit
-            
+
             stats = cache.stats()
             assert "memory_hits" in stats
             assert "disk_hits" in stats
@@ -196,7 +196,7 @@ class TestHybridCache:
             cache = HybridCache(Path(tmpdir))
             cache.set("key1", "value1")
             cache.clear()
-            
+
             assert cache.get("key1") is None
 
 
@@ -258,7 +258,7 @@ class TestCacheEdgeCases:
             cache.set("key/with/slashes", "value1")
             cache.set("key:with:colons", "value2")
             cache.set("key?with=query", "value3")
-            
+
             assert cache.get("key/with/slashes") == "value1"
             assert cache.get("key:with:colons") == "value2"
             assert cache.get("key?with=query") == "value3"

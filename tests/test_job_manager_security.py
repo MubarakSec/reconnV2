@@ -53,7 +53,9 @@ def test_acquire_lock_recovers_stale_pid_lock(monkeypatch, tmp_path):
     record = manager.create_job(target="example.com", profile="passive")
     lock_path = record.paths.root / ".lock"
     lock_path.write_text(
-        json.dumps({"owner": "old-worker", "pid": 999999, "timestamp": "2026-01-01T00:00:00Z"}),
+        json.dumps(
+            {"owner": "old-worker", "pid": 999999, "timestamp": "2026-01-01T00:00:00Z"}
+        ),
         encoding="utf-8",
     )
 

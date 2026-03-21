@@ -69,7 +69,9 @@ def _make_record(root: Path, job_id: str) -> JobRecord:
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
 
 
-def test_job_manager_refreshes_last_pointers_on_move(monkeypatch, tmp_path: Path) -> None:
+def test_job_manager_refreshes_last_pointers_on_move(
+    monkeypatch, tmp_path: Path
+) -> None:
     _configure_recon_home(monkeypatch, tmp_path)
     manager = JobManager(home=tmp_path)
 
@@ -79,18 +81,25 @@ def test_job_manager_refreshes_last_pointers_on_move(monkeypatch, tmp_path: Path
     (record.paths.root / "report.html").write_text("<html></html>", encoding="utf-8")
     record.paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
     (record.paths.artifacts_dir / "trace.json").write_text("{}", encoding="utf-8")
-    (record.paths.artifacts_dir / "trace_events.jsonl").write_text("{}\n", encoding="utf-8")
+    (record.paths.artifacts_dir / "trace_events.jsonl").write_text(
+        "{}\n", encoding="utf-8"
+    )
 
     moved_root = manager.move_job(record.spec.job_id, config.FINISHED_JOBS)
     assert moved_root is not None
     assert _pointer_target(config.JOBS_ROOT / "last") == moved_root.resolve()
-    assert _pointer_target(config.RECON_HOME / "reports" / "last") == (moved_root / "report.html").resolve()
-    assert _pointer_target(config.RECON_HOME / "artifacts" / "last-trace.json") == (
-        moved_root / "artifacts" / "trace.json"
-    ).resolve()
-    assert _pointer_target(config.RECON_HOME / "artifacts" / "last-trace-events.jsonl") == (
-        moved_root / "artifacts" / "trace_events.jsonl"
-    ).resolve()
+    assert (
+        _pointer_target(config.RECON_HOME / "reports" / "last")
+        == (moved_root / "report.html").resolve()
+    )
+    assert (
+        _pointer_target(config.RECON_HOME / "artifacts" / "last-trace.json")
+        == (moved_root / "artifacts" / "trace.json").resolve()
+    )
+    assert (
+        _pointer_target(config.RECON_HOME / "artifacts" / "last-trace-events.jsonl")
+        == (moved_root / "artifacts" / "trace_events.jsonl").resolve()
+    )
 
 
 def test_remove_job_clears_last_pointers(monkeypatch, tmp_path: Path) -> None:
@@ -100,14 +109,18 @@ def test_remove_job_clears_last_pointers(monkeypatch, tmp_path: Path) -> None:
 
     (record.paths.root / "report.html").write_text("<html></html>", encoding="utf-8")
     (record.paths.artifacts_dir / "trace.json").write_text("{}", encoding="utf-8")
-    (record.paths.artifacts_dir / "trace_events.jsonl").write_text("{}\n", encoding="utf-8")
+    (record.paths.artifacts_dir / "trace_events.jsonl").write_text(
+        "{}\n", encoding="utf-8"
+    )
     refresh_job_pointers(record.paths.root)
 
     assert manager.remove_job(record.spec.job_id) is True
     assert not os.path.lexists(config.JOBS_ROOT / "last")
     assert not os.path.lexists(config.RECON_HOME / "reports" / "last")
     assert not os.path.lexists(config.RECON_HOME / "artifacts" / "last-trace.json")
-    assert not os.path.lexists(config.RECON_HOME / "artifacts" / "last-trace-events.jsonl")
+    assert not os.path.lexists(
+        config.RECON_HOME / "artifacts" / "last-trace-events.jsonl"
+    )
 
 
 def test_pipeline_trace_updates_last_trace_pointer(monkeypatch, tmp_path: Path) -> None:
@@ -124,24 +137,38 @@ def test_pipeline_trace_updates_last_trace_pointer(monkeypatch, tmp_path: Path) 
 
     asyncio.run(runner.run(context))
 
-    assert _pointer_target(config.RECON_HOME / "artifacts" / "last-trace.json") == record.paths.artifact("trace.json").resolve()
-    assert _pointer_target(config.RECON_HOME / "artifacts" / "last-trace-events.jsonl") == record.paths.artifact("trace_events.jsonl").resolve()
+    assert (
+        _pointer_target(config.RECON_HOME / "artifacts" / "last-trace.json")
+        == record.paths.artifact("trace.json").resolve()
+    )
+    assert (
+        _pointer_target(config.RECON_HOME / "artifacts" / "last-trace-events.jsonl")
+        == record.paths.artifact("trace_events.jsonl").resolve()
+    )
 
 
-def test_generate_html_report_updates_last_report_pointer(monkeypatch, tmp_path: Path) -> None:
+def test_generate_html_report_updates_last_report_pointer(
+    monkeypatch, tmp_path: Path
+) -> None:
     _configure_recon_home(monkeypatch, tmp_path)
     job_dir = tmp_path / "job-html"
     job_dir.mkdir()
-    (job_dir / "metadata.json").write_text(json.dumps({"job_id": "job-html", "status": "finished"}), encoding="utf-8")
+    (job_dir / "metadata.json").write_text(
+        json.dumps({"job_id": "job-html", "status": "finished"}), encoding="utf-8"
+    )
     (job_dir / "results.jsonl").write_text("", encoding="utf-8")
 
     output_path = tmp_path / "exports" / "report.html"
     generate_html_report(job_dir, output_path)
 
-    assert _pointer_target(config.RECON_HOME / "reports" / "last") == output_path.resolve()
+    assert (
+        _pointer_target(config.RECON_HOME / "reports" / "last") == output_path.resolve()
+    )
 
 
-def test_report_generator_updates_last_report_pointer(monkeypatch, tmp_path: Path, event_loop) -> None:
+def test_report_generator_updates_last_report_pointer(
+    monkeypatch, tmp_path: Path, event_loop
+) -> None:
     _configure_recon_home(monkeypatch, tmp_path)
     output_path = tmp_path / "exports" / "report.json"
     generator = ReportGenerator()
@@ -158,7 +185,9 @@ def test_report_generator_updates_last_report_pointer(monkeypatch, tmp_path: Pat
         )
     )
 
-    assert _pointer_target(config.RECON_HOME / "reports" / "last") == output_path.resolve()
+    assert (
+        _pointer_target(config.RECON_HOME / "reports" / "last") == output_path.resolve()
+    )
 
 
 def test_pdf_reporter_updates_last_report_pointer(monkeypatch, tmp_path: Path) -> None:
@@ -172,8 +201,12 @@ def test_pdf_reporter_updates_last_report_pointer(monkeypatch, tmp_path: Path) -
         path.write_bytes(b"%PDF-1.4\n")
         return path
 
-    with patch.object(PDFReporter, "_generate_with_reportlab", side_effect=_fake_generate):
+    with patch.object(
+        PDFReporter, "_generate_with_reportlab", side_effect=_fake_generate
+    ):
         result = reporter.generate_report({"target": "example.com"}, output_path, [])
 
     assert result == output_path
-    assert _pointer_target(config.RECON_HOME / "reports" / "last") == output_path.resolve()
+    assert (
+        _pointer_target(config.RECON_HOME / "reports" / "last") == output_path.resolve()
+    )

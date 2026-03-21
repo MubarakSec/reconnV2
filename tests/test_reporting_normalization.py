@@ -9,10 +9,19 @@ def test_resolve_severity_priority_and_score():
 
 
 def test_resolve_finding_type_rules():
-    assert reporting.resolve_finding_type({"finding_type": "sql_injection"}) == "sql_injection"
-    assert reporting.resolve_finding_type({"type": "auth_matrix_issue"}) == "auth_matrix_issue"
+    assert (
+        reporting.resolve_finding_type({"finding_type": "sql_injection"})
+        == "sql_injection"
+    )
+    assert (
+        reporting.resolve_finding_type({"type": "auth_matrix_issue"})
+        == "auth_matrix_issue"
+    )
     assert reporting.resolve_finding_type({"type": "finding", "tags": ["xss"]}) == "xss"
-    assert reporting.resolve_finding_type({"type": "finding", "source": "sqlmap"}) == "sql_injection"
+    assert (
+        reporting.resolve_finding_type({"type": "finding", "source": "sqlmap"})
+        == "sql_injection"
+    )
 
 
 def test_is_finding_and_secret():
@@ -25,8 +34,13 @@ def test_is_finding_and_secret():
 
 def test_resolve_confidence_label_and_verified():
     assert reporting.resolve_confidence_label({"tags": ["confirmed"]}) == "verified"
-    assert reporting.resolve_confidence_label({"tags": ["ssrf:confirmed"]}) == "verified"
-    assert reporting.resolve_confidence_label({"source": "extended-validation"}) == "verified"
+    assert (
+        reporting.resolve_confidence_label({"tags": ["ssrf:confirmed"]}) == "verified"
+    )
+    assert (
+        reporting.resolve_confidence_label({"source": "extended-validation"})
+        == "verified"
+    )
     assert reporting.resolve_confidence_label({"confidence": 0.9}) == "high"
     assert reporting.resolve_confidence_label({"confidence": 0.7}) == "medium"
     assert reporting.resolve_confidence_label({"confidence": 0.2}) == "low"
@@ -38,22 +52,48 @@ def test_resolve_confidence_label_and_verified():
 
 def test_resolve_confidence_label_edge_cases():
     # Explicit label must win over heuristics.
-    assert reporting.resolve_confidence_label(
-        {"confidence_label": "low", "tags": ["ssrf:confirmed"], "source": "extended-validation"}
-    ) == "low"
+    assert (
+        reporting.resolve_confidence_label(
+            {
+                "confidence_label": "low",
+                "tags": ["ssrf:confirmed"],
+                "source": "extended-validation",
+            }
+        )
+        == "low"
+    )
     # Exploit-validation source should be treated as verified.
-    assert reporting.resolve_confidence_label({"source": "exploit-validation"}) == "verified"
+    assert (
+        reporting.resolve_confidence_label({"source": "exploit-validation"})
+        == "verified"
+    )
     # Non-string tags should be ignored safely.
-    assert reporting.resolve_confidence_label({"tags": [None, 7, "confirmed"]}) == "verified"
+    assert (
+        reporting.resolve_confidence_label({"tags": [None, 7, "confirmed"]})
+        == "verified"
+    )
 
 
 def test_infer_replay_stage_and_rerun_command():
     assert reporting.infer_replay_stage({"source": "dalfox"}) == "vuln_scan"
-    assert reporting.infer_replay_stage({"source": "idor-validator"}) == "idor_validator"
-    assert reporting.infer_replay_stage({"source": "ssrf-validator"}) == "ssrf_validator"
-    assert reporting.infer_replay_stage({"source": "auth-bypass-validator"}) == "auth_bypass_validator"
-    assert reporting.infer_replay_stage({"source": "secret-validator"}) == "secret_exposure_validator"
-    assert reporting.infer_replay_stage({"finding_type": "open_redirect"}) == "extended_validation"
+    assert (
+        reporting.infer_replay_stage({"source": "idor-validator"}) == "idor_validator"
+    )
+    assert (
+        reporting.infer_replay_stage({"source": "ssrf-validator"}) == "ssrf_validator"
+    )
+    assert (
+        reporting.infer_replay_stage({"source": "auth-bypass-validator"})
+        == "auth_bypass_validator"
+    )
+    assert (
+        reporting.infer_replay_stage({"source": "secret-validator"})
+        == "secret_exposure_validator"
+    )
+    assert (
+        reporting.infer_replay_stage({"finding_type": "open_redirect"})
+        == "extended_validation"
+    )
     assert reporting.build_finding_rerun_command("job123", {"source": "dalfox"}) == (
         "python -m recon_cli rerun job123 --stages vuln_scan --keep-results"
     )
@@ -137,12 +177,18 @@ def test_build_triage_entry_fields():
     assert entry["severity"] == "critical"
     assert entry["finding_type"] == "sql_injection"
     assert entry["proof"] == "verified"
-    assert entry["repro_cmd"].startswith("python -m recon_cli rerun job123 --stages vuln_scan")
+    assert entry["repro_cmd"].startswith(
+        "python -m recon_cli rerun job123 --stages vuln_scan"
+    )
     assert entry["poc_steps"][0]["command"] == entry["repro_cmd"]
     assert "injectable parameter" in entry["poc_steps"][0]["expected_success"].lower()
     assert entry["asset_context"]["host"] == "example.com"
     assert entry["asset_context"]["endpoint"] == "https://example.com/search?q=1"
-    assert entry["asset_context"]["auth_requirement"] in {"unknown", "likely_required", "public"}
+    assert entry["asset_context"]["auth_requirement"] in {
+        "unknown",
+        "likely_required",
+        "public",
+    }
     assert entry["impact_hypothesis"]
 
 
@@ -165,7 +211,9 @@ def test_compute_risk_score_prioritizes_verified_public_auth():
         "severity": "medium",
         "tags": [],
     }
-    assert reporting.compute_risk_score(high_value) > reporting.compute_risk_score(low_value)
+    assert reporting.compute_risk_score(high_value) > reporting.compute_risk_score(
+        low_value
+    )
 
 
 def test_rank_findings_is_deterministic():

@@ -78,7 +78,9 @@ def _install_testclient_compat() -> None:
             kwargs["headers"] = merged_headers
             loop = asyncio.new_event_loop()
             try:
-                return loop.run_until_complete(self._request_async(method, url, **kwargs))
+                return loop.run_until_complete(
+                    self._request_async(method, url, **kwargs)
+                )
             finally:
                 loop.close()
 
@@ -122,25 +124,21 @@ _install_testclient_compat()
 #                     Pytest Configuration
 # ═══════════════════════════════════════════════════════════
 
+
 def pytest_configure(config):
     """تكوين pytest"""
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "unit: marks tests as unit tests"
-    )
-    config.addinivalue_line(
-        "markers", "asyncio: marks tests as async"
-    )
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "unit: marks tests as unit tests")
+    config.addinivalue_line("markers", "asyncio: marks tests as async")
 
 
 # ═══════════════════════════════════════════════════════════
 #                     Temp Directories
 # ═══════════════════════════════════════════════════════════
+
 
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
@@ -174,38 +172,50 @@ def config_dir(temp_dir: Path) -> Path:
 #                     Data Factories
 # ═══════════════════════════════════════════════════════════
 
+
 @dataclass
 class TestDataFactory:
     """مصنع بيانات الاختبار"""
-    
+
     base_dir: Path = field(default_factory=lambda: Path(tempfile.gettempdir()))
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Targets
     # ─────────────────────────────────────────────────────────
-    
+
     def create_targets(self, count: int = 5) -> List[str]:
         """إنشاء أهداف"""
         return [f"test{i}.example.com" for i in range(1, count + 1)]
-    
+
     def create_targets_file(self, count: int = 5) -> Path:
         """إنشاء ملف أهداف"""
         path = self.base_dir / "targets.txt"
         targets = self.create_targets(count)
         path.write_text("\n".join(targets))
         return path
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Subdomains
     # ─────────────────────────────────────────────────────────
-    
+
     def create_subdomains(
         self,
         domain: str = "example.com",
         count: int = 10,
     ) -> List[Dict[str, Any]]:
         """إنشاء نتائج subdomain"""
-        prefixes = ["www", "api", "admin", "mail", "blog", "dev", "test", "staging", "app", "cdn"]
+        prefixes = [
+            "www",
+            "api",
+            "admin",
+            "mail",
+            "blog",
+            "dev",
+            "test",
+            "staging",
+            "app",
+            "cdn",
+        ]
         return [
             {
                 "host": f"{prefixes[i % len(prefixes)]}{i // len(prefixes) or ''}.{domain}",
@@ -214,7 +224,7 @@ class TestDataFactory:
             }
             for i in range(count)
         ]
-    
+
     def create_subdomains_file(
         self,
         domain: str = "example.com",
@@ -227,11 +237,11 @@ class TestDataFactory:
             for sub in subs:
                 f.write(json.dumps(sub) + "\n")
         return path
-    
+
     # ─────────────────────────────────────────────────────────
     #                     HTTP Responses
     # ─────────────────────────────────────────────────────────
-    
+
     def create_http_responses(self, count: int = 10) -> List[Dict[str, Any]]:
         """إنشاء استجابات HTTP"""
         return [
@@ -244,19 +254,22 @@ class TestDataFactory:
             }
             for i in range(count)
         ]
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Vulnerabilities
     # ─────────────────────────────────────────────────────────
-    
+
     def create_vulnerabilities(self, count: int = 5) -> List[Dict[str, Any]]:
         """إنشاء ثغرات"""
         severities = ["critical", "high", "medium", "low", "info"]
         templates = [
-            "CVE-2021-44228", "CVE-2023-1234", "xss-reflected",
-            "sqli-error-based", "open-redirect",
+            "CVE-2021-44228",
+            "CVE-2023-1234",
+            "xss-reflected",
+            "sqli-error-based",
+            "open-redirect",
         ]
-        
+
         return [
             {
                 "template_id": templates[i % len(templates)],
@@ -269,15 +282,15 @@ class TestDataFactory:
             }
             for i in range(count)
         ]
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Secrets
     # ─────────────────────────────────────────────────────────
-    
+
     def create_secrets(self, count: int = 3) -> List[Dict[str, Any]]:
         """إنشاء أسرار"""
         types = ["aws_access_key", "github_token", "api_key"]
-        
+
         return [
             {
                 "type": types[i % len(types)],
@@ -288,11 +301,11 @@ class TestDataFactory:
             }
             for i in range(count)
         ]
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Job Specs
     # ─────────────────────────────────────────────────────────
-    
+
     def create_job_spec(
         self,
         targets: Optional[List[str]] = None,
@@ -312,16 +325,16 @@ class TestDataFactory:
                 "on_error": True,
             },
         }
-    
+
     def create_job_dir(self, job_id: str = "test_job") -> Path:
         """إنشاء مجلد مهمة"""
         path = self.base_dir / "jobs" / job_id
         path.mkdir(parents=True, exist_ok=True)
-        
+
         # Create spec
         spec = self.create_job_spec()
         (path / "spec.json").write_text(json.dumps(spec))
-        
+
         # Create metadata
         metadata = {
             "job_id": job_id,
@@ -329,13 +342,13 @@ class TestDataFactory:
             "created_at": datetime.now().isoformat(),
         }
         (path / "metadata.json").write_text(json.dumps(metadata))
-        
+
         return path
-    
+
     # ─────────────────────────────────────────────────────────
     #                     Results
     # ─────────────────────────────────────────────────────────
-    
+
     def create_scan_results(self) -> Dict[str, Any]:
         """إنشاء نتائج فحص كاملة"""
         return {
@@ -350,20 +363,20 @@ class TestDataFactory:
                 "duration_seconds": 120.5,
             },
         }
-    
+
     def create_results_file(self) -> Path:
         """إنشاء ملف نتائج JSONL"""
         path = self.base_dir / "results.jsonl"
-        
+
         results = []
         results.extend(self.create_subdomains(count=5))
         results.extend(self.create_http_responses(count=5))
         results.extend(self.create_vulnerabilities(count=3))
-        
+
         with open(path, "w") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")
-        
+
         return path
 
 
@@ -378,10 +391,11 @@ def data_factory(temp_dir: Path) -> TestDataFactory:
 #                     Mock Factories
 # ═══════════════════════════════════════════════════════════
 
+
 @dataclass
 class MockFactory:
     """مصنع الـ Mocks"""
-    
+
     def create_http_response(
         self,
         status: int = 200,
@@ -397,7 +411,7 @@ class MockFactory:
         response.read = AsyncMock(return_value=text.encode())
         response.headers = {"content-type": "application/json"}
         return response
-    
+
     def create_subprocess_result(
         self,
         returncode: int = 0,
@@ -410,7 +424,7 @@ class MockFactory:
         result.stdout = stdout.encode()
         result.stderr = stderr.encode()
         return result
-    
+
     def create_async_subprocess(
         self,
         returncode: int = 0,
@@ -420,22 +434,22 @@ class MockFactory:
         """إنشاء async subprocess"""
         process = MagicMock()
         process.returncode = returncode
-        process.communicate = AsyncMock(
-            return_value=(stdout.encode(), stderr.encode())
-        )
+        process.communicate = AsyncMock(return_value=(stdout.encode(), stderr.encode()))
         process.wait = AsyncMock(return_value=returncode)
         return process
-    
+
     def create_tool_executor(self) -> MagicMock:
         """إنشاء tool executor mock"""
         executor = MagicMock()
-        executor.run = AsyncMock(return_value={
-            "success": True,
-            "output": "test output",
-            "results": [],
-        })
+        executor.run = AsyncMock(
+            return_value={
+                "success": True,
+                "output": "test output",
+                "results": [],
+            }
+        )
         return executor
-    
+
     def create_http_client(self) -> MagicMock:
         """إنشاء HTTP client mock"""
         client = MagicMock()
@@ -456,12 +470,13 @@ def mock_factory() -> MockFactory:
 #                     Tool Mocks
 # ═══════════════════════════════════════════════════════════
 
+
 @pytest.fixture
 def mock_subfinder(data_factory: TestDataFactory):
     """Mock subfinder"""
     subs = data_factory.create_subdomains()
     output = "\n".join(s["host"] for s in subs)
-    
+
     with patch("asyncio.create_subprocess_exec") as mock:
         process = MagicMock()
         process.returncode = 0
@@ -475,7 +490,7 @@ def mock_httpx(data_factory: TestDataFactory):
     """Mock httpx-toolkit"""
     responses = data_factory.create_http_responses()
     output = "\n".join(json.dumps(r) for r in responses)
-    
+
     with patch("asyncio.create_subprocess_exec") as mock:
         process = MagicMock()
         process.returncode = 0
@@ -489,7 +504,7 @@ def mock_nuclei(data_factory: TestDataFactory):
     """Mock nuclei"""
     vulns = data_factory.create_vulnerabilities()
     output = "\n".join(json.dumps(v) for v in vulns)
-    
+
     with patch("asyncio.create_subprocess_exec") as mock:
         process = MagicMock()
         process.returncode = 0
@@ -502,18 +517,19 @@ def mock_nuclei(data_factory: TestDataFactory):
 #                     Environment
 # ═══════════════════════════════════════════════════════════
 
+
 @pytest.fixture
 def clean_env():
     """بيئة نظيفة"""
     original = os.environ.copy()
-    
+
     # Remove RECON_ prefixed vars
     for key in list(os.environ.keys()):
         if key.startswith("RECON_"):
             del os.environ[key]
-    
+
     yield
-    
+
     # Restore
     os.environ.clear()
     os.environ.update(original)
@@ -523,14 +539,14 @@ def clean_env():
 def test_env(temp_dir: Path):
     """بيئة اختبار"""
     original = os.environ.copy()
-    
+
     os.environ["RECON_JOBS_DIR"] = str(temp_dir / "jobs")
     os.environ["RECON_CONFIG_DIR"] = str(temp_dir / "config")
     os.environ["RECON_LOG_LEVEL"] = "DEBUG"
     os.environ["RECON_CONCURRENCY"] = "5"
-    
+
     yield
-    
+
     os.environ.clear()
     os.environ.update(original)
 
@@ -538,6 +554,7 @@ def test_env(temp_dir: Path):
 # ═══════════════════════════════════════════════════════════
 #                     Async Helpers
 # ═══════════════════════════════════════════════════════════
+
 
 @pytest.fixture
 def async_timeout():
@@ -553,6 +570,7 @@ async def run_with_timeout(coro, timeout: float = 10.0):
 # ═══════════════════════════════════════════════════════════
 #                     Database
 # ═══════════════════════════════════════════════════════════
+
 
 @pytest.fixture
 def temp_db(temp_dir: Path) -> Path:
@@ -571,13 +589,14 @@ def memory_db() -> str:
 #                     API Testing
 # ═══════════════════════════════════════════════════════════
 
+
 @pytest.fixture
 def api_client():
     """عميل API للاختبار"""
     try:
         from fastapi.testclient import TestClient
         from recon_cli.api.app import create_app
-        
+
         app = create_app()
         return TestClient(app)
     except ImportError:
@@ -590,7 +609,7 @@ def async_api_client():
     try:
         from httpx import AsyncClient
         from recon_cli.api.app import create_app
-        
+
         app = create_app()
         return AsyncClient(app=app, base_url="http://test")
     except ImportError:
@@ -601,33 +620,34 @@ def async_api_client():
 #                     Assertions
 # ═══════════════════════════════════════════════════════════
 
+
 class Assertions:
     """تأكيدات مخصصة"""
-    
+
     @staticmethod
     def assert_valid_subdomain(data: Dict[str, Any]) -> None:
         """تأكيد صحة subdomain"""
         assert "host" in data
         assert "." in data["host"]
-    
+
     @staticmethod
     def assert_valid_vulnerability(data: Dict[str, Any]) -> None:
         """تأكيد صحة vulnerability"""
         assert "severity" in data
         assert data["severity"] in ["critical", "high", "medium", "low", "info"]
-    
+
     @staticmethod
     def assert_valid_job(data: Dict[str, Any]) -> None:
         """تأكيد صحة job"""
         assert "job_id" in data or "id" in data
         assert "status" in data
-    
+
     @staticmethod
     def assert_file_contains(path: Path, text: str) -> None:
         """تأكيد احتواء ملف على نص"""
         content = path.read_text()
         assert text in content, f"'{text}' not found in {path}"
-    
+
     @staticmethod
     def assert_json_file(path: Path) -> Dict:
         """تأكيد صحة ملف JSON"""
@@ -646,6 +666,7 @@ def assertions() -> Assertions:
 #                     Performance
 # ═══════════════════════════════════════════════════════════
 
+
 @pytest.fixture
 def performance_threshold():
     """عتبات الأداء"""
@@ -658,20 +679,22 @@ def performance_threshold():
 
 class PerformanceTimer:
     """مؤقت الأداء"""
-    
+
     def __init__(self):
         self.start_time = None
         self.end_time = None
-    
+
     def __enter__(self):
         import time
+
         self.start_time = time.perf_counter()
         return self
-    
+
     def __exit__(self, *args):
         import time
+
         self.end_time = time.perf_counter()
-    
+
     @property
     def elapsed_ms(self) -> float:
         if self.start_time and self.end_time:

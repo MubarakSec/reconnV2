@@ -13,9 +13,17 @@ def build_job(tmp_path: Path) -> JobRecord:
     paths.logs_dir.mkdir(parents=True, exist_ok=True)
     paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
     paths.pipeline_log.touch()
-    fs.write_json(paths.spec_path, JobSpec(job_id="job1", target="example.com", profile="passive").to_dict())
-    fs.write_json(paths.metadata_path, JobMetadata(job_id="job1", queued_at="2020-01-01T00:00:00Z").to_dict())
-    paths.results_jsonl.write_text('{"type":"meta","schema_version":"1.0.0"}\n', encoding="utf-8")
+    fs.write_json(
+        paths.spec_path,
+        JobSpec(job_id="job1", target="example.com", profile="passive").to_dict(),
+    )
+    fs.write_json(
+        paths.metadata_path,
+        JobMetadata(job_id="job1", queued_at="2020-01-01T00:00:00Z").to_dict(),
+    )
+    paths.results_jsonl.write_text(
+        '{"type":"meta","schema_version":"1.0.0"}\n', encoding="utf-8"
+    )
     return JobRecord(
         spec=JobSpec.from_dict(fs.read_json(paths.spec_path)),
         metadata=JobMetadata.from_dict(fs.read_json(paths.metadata_path)),

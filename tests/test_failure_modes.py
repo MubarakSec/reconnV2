@@ -6,10 +6,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_base import StageError
-from recon_cli.pipeline.stages import PassiveEnumerationStage
 from recon_cli.tools.executor import CommandExecutor, CommandError
-from recon_cli.utils import fs
 
 
 class DummyManager:
@@ -38,10 +35,20 @@ def test_corrupt_metadata_detected(tmp_path: Path):
 
 
 def test_executor_handles_timeout(tmp_path: Path):
-    logger = type("L", (), {"info": lambda *a, **k: None, "error": lambda *a, **k: None, "warning": lambda *a, **k: None})()
+    logger = type(
+        "L",
+        (),
+        {
+            "info": lambda *a, **k: None,
+            "error": lambda *a, **k: None,
+            "warning": lambda *a, **k: None,
+        },
+    )()
     executor = CommandExecutor(logger)
     with pytest.raises(CommandError):
-        executor.run([subprocess.sys.executable, "-c", "import time; time.sleep(2)"], timeout=1)
+        executor.run(
+            [subprocess.sys.executable, "-c", "import time; time.sleep(2)"], timeout=1
+        )
 
 
 def test_tls_toggle_in_context(monkeypatch, tmp_path: Path):

@@ -1,5 +1,3 @@
-import os
-import sys
 from pathlib import Path
 
 # Import from plugins package (exports stage plugin loader)

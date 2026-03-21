@@ -57,8 +57,12 @@ class FakeSession:
 
 def fake_requests(response_text="ok", cookie_name=None):
     return types.SimpleNamespace(
-        Session=lambda: FakeSession(response_text=response_text, cookie_name=cookie_name),
-        packages=types.SimpleNamespace(urllib3=types.SimpleNamespace(disable_warnings=lambda: None)),
+        Session=lambda: FakeSession(
+            response_text=response_text, cookie_name=cookie_name
+        ),
+        packages=types.SimpleNamespace(
+            urllib3=types.SimpleNamespace(disable_warnings=lambda: None)
+        ),
     )
 
 
@@ -117,7 +121,9 @@ def test_auth_login_fail_regex(monkeypatch, tmp_path: Path):
         "auth_login_payload": "user=test&pass=wrong",
         "auth_login_fail_regex": "invalid",
     }
-    monkeypatch.setattr(auth_mod, "requests", fake_requests(response_text="invalid credentials"))
+    monkeypatch.setattr(
+        auth_mod, "requests", fake_requests(response_text="invalid credentials")
+    )
     record = make_record(tmp_path, runtime_overrides)
     context = PipelineContext(record=record, manager=DummyManager())
 

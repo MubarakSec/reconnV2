@@ -1,6 +1,6 @@
 """Tests for rate_limiter.py"""
+
 import time
-import pytest
 from recon_cli.utils.rate_limiter import (
     TokenBucket,
     RateLimitConfig,
@@ -77,7 +77,7 @@ class TestRateLimiter:
         """wait_for_slot respects rate limits."""
         config = RateLimitConfig(requests_per_second=100, per_host_limit=100)
         limiter = RateLimiter(config)
-        
+
         # Should not block for first request
         start = time.time()
         limiter.wait_for_slot("https://example.com/page1")
@@ -88,11 +88,11 @@ class TestRateLimiter:
         """Different hosts have separate limits."""
         config = RateLimitConfig(requests_per_second=100, per_host_limit=5)
         limiter = RateLimiter(config)
-        
+
         # Quick requests to different hosts should work
         limiter.wait_for_slot("https://example.com/")
         limiter.wait_for_slot("https://test.com/")
-        
+
         stats = limiter.stats()
         assert stats["total_requests"] == 2
 
@@ -100,11 +100,11 @@ class TestRateLimiter:
         """Rate limiter backs off on 429 response."""
         config = RateLimitConfig(requests_per_second=100)
         limiter = RateLimiter(config)
-        
+
         url = "https://example.com/"
         limiter.wait_for_slot(url)
         limiter.on_response(url, 429)
-        
+
         stats = limiter.stats()
         assert stats["total_429s"] == 1
 
@@ -112,11 +112,11 @@ class TestRateLimiter:
         """Successful responses are tracked."""
         config = RateLimitConfig(requests_per_second=100)
         limiter = RateLimiter(config)
-        
+
         url = "https://example.com/"
         limiter.wait_for_slot(url)
         limiter.on_response(url, 200)
-        
+
         stats = limiter.stats()
         assert stats["total_requests"] == 1
         assert stats["total_429s"] == 0
@@ -125,11 +125,11 @@ class TestRateLimiter:
         """Stats returns correct information."""
         config = RateLimitConfig(requests_per_second=100)
         limiter = RateLimiter(config)
-        
+
         limiter.wait_for_slot("https://a.com/")
         limiter.wait_for_slot("https://b.com/")
         limiter.wait_for_slot("https://c.com/")
-        
+
         stats = limiter.stats()
         assert stats["total_requests"] == 3
         assert stats["hosts_tracked"] == 3
@@ -138,7 +138,7 @@ class TestRateLimiter:
         """Host extraction from URLs."""
         config = RateLimitConfig()
         limiter = RateLimiter(config)
-        
+
         # Test various URL formats
         assert limiter._extract_host("https://example.com/path") == "example.com"
         assert limiter._extract_host("http://test.org:8080/") == "test.org"
@@ -155,13 +155,13 @@ class TestRateLimiterIntegration:
             burst_size=5,
         )
         limiter = RateLimiter(config)
-        
+
         # Burst of 5 requests should go through quickly
         start = time.time()
         for i in range(5):
             limiter.wait_for_slot(f"https://example.com/page{i}")
         elapsed = time.time() - start
-        
+
         # Should complete in under 1 second due to burst
         assert elapsed < 1.0
 
@@ -172,12 +172,12 @@ class TestRateLimiterIntegration:
             per_host_limit=10,
         )
         limiter = RateLimiter(config)
-        
+
         hosts = ["example.com", "test.org", "demo.net"]
         for host in hosts:
             for i in range(5):
                 limiter.wait_for_slot(f"https://{host}/page{i}")
-        
+
         stats = limiter.stats()
         assert stats["total_requests"] == 15
         assert stats["hosts_tracked"] == 3

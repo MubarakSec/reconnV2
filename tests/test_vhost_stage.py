@@ -85,13 +85,23 @@ def test_vhost_probe_cap_enforced(monkeypatch, tmp_path: Path):
     _write_base_url(record.paths.results_jsonl)
     context = PipelineContext(record=record, manager=DummyManager())
 
-    def fake_get(url, timeout=None, allow_redirects=None, verify=None, headers=None, stream=None):
+    def fake_get(
+        url, timeout=None, allow_redirects=None, verify=None, headers=None, stream=None
+    ):
         host_header = (headers or {}).get("Host")
         if not host_header:
-            return _FakeResponse(200, "<html><title>Base</title></html>", {"Content-Length": "1000"})
+            return _FakeResponse(
+                200, "<html><title>Base</title></html>", {"Content-Length": "1000"}
+            )
         if host_header == "admin.example.com":
-            return _FakeResponse(200, "<html><title>Admin</title></html>", {"Content-Length": "1200", "Server": "nginx"})
-        return _FakeResponse(200, "<html><title>Base</title></html>", {"Content-Length": "1000"})
+            return _FakeResponse(
+                200,
+                "<html><title>Admin</title></html>",
+                {"Content-Length": "1200", "Server": "nginx"},
+            )
+        return _FakeResponse(
+            200, "<html><title>Base</title></html>", {"Content-Length": "1000"}
+        )
 
     import requests
 
@@ -128,11 +138,19 @@ def test_vhost_filters_wildcard_like_candidates(monkeypatch, tmp_path: Path):
     _write_base_url(record.paths.results_jsonl)
     context = PipelineContext(record=record, manager=DummyManager())
 
-    def fake_get(url, timeout=None, allow_redirects=None, verify=None, headers=None, stream=None):
+    def fake_get(
+        url, timeout=None, allow_redirects=None, verify=None, headers=None, stream=None
+    ):
         host_header = (headers or {}).get("Host")
         if not host_header:
-            return _FakeResponse(200, "<html><title>Base</title></html>", {"Content-Length": "1000"})
-        return _FakeResponse(200, "<html><title>Catch-All</title></html>", {"Content-Length": "2000", "Server": "nginx"})
+            return _FakeResponse(
+                200, "<html><title>Base</title></html>", {"Content-Length": "1000"}
+            )
+        return _FakeResponse(
+            200,
+            "<html><title>Catch-All</title></html>",
+            {"Content-Length": "2000", "Server": "nginx"},
+        )
 
     import requests
 

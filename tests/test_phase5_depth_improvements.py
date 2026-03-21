@@ -55,7 +55,9 @@ class _FakeResponse:
         return None
 
 
-def test_js_intel_extracts_dynamic_routes_and_hidden_params(monkeypatch, tmp_path: Path):
+def test_js_intel_extracts_dynamic_routes_and_hidden_params(
+    monkeypatch, tmp_path: Path
+):
     record = _make_record(
         tmp_path,
         {
@@ -91,10 +93,20 @@ def test_js_intel_extracts_dynamic_routes_and_hidden_params(monkeypatch, tmp_pat
 
     import requests
 
-    monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: _FakeResponse(200, text=js_blob, headers={"Content-Type": "application/javascript"}))
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda *_args, **_kwargs: _FakeResponse(
+            200, text=js_blob, headers={"Content-Type": "application/javascript"}
+        ),
+    )
 
     JSIntelligenceStage().run(context)
-    urls = [entry.get("url") for entry in read_jsonl(record.paths.results_jsonl) if entry.get("source") == "js-intel"]
+    urls = [
+        entry.get("url")
+        for entry in read_jsonl(record.paths.results_jsonl)
+        if entry.get("source") == "js-intel"
+    ]
     assert any("/api/v1/users/1" in str(url) for url in urls)
     assert any("/graphql/v1" in str(url) for url in urls)
     hints = context.get_data("js_param_hints", {}) or {}
@@ -147,12 +159,16 @@ def test_js_intel_extracts_graphql_ws_and_persisted_hints(monkeypatch, tmp_path:
     monkeypatch.setattr(
         requests,
         "get",
-        lambda *_args, **_kwargs: _FakeResponse(200, text=js_blob, headers={"Content-Type": "application/javascript"}),
+        lambda *_args, **_kwargs: _FakeResponse(
+            200, text=js_blob, headers={"Content-Type": "application/javascript"}
+        ),
     )
 
     JSIntelligenceStage().run(context)
 
-    artifact_rows = json.loads(record.paths.artifact("js_intel.json").read_text(encoding="utf-8"))
+    artifact_rows = json.loads(
+        record.paths.artifact("js_intel.json").read_text(encoding="utf-8")
+    )
     assert len(artifact_rows) == 1
     artifact = artifact_rows[0]
     assert artifact["surface_base_url"] == "https://app.example.com/app"
@@ -164,10 +180,16 @@ def test_js_intel_extracts_graphql_ws_and_persisted_hints(monkeypatch, tmp_path:
     assert "billing" in artifact["high_value_strings"]
     assert "flag" in artifact["high_value_strings"]
 
-    assert "https://app.example.com/gql" in (context.get_data("js_graphql_endpoints", []) or [])
-    assert "wss://stream.example.com/socket" in (context.get_data("js_ws_endpoints", []) or [])
+    assert "https://app.example.com/gql" in (
+        context.get_data("js_graphql_endpoints", []) or []
+    )
+    assert "wss://stream.example.com/socket" in (
+        context.get_data("js_ws_endpoints", []) or []
+    )
     assert "GetBillingOverview" in (context.get_data("js_graphql_operations", []) or [])
-    assert "0123456789abcdef0123456789abcdef" in (context.get_data("js_persisted_query_hints", []) or [])
+    assert "0123456789abcdef0123456789abcdef" in (
+        context.get_data("js_persisted_query_hints", []) or []
+    )
 
     stats = record.metadata.stats.get("js_intel", {})
     assert stats.get("graphql_endpoints") == 1
@@ -208,18 +230,34 @@ def test_param_mining_generates_mutation_catalog_from_js_hints(tmp_path: Path):
         },
     )
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
-        json.dump({"type": "url", "url": "https://app.example.com/search?q=test&limit=10"}, handle, separators=(",", ":"))
+        json.dump(
+            {"type": "url", "url": "https://app.example.com/search?q=test&limit=10"},
+            handle,
+            separators=(",", ":"),
+        )
         handle.write("\n")
 
     context = PipelineContext(record=record, manager=DummyManager())
-    context.set_data("js_param_hints", {"redirect_url": ["https://app.example.com/app.js"], "user_id": ["https://app.example.com/app.js"]})
+    context.set_data(
+        "js_param_hints",
+        {
+            "redirect_url": ["https://app.example.com/app.js"],
+            "user_id": ["https://app.example.com/app.js"],
+        },
+    )
     ParamMiningStage().run(context)
 
-    mutations = [entry for entry in read_jsonl(record.paths.results_jsonl) if entry.get("type") == "param_mutation"]
+    mutations = [
+        entry
+        for entry in read_jsonl(record.paths.results_jsonl)
+        if entry.get("type") == "param_mutation"
+    ]
     assert mutations
     by_name = {entry.get("name"): entry for entry in mutations}
     assert by_name["redirect_url"]["category"] == "url"
-    assert any("169.254.169.254" in value for value in by_name["redirect_url"]["values"])
+    assert any(
+        "169.254.169.254" in value for value in by_name["redirect_url"]["values"]
+    )
     assert by_name["user_id"]["category"] == "identifier"
 
     stats = record.metadata.stats.get("param_mining", {})
@@ -241,7 +279,12 @@ def test_api_recon_enriches_probe_paths_from_js_endpoints(monkeypatch, tmp_path:
     )
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         json.dump(
-            {"type": "url", "url": "https://api.example.com/home", "hostname": "api.example.com", "score": 20},
+            {
+                "type": "url",
+                "url": "https://api.example.com/home",
+                "hostname": "api.example.com",
+                "score": 20,
+            },
             handle,
             separators=(",", ":"),
         )
@@ -258,12 +301,20 @@ def test_api_recon_enriches_probe_paths_from_js_endpoints(monkeypatch, tmp_path:
 
     async def fake_get(self_obj, url, **_kwargs):
         from recon_cli.utils.async_http import HTTPResponse
+
         called.append(url)
-        return HTTPResponse(url=url, status=404, headers={"Content-Type": "application/json"}, body="not found", elapsed=0.1)
+        return HTTPResponse(
+            url=url,
+            status=404,
+            headers={"Content-Type": "application/json"},
+            body="not found",
+            elapsed=0.1,
+        )
 
     from recon_cli.utils.async_http import AsyncHTTPClient
+
     monkeypatch.setattr(AsyncHTTPClient, "get", fake_get)
-    
+
     APIReconStage().run(context)
     assert any("/graphql/v1" in url for url in called)
     assert any("/api/openapi.json" in url for url in called)
@@ -271,7 +322,9 @@ def test_api_recon_enriches_probe_paths_from_js_endpoints(monkeypatch, tmp_path:
     assert stats.get("enriched_probe_paths", 0) > 0
 
 
-def test_runtime_crawl_role_aware_profiles_emit_profile_records(monkeypatch, tmp_path: Path):
+def test_runtime_crawl_role_aware_profiles_emit_profile_records(
+    monkeypatch, tmp_path: Path
+):
     record = _make_record(
         tmp_path,
         {
@@ -337,7 +390,9 @@ def test_runtime_crawl_role_aware_profiles_emit_profile_records(monkeypatch, tmp
 
 
 def test_correlation_builds_attack_paths_and_surface_benchmark(tmp_path: Path):
-    record = _make_record(tmp_path, {"enable_correlation": True, "correlation_attack_path_limit": 5})
+    record = _make_record(
+        tmp_path, {"enable_correlation": True, "correlation_attack_path_limit": 5}
+    )
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         rows = [
             {
@@ -373,7 +428,9 @@ def test_correlation_builds_attack_paths_and_surface_benchmark(tmp_path: Path):
     CorrelationStage().run(context)
 
     attack_path = record.paths.root / "artifacts" / "correlation" / "attack_paths.json"
-    benchmark_path = record.paths.root / "artifacts" / "correlation" / "surface_benchmark.json"
+    benchmark_path = (
+        record.paths.root / "artifacts" / "correlation" / "surface_benchmark.json"
+    )
     assert attack_path.exists()
     assert benchmark_path.exists()
     payload = json.loads(attack_path.read_text(encoding="utf-8"))

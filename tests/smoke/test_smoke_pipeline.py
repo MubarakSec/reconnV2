@@ -18,7 +18,11 @@ class _SmokeHandler(BaseHTTPRequestHandler):
     RESPONSES = {
         "/": (200, "text/html", b"<html><body><h1>Smoke</h1></body></html>"),
         "/login": (200, "text/html", b"<html><body>login</body></html>"),
-        "/api/": (200, "application/json", json.dumps({"users": ["alice", "bob"]}).encode()),
+        "/api/": (
+            200,
+            "application/json",
+            json.dumps({"users": ["alice", "bob"]}).encode(),
+        ),
         "/api/users": (200, "application/json", json.dumps({"user": "alice"}).encode()),
     }
 
@@ -92,8 +96,12 @@ def test_quick_pipeline_smoke(tmp_path: Path, smoke_server: Optional[int]):
     start = time.time()
     result = subprocess.run(cmd, env=env, timeout=240, capture_output=True, text=True)
     if result.returncode != 0:
-        pytest.fail("pipeline failed\nstdout: {}\nstderr: {}".format(result.stdout, result.stderr))
-    duration = time.time() - start
+        pytest.fail(
+            "pipeline failed\nstdout: {}\nstderr: {}".format(
+                result.stdout, result.stderr
+            )
+        )
+    time.time() - start
 
     finished = tmp_path / "jobs" / "finished"
     assert finished.exists(), "finished jobs directory missing"
@@ -105,9 +113,17 @@ def test_quick_pipeline_smoke(tmp_path: Path, smoke_server: Optional[int]):
     assert results_jsonl.exists()
     assert results_txt.exists()
 
-    entries = [json.loads(line) for line in results_jsonl.read_text().splitlines() if line.strip()]
+    entries = [
+        json.loads(line)
+        for line in results_jsonl.read_text().splitlines()
+        if line.strip()
+    ]
     if smoke_server == 80:
-        api_entries = [entry for entry in entries if entry.get("type") == "url" and "/api" in entry.get("url", "")]
+        api_entries = [
+            entry
+            for entry in entries
+            if entry.get("type") == "url" and "/api" in entry.get("url", "")
+        ]
         assert api_entries, "API endpoints were not discovered"
     else:
         assert entries, "pipeline produced no results in restricted runtime fallback"
@@ -116,7 +132,9 @@ def test_quick_pipeline_smoke(tmp_path: Path, smoke_server: Optional[int]):
     assert "Authorization" not in text_content, "credentials leaked in report"
 
 
-def test_free_port_returns_none_when_socket_creation_forbidden(monkeypatch: pytest.MonkeyPatch):
+def test_free_port_returns_none_when_socket_creation_forbidden(
+    monkeypatch: pytest.MonkeyPatch,
+):
     def _deny_socket(*_args, **_kwargs):
         raise PermissionError(1, "Operation not permitted")
 

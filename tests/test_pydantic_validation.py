@@ -1,5 +1,5 @@
 import pytest
-from recon_cli.db.schemas import validate_result, FindingResult, SignalResult, HostResult
+from recon_cli.db.schemas import validate_result
 
 
 def test_validate_finding():
@@ -110,8 +110,10 @@ def test_validate_idor_suspect():
 
 def test_validate_invalid_severity_fails():
     with pytest.raises(Exception):
-        validate_result({
-            "type": "finding",
-            "finding_type": "xss",
-            "severity": "super_critical",  # Invalid literal
-        })
+        validate_result(
+            {
+                "type": "finding",
+                "finding_type": "xss",
+                "severity": "super_critical",  # Invalid literal
+            }
+        )

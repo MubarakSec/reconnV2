@@ -1,7 +1,7 @@
 """Tests for reporter.py"""
+
 import json
 import tempfile
-import pytest
 from pathlib import Path
 from recon_cli.utils.reporter import (
     generate_html_report,
@@ -22,7 +22,7 @@ class TestReportData:
         """Parses valid job directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir)
-            
+
             # Create metadata.json
             metadata = {
                 "job_id": "test_job_123",
@@ -33,10 +33,10 @@ class TestReportData:
                     "hosts_discovered": 50,
                     "http_urls": 100,
                     "vulnerabilities": 5,
-                }
+                },
             }
             (job_dir / "metadata.json").write_text(json.dumps(metadata))
-            
+
             # Create results.jsonl
             results = [
                 {"type": "host", "hostname": "example.com"},
@@ -46,7 +46,7 @@ class TestReportData:
             with (job_dir / "results.jsonl").open("w") as f:
                 for r in results:
                     f.write(json.dumps(r) + "\n")
-            
+
             # Parse
             data = ReportData.from_job_dir(job_dir)
             assert data is not None
@@ -58,12 +58,16 @@ class TestReportData:
         """Counts severities correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir)
-            
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test",
-                "status": "finished",
-            }))
-            
+
+            (job_dir / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "test",
+                        "status": "finished",
+                    }
+                )
+            )
+
             results = [
                 {"type": "vulnerability", "severity": "critical"},
                 {"type": "vulnerability", "severity": "high"},
@@ -75,10 +79,10 @@ class TestReportData:
             with (job_dir / "results.jsonl").open("w") as f:
                 for r in results:
                     f.write(json.dumps(r) + "\n")
-            
+
             data = ReportData.from_job_dir(job_dir)
             counts = data.get_severity_counts()
-            
+
             assert counts["critical"] == 1
             assert counts["high"] == 2
             assert counts["medium"] == 1
@@ -94,20 +98,24 @@ class TestGenerateHtmlReport:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
-            
+
             # Create minimal job data
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "started_at": "2026-01-15T10:00:00Z",
-                "finished_at": "2026-01-15T10:30:00Z",
-                "stats": {}
-            }))
+            (job_dir / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "test_job",
+                        "status": "finished",
+                        "started_at": "2026-01-15T10:00:00Z",
+                        "finished_at": "2026-01-15T10:30:00Z",
+                        "stats": {},
+                    }
+                )
+            )
             (job_dir / "results.jsonl").write_text("")
-            
+
             output_path = Path(tmpdir) / "report.html"
             generate_html_report(job_dir, output_path)
-            
+
             assert output_path.exists()
             content = output_path.read_text()
             assert "<!DOCTYPE html>" in content
@@ -118,13 +126,17 @@ class TestGenerateHtmlReport:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
-            
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {"hosts_discovered": 10}
-            }))
-            
+
+            (job_dir / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "test_job",
+                        "status": "finished",
+                        "stats": {"hosts_discovered": 10},
+                    }
+                )
+            )
+
             results = [
                 {"type": "host", "hostname": "vulnerable.example.com"},
                 {"type": "url", "url": "https://api.example.com/v1"},
@@ -132,10 +144,10 @@ class TestGenerateHtmlReport:
             with (job_dir / "results.jsonl").open("w") as f:
                 for r in results:
                     f.write(json.dumps(r) + "\n")
-            
+
             output_path = Path(tmpdir) / "report.html"
             generate_html_report(job_dir, output_path)
-            
+
             content = output_path.read_text()
             assert "vulnerable.example.com" in content
             assert "api.example.com" in content
@@ -145,14 +157,23 @@ class TestGenerateHtmlReport:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
 
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {},
-            }))
+            (job_dir / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "test_job",
+                        "status": "finished",
+                        "stats": {},
+                    }
+                )
+            )
             results = [
                 {"type": "url", "url": "https://example.com/profile?token=abc123"},
-                {"type": "finding", "title": "auth leak", "severity": "high", "proof": "Authorization: Bearer xyz987"},
+                {
+                    "type": "finding",
+                    "title": "auth leak",
+                    "severity": "high",
+                    "proof": "Authorization: Bearer xyz987",
+                },
             ]
             with (job_dir / "results.jsonl").open("w") as f:
                 for item in results:
@@ -199,14 +220,17 @@ class TestGenerateHtmlReport:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
 
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {}
-            }))
+            (job_dir / "metadata.json").write_text(
+                json.dumps({"job_id": "test_job", "status": "finished", "stats": {}})
+            )
 
             results = [
-                {"type": "finding", "title": "confirmed-issue", "tags": ["ssrf:confirmed"], "severity": "high"},
+                {
+                    "type": "finding",
+                    "title": "confirmed-issue",
+                    "tags": ["ssrf:confirmed"],
+                    "severity": "high",
+                },
                 {"type": "finding", "title": "unconfirmed-issue", "severity": "high"},
             ]
             with (job_dir / "results.jsonl").open("w") as f:
@@ -226,11 +250,9 @@ class TestGenerateHtmlReport:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
 
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {}
-            }))
+            (job_dir / "metadata.json").write_text(
+                json.dumps({"job_id": "test_job", "status": "finished", "stats": {}})
+            )
 
             results = [
                 {
@@ -258,23 +280,28 @@ class TestGenerateHtmlReport:
             assert "curl https://example.com" in content
             assert "Submission Summary" in content
             assert "confidence=verified" in content
-            assert "python -m recon_cli rerun test_job --stages vuln_scan --keep-results" in content
+            assert (
+                "python -m recon_cli rerun test_job --stages vuln_scan --keep-results"
+                in content
+            )
 
     def test_html_hunter_mode_includes_triage_hints(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
 
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {}
-            }))
-            (job_dir / "spec.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "target": "example.com",
-                "profile": "passive"
-            }))
+            (job_dir / "metadata.json").write_text(
+                json.dumps({"job_id": "test_job", "status": "finished", "stats": {}})
+            )
+            (job_dir / "spec.json").write_text(
+                json.dumps(
+                    {
+                        "job_id": "test_job",
+                        "target": "example.com",
+                        "profile": "passive",
+                    }
+                )
+            )
 
             results = [
                 {
@@ -315,17 +342,16 @@ class TestGenerateHtmlReport:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
-            
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_arabic",
-                "status": "منتهي",
-                "stats": {}
-            }), encoding="utf-8")
+
+            (job_dir / "metadata.json").write_text(
+                json.dumps({"job_id": "test_arabic", "status": "منتهي", "stats": {}}),
+                encoding="utf-8",
+            )
             (job_dir / "results.jsonl").write_text("")
-            
+
             output_path = Path(tmpdir) / "report.html"
             generate_html_report(job_dir, output_path)
-            
+
             content = output_path.read_text(encoding="utf-8")
             assert "منتهي" in content
 
@@ -333,13 +359,13 @@ class TestGenerateHtmlReport:
         """Handles missing job directory gracefully."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "report.html"
-            
+
             # Should not raise, just return without creating file
             try:
                 generate_html_report(Path("/nonexistent"), output_path)
             except Exception:
                 pass  # Expected
-            
+
             assert not output_path.exists()
 
 
@@ -351,24 +377,22 @@ class TestHtmlReportContent:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
-            
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {}
-            }))
+
+            (job_dir / "metadata.json").write_text(
+                json.dumps({"job_id": "test_job", "status": "finished", "stats": {}})
+            )
             (job_dir / "results.jsonl").write_text("")
-            
+
             output_path = Path(tmpdir) / "report.html"
             generate_html_report(job_dir, output_path)
-            
+
             content = output_path.read_text()
-            
+
             # Check for essential HTML elements
             assert "<head>" in content
             assert "<body>" in content
             assert "</html>" in content
-            
+
             # Check for CSS styling
             assert "<style>" in content or "style=" in content
 
@@ -377,23 +401,25 @@ class TestHtmlReportContent:
         with tempfile.TemporaryDirectory() as tmpdir:
             job_dir = Path(tmpdir) / "job"
             job_dir.mkdir()
-            
-            (job_dir / "metadata.json").write_text(json.dumps({
-                "job_id": "test_job",
-                "status": "finished",
-                "stats": {}
-            }))
-            
+
+            (job_dir / "metadata.json").write_text(
+                json.dumps({"job_id": "test_job", "status": "finished", "stats": {}})
+            )
+
             results = [
-                {"type": "vulnerability", "severity": "critical", "name": "SQL Injection"},
+                {
+                    "type": "vulnerability",
+                    "severity": "critical",
+                    "name": "SQL Injection",
+                },
             ]
             with (job_dir / "results.jsonl").open("w") as f:
                 for r in results:
                     f.write(json.dumps(r) + "\n")
-            
+
             output_path = Path(tmpdir) / "report.html"
             generate_html_report(job_dir, output_path)
-            
+
             content = output_path.read_text()
             assert "critical" in content.lower()
             assert "SQL Injection" in content

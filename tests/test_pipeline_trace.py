@@ -31,7 +31,9 @@ class DummyManager:
         return None
 
 
-def _make_record(tmp_path: Path, job_id: str, runtime_overrides: dict | None = None) -> JobRecord:
+def _make_record(
+    tmp_path: Path, job_id: str, runtime_overrides: dict | None = None
+) -> JobRecord:
     root = tmp_path / job_id
     paths = JobPaths(root)
     paths.root.mkdir(parents=True, exist_ok=True)
@@ -84,7 +86,9 @@ def test_pipeline_trace_artifact_records_failure(tmp_path: Path) -> None:
     assert "trace.finished" in event_names
 
 
-def test_parallel_pipeline_trace_records_stage_spans_and_batches(tmp_path: Path) -> None:
+def test_parallel_pipeline_trace_records_stage_spans_and_batches(
+    tmp_path: Path,
+) -> None:
     class DedupeStage(Stage):
         name = "dedupe_canonicalize"
 
@@ -115,7 +119,9 @@ def test_parallel_pipeline_trace_records_stage_spans_and_batches(tmp_path: Path)
     context = PipelineContext(record=record, manager=DummyManager(), force=False)
     runner = PipelineRunner(stages=[DedupeStage(), DnsStage(), HttpStage()])
 
-    asyncio.run(runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"]))
+    asyncio.run(
+        runner.run(context, stages=["dedupe_canonicalize", "dns_resolve", "http_probe"])
+    )
 
     trace_summary = fs.read_json(record.paths.artifact("trace.json"), default={})
     trace_events = read_jsonl(record.paths.artifact("trace_events.jsonl"))
@@ -129,7 +135,9 @@ def test_parallel_pipeline_trace_records_stage_spans_and_batches(tmp_path: Path)
         "http_probe",
     }
     assert all(span["status"] == "completed" for span in spans)
-    assert all(span["parent_span_id"] == trace_summary.get("root_span_id") for span in spans)
+    assert all(
+        span["parent_span_id"] == trace_summary.get("root_span_id") for span in spans
+    )
     trace_stats = record.metadata.stats.get("trace", {})
     assert trace_stats.get("parallel_enabled") is True
     assert trace_stats.get("span_count") == 3
@@ -147,9 +155,20 @@ def test_pipeline_trace_records_tool_execution_spans(tmp_path: Path):
             true_cmd = which("true") or "/usr/bin/true"
             false_cmd = which("false") or "/usr/bin/false"
             import uuid
+
             uid = uuid.uuid4().hex
-            context.executor.run([true_cmd, f"--uid={uid}"], check=False, capture_output=True, context=context)
-            context.executor.run([false_cmd, f"--uid={uid}"], check=False, capture_output=True, context=context)
+            context.executor.run(
+                [true_cmd, f"--uid={uid}"],
+                check=False,
+                capture_output=True,
+                context=context,
+            )
+            context.executor.run(
+                [false_cmd, f"--uid={uid}"],
+                check=False,
+                capture_output=True,
+                context=context,
+            )
 
     record = _make_record(tmp_path, "job-trace-tools", {"retry_count": 0})
     context = PipelineContext(record=record, manager=DummyManager(), force=True)
@@ -164,13 +183,28 @@ def test_pipeline_trace_records_tool_execution_spans(tmp_path: Path):
 
     assert len(stage_spans) == 1
     assert len(tool_spans) == 2
-    assert trace_summary.get("stats", {}).get("span_counts_by_type", {}).get("tool_exec") == 2
+    assert (
+        trace_summary.get("stats", {}).get("span_counts_by_type", {}).get("tool_exec")
+        == 2
+    )
 
     stage_span = stage_spans[0]
-    assert all(span.get("parent_span_id") == stage_span.get("span_id") for span in tool_spans)
+    assert all(
+        span.get("parent_span_id") == stage_span.get("span_id") for span in tool_spans
+    )
 
-    ok_span = next(span for span in tool_spans if span.get("attributes", {}).get("tool") == Path(which("true") or "/usr/bin/true").name)
-    failed_span = next(span for span in tool_spans if span.get("attributes", {}).get("tool") == Path(which("false") or "/usr/bin/false").name)
+    ok_span = next(
+        span
+        for span in tool_spans
+        if span.get("attributes", {}).get("tool")
+        == Path(which("true") or "/usr/bin/true").name
+    )
+    failed_span = next(
+        span
+        for span in tool_spans
+        if span.get("attributes", {}).get("tool")
+        == Path(which("false") or "/usr/bin/false").name
+    )
 
     assert ok_span["status"] == "completed"
     assert failed_span["status"] == "failed"

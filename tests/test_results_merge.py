@@ -7,8 +7,24 @@ from recon_cli.utils.jsonl import read_jsonl
 def test_results_tracker_merges_duplicates(tmp_path: Path):
     path = tmp_path / "results.jsonl"
     tracker = ResultsTracker(path)
-    tracker.append({"type": "url", "url": "https://example.com", "tags": ["a"], "source": "probe", "score": 10})
-    tracker.append({"type": "url", "url": "https://example.com", "tags": ["b"], "source": "ffuf", "score": 30})
+    tracker.append(
+        {
+            "type": "url",
+            "url": "https://example.com",
+            "tags": ["a"],
+            "source": "probe",
+            "score": 10,
+        }
+    )
+    tracker.append(
+        {
+            "type": "url",
+            "url": "https://example.com",
+            "tags": ["b"],
+            "source": "ffuf",
+            "score": 30,
+        }
+    )
     entries = [e for e in read_jsonl(path) if e.get("type") != "meta"]
     assert len(entries) == 1
     entry = entries[0]
@@ -116,7 +132,9 @@ def test_results_tracker_keeps_findings_with_different_parameters(tmp_path: Path
         "severity": "high",
     }
     tracker.append({**base, "parameter": "q"})
-    tracker.append({**base, "parameter": "id", "url": "https://example.com/search?id=1"})
+    tracker.append(
+        {**base, "parameter": "id", "url": "https://example.com/search?id=1"}
+    )
     entries = [e for e in read_jsonl(path) if e.get("type") == "finding"]
     assert len(entries) == 2
 

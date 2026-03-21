@@ -32,7 +32,9 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
         profile="full",
         runtime_overrides=runtime_overrides,
     )
-    metadata = JobMetadata(job_id="job-idor-validator", queued_at="2020-01-01T00:00:00Z")
+    metadata = JobMetadata(
+        job_id="job-idor-validator", queued_at="2020-01-01T00:00:00Z"
+    )
     fs.write_json(paths.spec_path, spec.to_dict())
     fs.write_json(paths.metadata_path, metadata.to_dict())
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
@@ -101,7 +103,9 @@ def test_idor_validator_confirms_subject_change(monkeypatch, tmp_path: Path):
         if url.endswith("/users/1"):
             # Both token-a and token-b can see users/1
             if auth in {"Bearer token-a", "Bearer token-b"}:
-                return _FakeResponse(200, body={"id": "1", "email": "alice@example.com"})
+                return _FakeResponse(
+                    200, body={"id": "1", "email": "alice@example.com"}
+                )
             return _FakeResponse(403, text="forbidden")
         if url.endswith("/users/2"):
             if auth == "Bearer token-a":

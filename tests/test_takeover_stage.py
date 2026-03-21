@@ -83,7 +83,9 @@ def test_takeover_provider_filtering(monkeypatch, tmp_path: Path):
 
         async def check_host(self, hostname, providers=None):
             FakeDetector.last_providers = providers
-            return TakeoverFinding(hostname=hostname, provider="aws_s3", evidence="NoSuchBucket")
+            return TakeoverFinding(
+                hostname=hostname, provider="aws_s3", evidence="NoSuchBucket"
+            )
 
     monkeypatch.setattr(stage_mod, "TakeoverDetector", FakeDetector)
 
@@ -92,7 +94,11 @@ def test_takeover_provider_filtering(monkeypatch, tmp_path: Path):
     stage.run(context)
 
     assert FakeDetector.last_providers == {"aws_s3"}
-    findings = [r for r in read_jsonl(record.paths.results_jsonl) if r.get("finding_type") == "subdomain_takeover"]
+    findings = [
+        r
+        for r in read_jsonl(record.paths.results_jsonl)
+        if r.get("finding_type") == "subdomain_takeover"
+    ]
     assert len(findings) == 1
 
 

@@ -2,14 +2,15 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 from recon_cli.active import modules as active_modules
 from recon_cli.scanners import integrations as scanner_integrations
 
 
 class DummyResponse:
-    def __init__(self, *, status_code=200, text="", headers=None, content=None, encoding="utf-8"):
+    def __init__(
+        self, *, status_code=200, text="", headers=None, content=None, encoding="utf-8"
+    ):
         self.status_code = status_code
         self.text = text
         self.headers = headers or {}
@@ -34,7 +35,9 @@ class DummySession:
 
 def test_js_secret_harvest_finds_token(monkeypatch):
     body = "var key = 'AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz0123456';"
-    session = DummySession(DummyResponse(text=body, headers={"Content-Type": "application/javascript"}))
+    session = DummySession(
+        DummyResponse(text=body, headers={"Content-Type": "application/javascript"})
+    )
     url_entries = [
         {"url": "https://ex.com/app.js", "status_code": 200, "score": 10},
     ]
@@ -89,6 +92,7 @@ def test_nuclei_parses_findings(monkeypatch, tmp_path):
 def test_wpscan_parses_findings(monkeypatch, tmp_path):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
+
     def fake_run(cmd, **_kwargs):
         out_idx = cmd.index("--output") + 1
         out_path = Path(cmd[out_idx])

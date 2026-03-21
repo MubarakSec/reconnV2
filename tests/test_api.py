@@ -1,7 +1,6 @@
 """Tests for REST API (recon_cli/api/app.py)"""
-import json
+
 import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 # Skip if FastAPI not installed
@@ -9,7 +8,9 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
-from recon_cli.api.app import app, create_app, JOBS_BASE
+from recon_cli.api.app import create_app
+
+
 @pytest.fixture
 def api_client(tmp_path):
     with patch("recon_cli.users.UserManager.validate_api_key") as mock_val:
@@ -17,10 +18,17 @@ def api_client(tmp_path):
         mock_val.return_value = {
             "id": "admin",
             "username": "admin",
-            "permissions": ["api:admin", "api:access", "jobs:create", "jobs:run", "jobs:delete"],
-            "scopes": ["*"]
+            "permissions": [
+                "api:admin",
+                "api:access",
+                "jobs:create",
+                "jobs:run",
+                "jobs:delete",
+            ],
+            "scopes": ["*"],
         }
         from recon_cli.jobs.manager import JobManager
+
         # Now truly isolated via refactored constructor
         isolated_manager = JobManager(home=tmp_path)
 
@@ -29,6 +37,8 @@ def api_client(tmp_path):
         client = TestClient(fresh_app)
         client.headers["X-API-Key"] = "test-key"
         yield client
+
+
 class TestAPIStatus:
     """Tests for /api/status endpoint."""
 
@@ -59,7 +69,10 @@ class TestAPIStats:
         data = response.json()
         for key in ("queued", "running", "finished", "failed", "total"):
             assert key in data
-        assert data["total"] == data["queued"] + data["running"] + data["finished"] + data["failed"]
+        assert (
+            data["total"]
+            == data["queued"] + data["running"] + data["finished"] + data["failed"]
+        )
 
 
 class TestAPIJobs:
@@ -93,7 +106,11 @@ class TestAPIJobs:
     def test_delete_requires_permission(self, api_client):
         """Deleting job requires permission."""
         with patch("recon_cli.users.UserManager.validate_api_key") as mock_val:
-            mock_val.return_value = {"id": "user", "permissions": ["api:access"], "scopes": []}
+            mock_val.return_value = {
+                "id": "user",
+                "permissions": ["api:access"],
+                "scopes": [],
+            }
             response = api_client.delete("/api/jobs/job-123")
             assert response.status_code == 403
 
@@ -129,12 +146,11 @@ class TestAPIScan:
             mock_job.metadata.queued_at = "2026-01-01T00:00:00Z"
             mock_job.metadata.stats = {}
             mock_create.return_value = mock_job
-            
-            response = api_client.post("/api/scan", json={
-                "target": "example.com",
-                "profile": "passive",
-                "inline": False
-            })
+
+            response = api_client.post(
+                "/api/scan",
+                json={"target": "example.com", "profile": "passive", "inline": False},
+            )
             if response.status_code != 200:
                 print(f"DEBUG: Response body: {response.json()}")
             assert response.status_code == 200
@@ -142,7 +158,9 @@ class TestAPIScan:
 
     def test_scan_rejects_invalid_scanner_token(self, api_client):
         """Invalid scanner tokens are rejected."""
-        response = api_client.post("/api/scan", json={"target": "ex.com", "scanners": ["../bad"]})
+        response = api_client.post(
+            "/api/scan", json={"target": "ex.com", "scanners": ["../bad"]}
+        )
         assert response.status_code == 422
 
 
@@ -207,13 +225,18 @@ class TestAPIResponseFormat:
 
     def test_cors_headers(self, api_client):
         """Responses include CORS headers."""
-        response = api_client.options("/api/status", headers={
-            "Origin": "http://localhost:8080", 
-            "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "X-API-Key"
-        })
+        response = api_client.options(
+            "/api/status",
+            headers={
+                "Origin": "http://localhost:8080",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "X-API-Key",
+            },
+        )
         assert response.status_code == 200
-        assert response.headers["access-control-allow-origin"] == "http://localhost:8080"
+        assert (
+            response.headers["access-control-allow-origin"] == "http://localhost:8080"
+        )
 
 
 class TestAPIMutationValidation:
@@ -226,5 +249,7 @@ class TestAPIMutationValidation:
 
     def test_create_job_rejects_non_boolean_allow_ip(self, api_client):
         """Non-boolean allow_ip is rejected."""
-        response = api_client.post("/api/jobs", json={"targets": ["ex.com"], "options": {"allow_ip": "yes"}})
-        assert response.status_code == 422 # Pydantic type error
+        response = api_client.post(
+            "/api/jobs", json={"targets": ["ex.com"], "options": {"allow_ip": "yes"}}
+        )
+        assert response.status_code == 422  # Pydantic type error

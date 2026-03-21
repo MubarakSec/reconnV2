@@ -39,7 +39,13 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
 
 
 def _write_url(path: Path, url: str, score: int = 90) -> None:
-    payload = {"type": "url", "url": url, "hostname": "app.example.com", "score": score, "source": "httpx"}
+    payload = {
+        "type": "url",
+        "url": url,
+        "hostname": "app.example.com",
+        "score": score,
+        "source": "httpx",
+    }
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, separators=(",", ":"))
         handle.write("\n")
@@ -54,7 +60,9 @@ class _FakeResponse:
         return None
 
 
-def test_open_redirect_validator_confirms_and_writes_artifact(monkeypatch, tmp_path: Path):
+def test_open_redirect_validator_confirms_and_writes_artifact(
+    monkeypatch, tmp_path: Path
+):
     record = _make_record(
         tmp_path,
         {
@@ -67,7 +75,9 @@ def test_open_redirect_validator_confirms_and_writes_artifact(monkeypatch, tmp_p
             "open_redirect_validator_per_host_rps": 0,
         },
     )
-    _write_url(record.paths.results_jsonl, "https://app.example.com/login?next=/dashboard")
+    _write_url(
+        record.paths.results_jsonl, "https://app.example.com/login?next=/dashboard"
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_get(url, **_kwargs):
@@ -77,7 +87,9 @@ def test_open_redirect_validator_confirms_and_writes_artifact(monkeypatch, tmp_p
                 start = url.find("%2F%2Fredirect-")
             if start != -1:
                 encoded = url[start:].split("&", 1)[0]
-                location = encoded.replace("https%3A%2F%2F", "https://").replace("%2F", "/")
+                location = encoded.replace("https%3A%2F%2F", "https://").replace(
+                    "%2F", "/"
+                )
                 return _FakeResponse(302, location=location)
         return _FakeResponse(302, location="/dashboard")
 
@@ -91,7 +103,8 @@ def test_open_redirect_validator_confirms_and_writes_artifact(monkeypatch, tmp_p
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "open-redirect-validator" and item.get("finding_type") == "open_redirect"
+        if item.get("source") == "open-redirect-validator"
+        and item.get("finding_type") == "open_redirect"
     ]
     assert len(findings) == 1
     assert findings[0].get("confidence_label") == "verified"

@@ -125,7 +125,9 @@ def test_command_executor_session_lifecycle() -> None:
     echo_snapshot = executor.send_session_input(info.alias, "hello")
     echo_output = echo_snapshot.output
     if "echo:hello" not in echo_output:
-        _echo_info, echoed_output = _wait_for_output(executor, info.session_id, "echo:hello")
+        _echo_info, echoed_output = _wait_for_output(
+            executor, info.session_id, "echo:hello"
+        )
         echo_output += echoed_output
     assert "echo:hello" in echo_output
 
@@ -140,7 +142,10 @@ def test_command_executor_session_lifecycle() -> None:
     assert final.finished_at is not None
     assert final.error == "Session terminated by user"
     assert final.returncode is not None
-    assert all(item.session_id != info.session_id for item in executor.list_sessions(include_finished=False))
+    assert all(
+        item.session_id != info.session_id
+        for item in executor.list_sessions(include_finished=False)
+    )
 
 
 def test_command_session_records_tool_trace(tmp_path: Path) -> None:
@@ -171,7 +176,11 @@ def test_command_session_records_tool_trace(tmp_path: Path) -> None:
         recorder.close(status="finished")
 
     trace_summary = fs.read_json(trace_path, default={})
-    tool_spans = [span for span in trace_summary.get("spans", []) if span.get("span_type") == "tool_exec"]
+    tool_spans = [
+        span
+        for span in trace_summary.get("spans", [])
+        if span.get("span_type") == "tool_exec"
+    ]
 
     assert len(tool_spans) == 1
     tool_span = tool_spans[0]
@@ -203,7 +212,9 @@ def test_command_session_truncates_buffer_and_records_trace(tmp_path: Path) -> N
 
     try:
         with bind_trace_scope(recorder, stage_span.span_id):
-            info = executor.start_session(_large_output_command(4096), max_output_chars=128)
+            info = executor.start_session(
+                _large_output_command(4096), max_output_chars=128
+            )
             deadline = time.monotonic() + 3.0
             snapshot = info
             while time.monotonic() < deadline:
@@ -226,16 +237,24 @@ def test_command_session_truncates_buffer_and_records_trace(tmp_path: Path) -> N
     assert any("output exceeded 128 chars" in message for message in logger.warnings)
 
     trace_summary = fs.read_json(trace_path, default={})
-    tool_spans = [span for span in trace_summary.get("spans", []) if span.get("span_type") == "tool_exec"]
+    tool_spans = [
+        span
+        for span in trace_summary.get("spans", [])
+        if span.get("span_type") == "tool_exec"
+    ]
     assert len(tool_spans) == 1
     tool_span = tool_spans[0]
     assert tool_span.get("attributes", {}).get("session_output_truncated") is True
-    assert tool_span.get("attributes", {}).get("session_dropped_output_chars", 0) >= 3968
+    assert (
+        tool_span.get("attributes", {}).get("session_dropped_output_chars", 0) >= 3968
+    )
     event_names = [event.get("name") for event in tool_span.get("events", [])]
     assert "session.output.truncated" in event_names
 
 
-def test_list_sessions_prunes_finished_sessions_by_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_sessions_prunes_finished_sessions_by_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("RECON_EXECUTOR_SESSION_FINISHED_TTL_SECONDS", "1")
     executor = CommandExecutor(DummyLogger())
 
@@ -275,8 +294,12 @@ def test_cleanup_sessions_keeps_running_and_honors_finished_limit() -> None:
     assert cleaned["terminated_running_sessions"] == 0
     assert cleaned["pruned_finished_sessions"] == 1
     assert cleaned["remaining_sessions"] == 2
-    assert any(item.session_id == running.session_id and item.running for item in sessions)
-    assert any(item.session_id == second.session_id and not item.running for item in sessions)
+    assert any(
+        item.session_id == running.session_id and item.running for item in sessions
+    )
+    assert any(
+        item.session_id == second.session_id and not item.running for item in sessions
+    )
     assert all(item.session_id != first.session_id for item in sessions)
 
     executor.terminate_session(running.alias)

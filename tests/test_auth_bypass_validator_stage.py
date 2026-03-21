@@ -32,7 +32,9 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
         profile="full",
         runtime_overrides=runtime_overrides,
     )
-    metadata = JobMetadata(job_id="job-auth-bypass-validator", queued_at="2020-01-01T00:00:00Z")
+    metadata = JobMetadata(
+        job_id="job-auth-bypass-validator", queued_at="2020-01-01T00:00:00Z"
+    )
     fs.write_json(paths.spec_path, spec.to_dict())
     fs.write_json(paths.metadata_path, metadata.to_dict())
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
@@ -77,7 +79,12 @@ def test_auth_bypass_validator_confirms_forced_browse(monkeypatch, tmp_path: Pat
             "auth_bypass_validator_per_host_rps": 0,
         },
     )
-    _write_url(record.paths.results_jsonl, "https://app.example.com/admin/panel", score=80, status_code=403)
+    _write_url(
+        record.paths.results_jsonl,
+        "https://app.example.com/admin/panel",
+        score=80,
+        status_code=403,
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_request(_method, _url, **kwargs):
@@ -96,7 +103,8 @@ def test_auth_bypass_validator_confirms_forced_browse(monkeypatch, tmp_path: Pat
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "auth-bypass-validator" and item.get("finding_type") == "auth_bypass"
+        if item.get("source") == "auth-bypass-validator"
+        and item.get("finding_type") == "auth_bypass"
     ]
     assert len(findings) == 1
     assert findings[0].get("confidence_label") == "verified"
@@ -126,7 +134,12 @@ def test_auth_bypass_validator_confirms_privilege_boundary(monkeypatch, tmp_path
             "idor_token_b": "Bearer token-b",
         },
     )
-    _write_url(record.paths.results_jsonl, "https://app.example.com/admin/users", score=75, status_code=403)
+    _write_url(
+        record.paths.results_jsonl,
+        "https://app.example.com/admin/users",
+        score=75,
+        status_code=403,
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_request(_method, _url, **kwargs):
@@ -146,10 +159,13 @@ def test_auth_bypass_validator_confirms_privilege_boundary(monkeypatch, tmp_path
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "auth-bypass-validator" and item.get("finding_type") == "auth_bypass"
+        if item.get("source") == "auth-bypass-validator"
+        and item.get("finding_type") == "auth_bypass"
     ]
     assert len(findings) == 1
-    assert (findings[0].get("details") or {}).get("reason") == "token_boundary_indistinguishable"
+    assert (findings[0].get("details") or {}).get(
+        "reason"
+    ) == "token_boundary_indistinguishable"
 
     stats = record.metadata.stats.get("auth_bypass_validator", {})
     assert stats.get("confirmed_boundary") == 1
@@ -167,7 +183,12 @@ def test_auth_bypass_validator_handles_empty_candidates(tmp_path: Path):
             "auth_bypass_validator_min_score": 40,
         },
     )
-    _write_url(record.paths.results_jsonl, "https://app.example.com/public/health", score=10, status_code=200)
+    _write_url(
+        record.paths.results_jsonl,
+        "https://app.example.com/public/health",
+        score=10,
+        status_code=200,
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     stage = AuthBypassValidatorStage()

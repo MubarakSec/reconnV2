@@ -34,14 +34,22 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
         profile="full",
         runtime_overrides=runtime_overrides,
     )
-    metadata = JobMetadata(job_id="job-ssrf-validator", queued_at="2020-01-01T00:00:00Z")
+    metadata = JobMetadata(
+        job_id="job-ssrf-validator", queued_at="2020-01-01T00:00:00Z"
+    )
     fs.write_json(paths.spec_path, spec.to_dict())
     fs.write_json(paths.metadata_path, metadata.to_dict())
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
 
 
 def _write_url(path: Path, url: str, score: int = 90) -> None:
-    payload = {"type": "url", "url": url, "hostname": "app.example.com", "score": score, "source": "httpx"}
+    payload = {
+        "type": "url",
+        "url": url,
+        "hostname": "app.example.com",
+        "score": score,
+        "source": "httpx",
+    }
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, separators=(",", ":"))
         handle.write("\n")
@@ -74,7 +82,10 @@ def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
             "ssrf_validator_per_host_rps": 0,
         },
     )
-    _write_url(record.paths.results_jsonl, "https://app.example.com/fetch?url=https://example.net/")
+    _write_url(
+        record.paths.results_jsonl,
+        "https://app.example.com/fetch?url=https://example.net/",
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     class FakeSession:
@@ -89,7 +100,13 @@ def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
 
         def collect_interactions(self, tokens):
             token = list(tokens)[0]
-            return [OastInteraction(token=token, protocol="http", raw={"token": token, "protocol": "http"})]
+            return [
+                OastInteraction(
+                    token=token,
+                    protocol="http",
+                    raw={"token": token, "protocol": "http"},
+                )
+            ]
 
         def stop(self):
             return None
@@ -134,14 +151,19 @@ def test_ssrf_validator_confirms_via_internal_probe(monkeypatch, tmp_path: Path)
             "retry_count": 0,
         },
     )
-    _write_url(record.paths.results_jsonl, "https://app.example.com/render?url=https://example.net/")
+    _write_url(
+        record.paths.results_jsonl,
+        "https://app.example.com/render?url=https://example.net/",
+    )
     context = PipelineContext(record=record, manager=DummyManager())
 
     def fake_request(_method, url, **_kwargs):
         query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
         payload = query.get("url", "")
         if payload.startswith("http://127.0.0.1"):
-            return _FakeResponse(500, text="dial tcp 127.0.0.1:80: connect: connection refused")
+            return _FakeResponse(
+                500, text="dial tcp 127.0.0.1:80: connect: connection refused"
+            )
         return _FakeResponse(200, text="ok baseline")
 
     import requests

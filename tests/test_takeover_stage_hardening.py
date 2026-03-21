@@ -33,7 +33,9 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
         profile="full",
         runtime_overrides=runtime_overrides,
     )
-    metadata = JobMetadata(job_id="job-takeover-hardening", queued_at="2020-01-01T00:00:00Z")
+    metadata = JobMetadata(
+        job_id="job-takeover-hardening", queued_at="2020-01-01T00:00:00Z"
+    )
     fs.write_json(paths.spec_path, spec.to_dict())
     fs.write_json(paths.metadata_path, metadata.to_dict())
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
@@ -46,7 +48,9 @@ def _write_host(path: Path, hostname: str) -> None:
         handle.write("\n")
 
 
-def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(monkeypatch, tmp_path: Path):
+def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(
+    monkeypatch, tmp_path: Path
+):
     from recon_cli.pipeline import stage_takeover as stage_mod
 
     record = _make_record(
@@ -64,7 +68,11 @@ def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(m
     stage = TakeoverStage()
 
     monkeypatch.setattr(stage_mod, "dns", object())
-    monkeypatch.setattr(stage, "_resolve_cname_chain", lambda _host, _timeout: ["orphan.s3.amazonaws.com"])
+    monkeypatch.setattr(
+        stage,
+        "_resolve_cname_chain",
+        lambda _host, _timeout: ["orphan.s3.amazonaws.com"],
+    )
     monkeypatch.setattr(stage, "_target_has_address", lambda _host, _timeout: False)
 
     async def fake_check(_self, hostname: str, providers=None):
@@ -85,7 +93,8 @@ def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(m
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "takeover-check" and item.get("finding_type") == "subdomain_takeover"
+        if item.get("source") == "takeover-check"
+        and item.get("finding_type") == "subdomain_takeover"
     ]
     assert len(findings) == 1
     claimability = (findings[0].get("details") or {}).get("claimability") or {}
@@ -98,7 +107,9 @@ def test_takeover_stage_marks_high_claimability_when_dns_and_fingerprint_align(m
     assert stats.get("suppressed_low_confidence") == 0
 
 
-def test_takeover_stage_suppresses_low_confidence_fingerprints(monkeypatch, tmp_path: Path):
+def test_takeover_stage_suppresses_low_confidence_fingerprints(
+    monkeypatch, tmp_path: Path
+):
     from recon_cli.pipeline import stage_takeover as stage_mod
 
     record = _make_record(
@@ -137,7 +148,8 @@ def test_takeover_stage_suppresses_low_confidence_fingerprints(monkeypatch, tmp_
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "takeover-check" and item.get("finding_type") == "subdomain_takeover"
+        if item.get("source") == "takeover-check"
+        and item.get("finding_type") == "subdomain_takeover"
     ]
     assert not findings
     stats = record.metadata.stats.get("takeover", {})

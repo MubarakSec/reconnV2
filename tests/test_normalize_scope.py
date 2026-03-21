@@ -16,13 +16,19 @@ def _setup_temp_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "FINISHED_JOBS", config.JOBS_ROOT / "finished")
     monkeypatch.setattr(config, "FAILED_JOBS", config.JOBS_ROOT / "failed")
     monkeypatch.setattr(config, "ARCHIVE_ROOT", tmp_path / "archive")
-    monkeypatch.setattr(config, "DEFAULT_RESOLVERS", config.CONFIG_DIR / "resolvers.txt")
-    monkeypatch.setattr(config, "DEFAULT_RESOLVERS_PARENT", config.DEFAULT_RESOLVERS.parent)
+    monkeypatch.setattr(
+        config, "DEFAULT_RESOLVERS", config.CONFIG_DIR / "resolvers.txt"
+    )
+    monkeypatch.setattr(
+        config, "DEFAULT_RESOLVERS_PARENT", config.DEFAULT_RESOLVERS.parent
+    )
     monkeypatch.setattr(config, "DEFAULT_PROFILES", config.CONFIG_DIR / "profiles.json")
     config.ensure_base_directories(force=True)
 
 
-def test_normalize_stage_uses_inputs_after_move(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_normalize_stage_uses_inputs_after_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     _setup_temp_home(tmp_path, monkeypatch)
 
     from recon_cli.jobs.lifecycle import JobLifecycle

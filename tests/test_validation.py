@@ -4,7 +4,9 @@ from recon_cli.utils import validation
 
 
 def test_validate_target_url_strips_scheme_and_path():
-    assert validation.validate_target("https://www.example.com/login") == "www.example.com"
+    assert (
+        validation.validate_target("https://www.example.com/login") == "www.example.com"
+    )
 
 
 def test_validate_target_host_with_port():

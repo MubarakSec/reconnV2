@@ -19,7 +19,9 @@ class DummyManager:
         return None
 
 
-def make_record(tmp_path: Path, *, runtime_overrides=None, target: str = "example.com") -> JobRecord:
+def make_record(
+    tmp_path: Path, *, runtime_overrides=None, target: str = "example.com"
+) -> JobRecord:
     root = tmp_path / "job1"
     (root / "artifacts").mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
@@ -46,7 +48,7 @@ def test_passive_stage_seeds_input(monkeypatch, tmp_path):
     )
     # Mock wayback to avoid real network requests
     monkeypatch.setattr(PassiveEnumerationStage, "_run_wayback", lambda *_: None)
-    
+
     stage = PassiveEnumerationStage()
     stage.run(context)
     entries = read_jsonl(record.paths.results_jsonl)
@@ -54,12 +56,20 @@ def test_passive_stage_seeds_input(monkeypatch, tmp_path):
         entry.get("source") == "input" and entry.get("hostname") == record.spec.target
         for entry in entries
     )
-    passive_hosts = (record.paths.artifact("passive_hosts.txt")).read_text(encoding="utf-8").splitlines()
+    passive_hosts = (
+        (record.paths.artifact("passive_hosts.txt"))
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
     assert record.spec.target in passive_hosts
 
 
 def test_correlation_truncates_large_inputs(tmp_path):
-    overrides = {"correlation_max_records": 5, "correlation_svg_node_limit": 1000, "enable_correlation": True}
+    overrides = {
+        "correlation_max_records": 5,
+        "correlation_svg_node_limit": 1000,
+        "enable_correlation": True,
+    }
     record = make_record(tmp_path, runtime_overrides=overrides)
     manager = DummyManager()
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
@@ -133,7 +143,9 @@ def test_http_probe_fallback_respects_host_caps(monkeypatch, tmp_path):
         captured["hosts"] = list(hosts)
 
     monkeypatch.setattr(HttpProbeStage, "_fallback_probe", fake_fallback)
-    monkeypatch.setattr(HttpProbeStage, "_probe_additional_paths", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        HttpProbeStage, "_probe_additional_paths", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(HttpProbeStage, "_probe_soft_404", lambda *args, **kwargs: None)
 
     stage = HttpProbeStage()
@@ -173,7 +185,11 @@ def test_passive_wayback_fair_share_prevents_target_starvation(monkeypatch, tmp_
     stage.run(context)
 
     entries = read_jsonl(record.paths.results_jsonl)
-    wayback_urls = [entry for entry in entries if entry.get("type") == "url" and entry.get("source") == "waybackurls"]
+    wayback_urls = [
+        entry
+        for entry in entries
+        if entry.get("type") == "url" and entry.get("source") == "waybackurls"
+    ]
     assert len(wayback_urls) == 6
     counts = Counter(entry.get("hostname") for entry in wayback_urls)
     assert counts["a.example.com"] == 2
