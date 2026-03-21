@@ -197,7 +197,7 @@ class ResultNormalizer:
             import hashlib
 
             content = json.dumps(record, sort_keys=True)
-            return hashlib.md5(content.encode()).hexdigest()[:12]
+            return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()[:12]
 
         return "|".join(key_parts)
 

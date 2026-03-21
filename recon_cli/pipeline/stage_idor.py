@@ -465,7 +465,7 @@ class IDORStage(Stage):
         if limiter:
             limiter.on_response(url, resp.status_code)
         body = resp.content or b""
-        body_md5 = hashlib.md5(body).hexdigest()
+        body_md5 = hashlib.md5(body, usedforsecurity=False).hexdigest()
         headers_lower = {key.lower(): value for key, value in resp.headers.items()}
         text = ""
         try:

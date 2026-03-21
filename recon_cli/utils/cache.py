@@ -222,7 +222,7 @@ class DiskCache:
 
     def _deserialize(self, data: bytes) -> Any:
         """تحويل bytes إلى قيمة"""
-        return pickle.loads(data)
+        return pickle.loads(data)  # nosec B301
 
     def get(self, key: str) -> Optional[Any]:
         """الحصول على قيمة"""

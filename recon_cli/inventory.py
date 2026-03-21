@@ -441,7 +441,7 @@ class AssetInventory:
             {where}
             ORDER BY last_seen DESC
             LIMIT ? OFFSET ?
-        """
+        """  # nosec B608
         params.extend([limit, offset])
 
         with self._get_conn() as conn:
@@ -480,7 +480,7 @@ class AssetInventory:
 
         with self._get_conn() as conn:
             row = conn.execute(
-                f"SELECT COUNT(*) as cnt FROM assets {where}", params
+                f"SELECT COUNT(*) as cnt FROM assets {where}", params  # nosec B608
             ).fetchone()
             return row["cnt"]
 

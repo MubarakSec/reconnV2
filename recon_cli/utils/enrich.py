@@ -381,7 +381,7 @@ def get_soft_404_fingerprint(body: str, title: str = "") -> dict:
         "length": len(body),
         "word_count": len(words),
         "title": title.strip().lower(),
-        "hash": hashlib.md5(body.encode("utf-8", errors="ignore")).hexdigest()[:16],
+        "hash": hashlib.md5(body.encode("utf-8", errors="ignore"), usedforsecurity=False).hexdigest()[:16],
     }
 
 

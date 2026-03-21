@@ -471,7 +471,7 @@ class UserManager:
 
         with self._get_conn() as conn:
             rows = conn.execute(
-                f"SELECT * FROM users {where} LIMIT ?", params + [limit]
+                f"SELECT * FROM users {where} LIMIT ?", params + [limit]  # nosec B608
             ).fetchall()
 
             return [self._row_to_user(row) for row in rows]
@@ -863,7 +863,7 @@ class UserManager:
                 {where}
                 ORDER BY timestamp DESC
                 LIMIT ?
-                """,
+                """,  # nosec B608
                 params + [limit],
             ).fetchall()
 

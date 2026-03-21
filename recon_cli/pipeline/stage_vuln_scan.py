@@ -40,7 +40,7 @@ class VulnScanStage(Stage):
             for url in candidates[:max_urls]:
                 artifact = (
                     artifacts_dir
-                    / f"dalfox_{hashlib.md5(url.encode()).hexdigest()[:8]}.txt"
+                    / f"dalfox_{hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:8]}.txt"
                 )
                 cmd = ["dalfox", "url", url, "--format", "json", "--silence"]
                 try:
@@ -107,7 +107,7 @@ class VulnScanStage(Stage):
             for url in candidates[:max_urls]:
                 artifact = (
                     artifacts_dir
-                    / f"sqlmap_{hashlib.md5(url.encode()).hexdigest()[:8]}.txt"
+                    / f"sqlmap_{hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:8]}.txt"
                 )
                 cmd = [
                     "sqlmap",

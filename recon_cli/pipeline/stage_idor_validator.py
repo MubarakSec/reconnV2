@@ -380,7 +380,7 @@ class IDORValidatorStage(Stage):
         return (
             {
                 "status": status,
-                "body_md5": hashlib.md5(body).hexdigest(),
+                "body_md5": hashlib.md5(body, usedforsecurity=False).hexdigest(),
                 "sensitive": helper._extract_sensitive(data_json, text),
                 "subject_ids": helper._extract_subject_ids(data_json, text),
                 "text_sample": text,

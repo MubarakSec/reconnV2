@@ -258,7 +258,7 @@ class HttpProbeStage(Stage):
                 headers_lower = {k.lower(): v for k, v in raw_headers.items()}
                 etag = headers_lower.get("etag")
                 last_modified = headers_lower.get("last-modified")
-                body_md5 = hashlib.md5(body.encode("utf-8", "ignore")).hexdigest()
+                body_md5 = hashlib.md5(body.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()
 
                 if context.should_skip_due_to_cache(
                     url, etag=etag, last_modified=last_modified, body_md5=body_md5
@@ -377,7 +377,7 @@ class HttpProbeStage(Stage):
                 headers_lower = {k.lower(): v for k, v in raw_headers.items()}
                 etag = headers_lower.get("etag")
                 last_modified = headers_lower.get("last-modified")
-                body_md5 = hashlib.md5(body.encode("utf-8", "ignore")).hexdigest()
+                body_md5 = hashlib.md5(body.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()
 
                 if context.should_skip_due_to_cache(
                     url, etag=etag, last_modified=last_modified, body_md5=body_md5
@@ -469,7 +469,7 @@ class HttpProbeStage(Stage):
         for host in hosts[:max_hosts]:
             for scheme in ("https", "http"):
                 for _ in range(max_paths):
-                    random_path = f"/recon404-{int(time.time() * 1000)}-{hashlib.md5(host.encode()).hexdigest()[:6]}"
+                    random_path = f"/recon404-{int(time.time() * 1000)}-{hashlib.md5(host.encode(), usedforsecurity=False).hexdigest()[:6]}"
                     url = f"{scheme}://{host}{random_path}"
                     if context.url_allowed(url):
                         urls_to_check.append((host, url))

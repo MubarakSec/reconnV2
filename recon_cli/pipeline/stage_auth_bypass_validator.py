@@ -425,7 +425,7 @@ class AuthBypassValidatorStage(Stage):
         text = str(getattr(resp, "text", "") or "")[:4000]
         location = str(getattr(resp, "headers", {}).get("Location", "") or "")
         body_hash = (
-            hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
+            hashlib.md5(text.encode("utf-8", errors="ignore"), usedforsecurity=False).hexdigest()
             if text
             else ""
         )

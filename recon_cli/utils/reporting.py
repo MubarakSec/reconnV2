@@ -192,7 +192,7 @@ def build_finding_fingerprint(entry: Dict[str, object]) -> str:
             param_hint,
         ]
     )
-    return f"fp_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+    return f"fp_{hashlib.sha1(raw.encode('utf-8'), usedforsecurity=False).hexdigest()[:16]}"
 
 
 def _recency_score(entry: Dict[str, object]) -> int:
@@ -518,7 +518,7 @@ def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, ob
             title,
         ]
     )
-    finding_id = f"fnd_{hashlib.sha1(raw_id.encode('utf-8')).hexdigest()[:12]}"
+    finding_id = f"fnd_{hashlib.sha1(raw_id.encode('utf-8'), usedforsecurity=False).hexdigest()[:12]}"
     tags = entry.get("tags")
     if not isinstance(tags, list):
         tags = []

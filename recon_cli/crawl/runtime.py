@@ -39,7 +39,7 @@ class CrawlResult:
 
 
 def dom_artifact_name(url: str) -> str:
-    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(url.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"dom_{digest}.html"
 
 

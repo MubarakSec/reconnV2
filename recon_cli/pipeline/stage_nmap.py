@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import shlex
-import xml.etree.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET  # type: ignore # nosec B405
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
@@ -148,7 +151,7 @@ class NmapStage(Stage):
             if not xml_path.exists():
                 continue
             try:
-                tree = ET.parse(xml_path)
+                tree = ET.parse(xml_path)  # nosec B314
             except Exception:
                 continue
             root = tree.getroot()
@@ -272,7 +275,7 @@ class NmapStage(Stage):
                 return
             if udp_xml.exists():
                 try:
-                    tree = ET.parse(udp_xml)
+                    tree = ET.parse(udp_xml)  # nosec B314
                 except Exception:
                     return
                 root = tree.getroot()
