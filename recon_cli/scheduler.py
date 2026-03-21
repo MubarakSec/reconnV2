@@ -108,13 +108,13 @@ class CronExpression:
     """
 
     WEEKDAYS = {
-        "sun": 0,
-        "mon": 1,
-        "tue": 2,
-        "wed": 3,
-        "thu": 4,
-        "fri": 5,
-        "sat": 6,
+        "mon": 0,
+        "tue": 1,
+        "wed": 2,
+        "thu": 3,
+        "fri": 4,
+        "sat": 5,
+        "sun": 6,
     }
 
     MONTHS = {
@@ -271,6 +271,7 @@ class ScheduledJob:
             "id": self.id,
             "name": self.name,
             "trigger_type": self.trigger_type.value,
+            "scan_spec": self.scan_spec,
             "enabled": self.enabled,
             "cron_expression": self.cron_expression,
             "interval_seconds": self.interval_seconds,

@@ -1,37 +1,73 @@
-from pathlib import Path
-from recon_cli.jobs.results import ResultsTracker
 
+import unittest
+from unittest.mock import MagicMock, patch
+from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
+from recon_cli.pipeline.context import PipelineContext
+from urllib.parse import urlparse
 
-def test_strict_validation():
-    results_file = Path("test_results.jsonl")
-    if results_file.exists():
-        results_file.unlink()
+class TestRepro(unittest.TestCase):
+    def test_repro(self):
+        context = MagicMock(spec=PipelineContext)
+        context.logger = MagicMock()
+        context.runtime_config = MagicMock()
+        context.runtime_config.enable_extended_validation = True
+        context.runtime_config.enable_redirect_validation = True
+        context.runtime_config.redirect_max_urls = 40
+        context.runtime_config.verify_tls = True
+        from pathlib import Path
+        import tempfile
+        tmp_dir = Path(tempfile.gettempdir())
+        context.record.paths.root = tmp_dir
+        context.record.paths.ensure_subdir.return_value = tmp_dir
+        context.record.metadata.stats = {}
+        context.get_results.return_value = [
+            {"type": "url", "url": "http://test.com?redirect=orig", "score": 50}
+        ]
+        context.url_allowed.return_value = True
+        context.results = MagicMock()
+        context.signal_index.return_value = {}
+        
+        # This is what I suspect is the issue: context.auth_session returns a MagicMock
+        # which is truthy, so ExtendedValidationStage uses session.request instead of requests.request
+        # context.auth_session.return_value = None 
 
-    tracker = ResultsTracker(results_file)
+        from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
+        
+        # Monkeypatch to add logging
+        original_execute = ExtendedValidationStage.execute
+        def logged_execute(self, context):
+            print("Starting execute")
+            res = original_execute(self, context)
+            print("Finished execute")
+            return res
+        ExtendedValidationStage.execute = logged_execute
 
-    # Valid finding
-    valid_finding = {
-        "type": "finding",
-        "finding_type": "xss",
-        "severity": "high",
-        "hostname": "example.com",
-    }
-    tracker.append(valid_finding)
+        original_collect = ExtendedValidationStage._collect_candidates
+        def logged_collect(self, context, signals):
+            print("Starting collect")
+            res = original_collect(self, context, signals)
+            print(f"Collect finished, redirect candidates: {len(res['redirect'])}")
+            return res
+        ExtendedValidationStage._collect_candidates = logged_collect
 
-    # Invalid finding (missing finding_type)
-    invalid_finding = {
-        "type": "finding",
-        "severity": "medium",
-        "hostname": "example.com",
-    }
-    tracker.append(invalid_finding)
-
-    # Check results
-    with open(results_file, "r") as f:
-        lines = f.readlines()
-        for line in lines:
-            print(f"Result: {line.strip()}")
-
+        stage = ExtendedValidationStage()
+        
+        mock_resp = MagicMock()
+        mock_resp.status_code = 302
+        mock_resp.headers = {"Location": "https://example.com/testtoken"}
+        
+        with patch("requests.request", return_value=mock_resp):
+            with patch.object(ExtendedValidationStage, "_token", return_value="testtoken"):
+                stage.execute(context)
+        
+        print(f"context.results.append called: {context.results.append.called}")
+        if not context.results.append.called:
+            print("Trying with auth_session = None")
+            context.auth_session.return_value = None
+            with patch("requests.request", return_value=mock_resp):
+                with patch.object(ExtendedValidationStage, "_token", return_value="testtoken"):
+                    stage.execute(context)
+            print(f"context.results.append called after fix: {context.results.append.called}")
 
 if __name__ == "__main__":
-    test_strict_validation()
+    unittest.main()

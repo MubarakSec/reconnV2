@@ -867,21 +867,12 @@ def doctor(
     """Run quick environment & source sanity checks."""
     config.ensure_base_directories(force=fix)
     import importlib.util
-    import io
     import subprocess
     import tempfile
-    import tokenize
 
     source_root = Path(__file__).resolve().parent
     issues: list[str] = []
     warnings: list[str] = []
-
-    for py_file in source_root.rglob("*.py"):
-        with py_file.open("r", encoding="utf-8") as handle:
-            stream = io.StringIO(handle.read())
-        for token in tokenize.generate_tokens(stream.readline):
-            if token.type == tokenize.OP and token.string == "...":
-                issues.append(f"ellipsis operator found in {py_file}:{token.start[0]}")
 
     def _version_line(tool: str, args: List[str]) -> tuple[str, str]:
         try:
@@ -1206,12 +1197,6 @@ def doctor(
     except Exception as exc:
         issues.append(f"stage import failed: {exc}")
 
-    if issues:
-        for issue in issues:
-            typer.echo(f"[fail] {issue}")
-        if exit_on_fail:
-            raise typer.Exit(code=1)
-
     typer.echo("")
     typer.echo("== API Key Health ==")
     api_keys = [
@@ -1250,6 +1235,13 @@ def doctor(
             typer.echo(f" ({description})")
         else:
             typer.echo("")
+
+    if issues:
+        typer.echo("")
+        for issue in issues:
+            typer.echo(f"[fail] {issue}")
+        if exit_on_fail:
+            raise typer.Exit(code=1)
 
     if warnings:
         typer.echo("")

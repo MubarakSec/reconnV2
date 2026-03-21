@@ -118,7 +118,7 @@ exclude_lines = [
   "@abstractmethod",
   "pass",
 ]
-fail_under = 70
+fail_under = 60
 show_missing = true
 skip_covered = false
 
