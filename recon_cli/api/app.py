@@ -535,7 +535,7 @@ def create_app(manager: Optional[JobManager] = None) -> "FastAPI":
             "name": "ReconnV2",
             "description": "Advanced Security Reconnaissance Pipeline",
             "build_date": "2026-02-01",
-            "python_required": ">=3.10,<3.13",
+            "python_required": ">=3.12,<3.15",
             "docs_url": "/docs",
         }
 
