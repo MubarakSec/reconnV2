@@ -1205,6 +1205,25 @@ def doctor(
             typer.echo(f"[fail] {issue}")
         raise typer.Exit(code=1)
 
+    typer.echo("")
+    typer.echo("== API Key Health ==")
+    api_keys = [
+        ("SecurityTrails", config.RUNTIME_CONFIG.securitytrails_api_key, "Required for historical DNS origin discovery"),
+        ("GitHub Token", config.RUNTIME_CONFIG.github_token, "Required for GitHub repository secret scanning"),
+        ("ViewDNS", config.RUNTIME_CONFIG.viewdns_api_key, "Used for reverse WHOIS lookups"),
+        ("WPScan", config.RUNTIME_CONFIG.wpscan_api_token, "Required for deep WordPress vulnerability scanning"),
+        ("Telegram Bot", config.RUNTIME_CONFIG.telegram_token, "Required for Telegram notifications and bot control"),
+    ]
+    for name, key, description in api_keys:
+        status = "ok" if key else "missing"
+        color = typer.colors.GREEN if key else typer.colors.YELLOW
+        typer.echo(f"{name:15} : ", nl=False)
+        typer.secho(status, fg=color, nl=False)
+        if not key:
+            typer.echo(f" ({description})")
+        else:
+            typer.echo("")
+
     if warnings:
         typer.secho(
             f"Doctor completed with {len(warnings)} warning(s)", fg=typer.colors.YELLOW
