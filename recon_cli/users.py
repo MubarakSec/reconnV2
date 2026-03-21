@@ -533,7 +533,13 @@ class UserManager:
             )
 
         self._log_action(
-            user.id, "login", "session", "", {"ip": ip_address}, ip_address, user_agent  # type: ignore[arg-type]
+            user.id,
+            "login",
+            "session",
+            "",
+            {"ip": ip_address},
+            ip_address,
+            user_agent,  # type: ignore[arg-type]
         )
 
         return session_token

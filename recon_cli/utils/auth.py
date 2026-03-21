@@ -375,7 +375,9 @@ class AuthSessionManager:
         success = False
         try:
             response = self.session.request(
-                self.profile.login.method, login_url, **request_kwargs  # type: ignore[arg-type]
+                self.profile.login.method,
+                login_url,
+                **request_kwargs,  # type: ignore[arg-type]
             )
             body = response.text or ""
             if self.profile.login.fail_regex and re.search(

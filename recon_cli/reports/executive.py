@@ -509,7 +509,7 @@ class ExecutiveSummary:
                 <div class="finding {kf.severity}">
                     <h4>{escape_html_text(kf.title)}</h4>
                     <span class="badge">{escape_html_text(kf.severity)}</span>
-                    <p>{escape_html_text(kf.impact[:200] + ('...' if kf.impact else ''))}</p>
+                    <p>{escape_html_text(kf.impact[:200] + ("..." if kf.impact else ""))}</p>
                 </div>
                 '''
                 for kf in self.key_findings[:5]

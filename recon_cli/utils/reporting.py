@@ -242,7 +242,9 @@ def compute_risk_score(entry: Dict[str, object]) -> int:
         exploitability_score += 6
 
     tokens = {
-        str(tag).lower() for tag in (entry.get("tags") or []) if isinstance(tag, str)  # type: ignore[attr-defined]
+        str(tag).lower()
+        for tag in (entry.get("tags") or [])
+        if isinstance(tag, str)  # type: ignore[attr-defined]
     }
     context_blob = " ".join(
         [
