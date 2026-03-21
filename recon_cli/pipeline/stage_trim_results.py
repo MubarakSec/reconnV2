@@ -99,7 +99,7 @@ class TrimResultsStage(Stage):
                     stats["findings_low_priority"] += 1
                     continue
                 cloned = self._clone_entry(entry)
-                host = cloned.get("hostname") or ""
+                host = cloned.get("hostname") or ""  # type: ignore[assignment]
                 bucket = finding_buckets[host]
                 item = (score, order, cloned, host)
                 if finding_limit > 0:
@@ -121,8 +121,8 @@ class TrimResultsStage(Stage):
             defaultdict(list)
         )
         for score, order_idx, entry_data, host in url_best.values():
-            bucket = host or "__unknown__"
-            per_host_urls[bucket].append((score, order_idx, entry_data))
+            bucket = host or "__unknown__"  # type: ignore[assignment]
+            per_host_urls[bucket].append((score, order_idx, entry_data))  # type: ignore[index]
 
         selected_urls: List[tuple[int, Dict[str, object]]] = []
         urls_dropped = 0
@@ -227,6 +227,6 @@ class TrimResultsStage(Stage):
     @staticmethod
     def _coerce_int(value: object) -> int:
         try:
-            return int(value) if value is not None else 0
+            return int(value) if value is not None else 0  # type: ignore[call-overload]
         except (TypeError, ValueError):
             return 0

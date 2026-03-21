@@ -193,12 +193,12 @@ class WafProbeStage(Stage):
                 continue
 
             if limiter:
-                limiter.on_response(url, resp_default[0].status_code)
+                limiter.on_response(url, resp_default[0].status_code)  # type: ignore[attr-defined]
             baseline_resp, baseline_snip = resp_default
             context.logger.info(
                 "WAF Probe: baseline fetched for %s (status %d)",
                 url,
-                baseline_resp.status_code,
+                baseline_resp.status_code,  # type: ignore[attr-defined]
             )
             try:
                 if limiter and not limiter.wait_for_slot(url, timeout=timeout):
@@ -219,7 +219,7 @@ class WafProbeStage(Stage):
                     limiter.on_error(url)
                 continue
             if limiter:
-                limiter.on_response(url, resp_attack[0].status_code)
+                limiter.on_response(url, resp_attack[0].status_code)  # type: ignore[attr-defined]
             attack_resp, attack_snip = resp_attack
 
             try:
@@ -246,7 +246,7 @@ class WafProbeStage(Stage):
                     limiter.on_error(url)
                 continue
             if limiter:
-                limiter.on_response(url, resp_alt[0].status_code)
+                limiter.on_response(url, resp_alt[0].status_code)  # type: ignore[attr-defined]
             alt_resp, alt_snip = resp_alt
 
             baseline_meta = self._response_meta(baseline_resp, baseline_snip)
@@ -479,11 +479,11 @@ class WafProbeStage(Stage):
         self, baseline: Dict[str, object], attack: Dict[str, object]
     ) -> bool:
         try:
-            baseline_status = int(baseline.get("status") or 0)
+            baseline_status = int(baseline.get("status") or 0)  # type: ignore[call-overload]
         except Exception:
             baseline_status = 0
         try:
-            attack_status = int(attack.get("status") or 0)
+            attack_status = int(attack.get("status") or 0)  # type: ignore[call-overload]
         except Exception:
             attack_status = 0
         if (
@@ -491,8 +491,8 @@ class WafProbeStage(Stage):
             and baseline_status not in self.BLOCK_STATUSES
         ):
             return True
-        base_len = int(baseline.get("length") or 0)
-        attack_len = int(attack.get("length") or 0)
+        base_len = int(baseline.get("length") or 0)  # type: ignore[call-overload]
+        attack_len = int(attack.get("length") or 0)  # type: ignore[call-overload]
         if base_len > 0 and attack_len > 0 and attack_len < base_len * 0.4:
             return True
         base_title = str(baseline.get("title") or "")

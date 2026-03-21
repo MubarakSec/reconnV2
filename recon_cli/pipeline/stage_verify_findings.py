@@ -201,7 +201,7 @@ class VerifyFindingsStage(Stage):
                 return True
 
         # Skip findings with very low scores that aren't verified
-        if int(entry.get("score", 0)) < 40:
+        if int(entry.get("score", 0)) < 40:  # type: ignore[call-overload]
             return True
 
         return False

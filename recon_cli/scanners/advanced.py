@@ -127,10 +127,10 @@ class BaseScanner(ABC):
 
             result = await self.executor.run_async(
                 command,
-                timeout=self.timeout,
+                timeout=self.timeout,  # type: ignore[arg-type]
             )
 
-            findings = []
+            findings: List[Dict[str, object]] = []
             if output_path.exists():
                 findings = self.parse_output(output_path)
 
@@ -227,7 +227,7 @@ class UncoverScanner(BaseScanner):
         return cmd
 
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
-        findings = []
+        findings: List[Dict[str, object]] = []
 
         with open(output_file, "r") as f:
             for line in f:
@@ -309,7 +309,7 @@ class NaabuScanner(BaseScanner):
         return cmd
 
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
-        findings = []
+        findings: List[Dict[str, object]] = []
 
         if not output_file.exists():
             return findings
@@ -413,7 +413,7 @@ class DalfoxScanner(BaseScanner):
         return cmd
 
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
-        findings = []
+        findings: List[Dict[str, object]] = []
 
         if not output_file.exists():
             return findings
@@ -541,7 +541,7 @@ class SQLMapScanner(BaseScanner):
         return cmd
 
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
-        findings = []
+        findings: List[Dict[str, object]] = []
 
         output_dir = output_file.parent / "sqlmap_output"
         if not output_dir.exists():
@@ -668,7 +668,7 @@ class NucleiScanner(BaseScanner):
         return cmd
 
     def parse_output(self, output_file: Path) -> List[Dict[str, Any]]:
-        findings = []
+        findings: List[Dict[str, object]] = []
 
         if not output_file.exists():
             return findings
@@ -797,7 +797,7 @@ class MultiScanner:
                         error=str(result),
                     )
                 else:
-                    results[scanner.name] = result
+                    results[scanner.name] = result  # type: ignore[assignment]
         else:
             for scanner in self.scanners:
                 try:

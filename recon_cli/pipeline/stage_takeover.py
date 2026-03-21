@@ -153,7 +153,7 @@ class TakeoverStage(Stage):
                     f"provider:{finding.provider}",
                     f"claimability:{claimability['level']}",
                 ],
-                "score": int(claimability["score"]),
+                "score": int(claimability["score"]),  # type: ignore[call-overload]
                 "priority": str(claimability["priority"]),
                 "severity": str(claimability["severity"]),
                 "confidence_label": str(claimability["confidence"]),
@@ -315,7 +315,7 @@ class TakeoverStage(Stage):
             for pattern in patterns:
                 for cname in cname_chain:
                     if self._cname_matches_pattern(cname, pattern):
-                        providers.add(fp.get("provider", ""))
+                        providers.add(fp.get("provider", ""))  # type: ignore[arg-type]
                         break
         providers.discard("")
         return providers

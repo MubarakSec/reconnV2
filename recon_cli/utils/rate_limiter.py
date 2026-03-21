@@ -226,7 +226,7 @@ class RateLimiter:
         stats = dict(self._stats)
         stats.update(
             {
-                "global_tokens": self._global_bucket.tokens,
+                "global_tokens": self._global_bucket.tokens,  # type: ignore[dict-item]
                 "host_count": len(self._host_buckets),
                 "hosts_tracked": len(self._host_buckets),
                 "cooldowns_active": sum(

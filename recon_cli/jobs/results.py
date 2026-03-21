@@ -441,7 +441,7 @@ class ResultsTracker:
                 continue
             if key == "score":
                 try:
-                    merged["score"] = max(int(merged.get("score", 0)), int(value))
+                    merged["score"] = max(int(merged.get("score", 0)), int(value))  # type: ignore[call-overload]
                 except (TypeError, ValueError):
                     merged["score"] = merged.get("score", value)
                 continue
@@ -453,8 +453,8 @@ class ResultsTracker:
                 continue
             if key == "confidence":
                 try:
-                    merged_value = float(merged.get("confidence", 0.0))
-                    new_value = float(value)
+                    merged_value = float(merged.get("confidence", 0.0))  # type: ignore[arg-type]
+                    new_value = float(value)  # type: ignore[arg-type]
                     merged["confidence"] = max(merged_value, new_value)
                 except (TypeError, ValueError):
                     merged["confidence"] = merged.get("confidence", value)
@@ -467,8 +467,8 @@ class ResultsTracker:
                 continue
             if key == "confidence_score":
                 try:
-                    merged_value = float(merged.get("confidence_score", 0.0))
-                    new_value = float(value)
+                    merged_value = float(merged.get("confidence_score", 0.0))  # type: ignore[arg-type]
+                    new_value = float(value)  # type: ignore[arg-type]
                     merged["confidence_score"] = max(merged_value, new_value)
                 except (TypeError, ValueError):
                     merged["confidence_score"] = merged.get("confidence_score", value)

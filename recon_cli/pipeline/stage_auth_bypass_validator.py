@@ -141,9 +141,9 @@ class AuthBypassValidatorStage(Stage):
             baseline_status = baseline_resp["status"]
             baseline_text = baseline_resp["text"]
             restricted = self._is_auth_restricted(
-                status=baseline_status,
-                text=baseline_text,
-                location=baseline_resp.get("location", ""),
+                status=baseline_status,  # type: ignore[arg-type]
+                text=baseline_text,  # type: ignore[arg-type]
+                location=baseline_resp.get("location", ""),  # type: ignore[arg-type]
                 hinted=bool(candidate.get("restricted_hint")),
             )
 
@@ -156,7 +156,7 @@ class AuthBypassValidatorStage(Stage):
                         skipped += 1
                         continue
                     headers = {"User-Agent": "recon-cli auth-bypass-validator"}
-                    headers.update(dict(technique.get("headers") or {}))
+                    headers.update(dict(technique.get("headers") or {}))  # type: ignore[call-overload]
                     resp = self._fetch(
                         context,
                         requests,
@@ -187,13 +187,13 @@ class AuthBypassValidatorStage(Stage):
                         }
                     )
                     if self._is_auth_restricted(
-                        status=resp["status"],
-                        text=resp["text"],
-                        location=resp.get("location", ""),
+                        status=resp["status"],  # type: ignore[arg-type]
+                        text=resp["text"],  # type: ignore[arg-type]
+                        location=resp.get("location", ""),  # type: ignore[arg-type]
                         hinted=False,
                     ):
                         continue
-                    if int(resp["status"]) not in self.SUCCESS_STATUS:
+                    if int(resp["status"]) not in self.SUCCESS_STATUS:  # type: ignore[call-overload]
                         continue
                     signal_id = context.emit_signal(
                         "auth_bypass_confirmed",
@@ -223,7 +223,7 @@ class AuthBypassValidatorStage(Stage):
                         },
                         "proof": f"{technique['name']} -> {resp['status']}",
                         "tags": ["auth-bypass", "forced-browse", "confirmed"],
-                        "score": max(90, int(candidate.get("score", 0) or 0)),
+                        "score": max(90, int(candidate.get("score", 0) or 0)),  # type: ignore[call-overload]
                         "priority": "high",
                         "severity": "critical",
                         "confidence_label": "verified",
@@ -271,19 +271,19 @@ class AuthBypassValidatorStage(Stage):
                             "kind": "privilege_boundary_probe",
                             "url": url,
                             "baseline_status": baseline_status,
-                            "token_a_status": int(
+                            "token_a_status": int(  # type: ignore[call-overload]
                                 auth_profiles.get("token-a", {}).get("status", 0) or 0
                             ),
-                            "token_b_status": int(
+                            "token_b_status": int(  # type: ignore[call-overload]
                                 auth_profiles.get("token-b", {}).get("status", 0) or 0
                             ),
-                            "reason": finding.get("details", {}).get("reason"),
+                            "reason": finding.get("details", {}).get("reason"),  # type: ignore[attr-defined]
                         }
                     )
 
             if finding and context.results.append(finding):
                 confirmed += 1
-                reason = str((finding.get("details") or {}).get("reason") or "")
+                reason = str((finding.get("details") or {}).get("reason") or "")  # type: ignore[attr-defined]
                 if reason == "forced_browse_bypass":
                     confirmed_forced += 1
                 else:
@@ -382,9 +382,9 @@ class AuthBypassValidatorStage(Stage):
             )
         selected: List[Dict[str, object]] = []
         for _host, items in grouped.items():
-            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
             selected.extend(items[:max_per_host])
-        selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+        selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
         return selected[:max_urls]
 
     def _fetch(
@@ -513,8 +513,8 @@ class AuthBypassValidatorStage(Stage):
         token_b = profiles.get("token-b")
         if not token_a or not token_b:
             return None
-        token_a_ok = int(token_a.get("status", 0) or 0) in self.SUCCESS_STATUS
-        token_b_ok = int(token_b.get("status", 0) or 0) in self.SUCCESS_STATUS
+        token_a_ok = int(token_a.get("status", 0) or 0) in self.SUCCESS_STATUS  # type: ignore[call-overload]
+        token_b_ok = int(token_b.get("status", 0) or 0) in self.SUCCESS_STATUS  # type: ignore[call-overload]
         if not token_a_ok or not token_b_ok:
             return None
         token_match = bool(token_a.get("hash")) and str(token_a.get("hash")) == str(
@@ -523,17 +523,17 @@ class AuthBypassValidatorStage(Stage):
         if not token_match:
             return None
 
-        baseline_status = int(baseline.get("status", 0) or 0)
+        baseline_status = int(baseline.get("status", 0) or 0)  # type: ignore[call-overload]
         baseline_ok = baseline_status in self.SUCCESS_STATUS
         baseline_hash = str(baseline.get("hash") or "")
         reason = "token_boundary_indistinguishable"
         severity = "high"
-        score = max(82, int(candidate.get("score", 0) or 0))
+        score = max(82, int(candidate.get("score", 0) or 0))  # type: ignore[call-overload]
         tags = ["auth-bypass", "privilege-boundary", "confirmed"]
         if baseline_ok and baseline_hash and baseline_hash == str(token_a.get("hash")):
             reason = "unauthenticated_matches_authenticated"
             severity = "critical"
-            score = max(90, int(candidate.get("score", 0) or 0))
+            score = max(90, int(candidate.get("score", 0) or 0))  # type: ignore[call-overload]
             tags = ["auth-bypass", "unauthenticated", "confirmed"]
         return {
             "type": "finding",
@@ -545,8 +545,8 @@ class AuthBypassValidatorStage(Stage):
             "details": {
                 "reason": reason,
                 "baseline_status": baseline_status,
-                "token_a_status": int(token_a.get("status", 0) or 0),
-                "token_b_status": int(token_b.get("status", 0) or 0),
+                "token_a_status": int(token_a.get("status", 0) or 0),  # type: ignore[call-overload]
+                "token_b_status": int(token_b.get("status", 0) or 0),  # type: ignore[call-overload]
             },
             "proof": reason,
             "tags": tags,

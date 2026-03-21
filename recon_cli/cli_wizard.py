@@ -168,13 +168,13 @@ class BaseWizard(Generic[T]):
             )
 
         elif step.step_type == StepType.NUMBER:
-            value = IntPrompt.ask(
+            value = IntPrompt.ask(  # type: ignore[assignment]
                 f"[cyan]{step.prompt}[/cyan]",
                 default=step.default if step.default else 0,  # type: ignore[arg-type]
             )
 
         elif step.step_type == StepType.CONFIRM:
-            value = Confirm.ask(
+            value = Confirm.ask(  # type: ignore[assignment]
                 f"[cyan]{step.prompt}[/cyan]",
                 default=step.default if step.default is not None else False,  # type: ignore[arg-type]
             )
@@ -207,7 +207,7 @@ class BaseWizard(Generic[T]):
             indices = [
                 int(x.strip()) for x in selection.split(",") if x.strip().isdigit()
             ]
-            value = [
+            value = [  # type: ignore[assignment]
                 step.choices[i - 1] for i in indices if 1 <= i <= len(step.choices)
             ]
 
@@ -216,7 +216,7 @@ class BaseWizard(Generic[T]):
                 f"[cyan]{step.prompt}[/cyan]",
                 default=str(step.default) if step.default else None,
             )
-            value = Path(path_str) if path_str else None
+            value = Path(path_str) if path_str else None  # type: ignore[assignment]
 
         elif step.step_type == StepType.PASSWORD:
             value = Prompt.ask(
@@ -234,7 +234,7 @@ class BaseWizard(Generic[T]):
                 if not item:
                     break
                 items.append(item)
-            value = items
+            value = items  # type: ignore[assignment]
 
         # Validate if validator provided
         if step.validator and value is not None:

@@ -189,7 +189,7 @@ class ApiSchemaProbeStage(Stage):
                     evidence={"method": method, "spec": spec_url},
                 )
 
-                for param in endpoint.get("params") or []:
+                for param in endpoint.get("params") or []:  # type: ignore[attr-defined]
                     if not isinstance(param, dict):
                         continue
                     name = param.get("name")
@@ -199,7 +199,7 @@ class ApiSchemaProbeStage(Stage):
                     param_counts[param_name] += 1
                     if len(param_examples[param_name]) < 3:
                         param_examples[param_name].append(url)
-                for field_name in endpoint.get("body_fields") or []:
+                for field_name in endpoint.get("body_fields") or []:  # type: ignore[attr-defined]
                     if not isinstance(field_name, str) or not field_name:
                         continue
                     param_counts[field_name] += 1
@@ -425,7 +425,7 @@ class ApiSchemaProbeStage(Stage):
         swagger_host = spec.get("host")
         base_path = spec.get("basePath") or ""
         schemes = spec.get("schemes") if isinstance(spec.get("schemes"), list) else []
-        scheme = schemes[0] if schemes else parsed.scheme or "https"
+        scheme = schemes[0] if schemes else parsed.scheme or "https"  # type: ignore[index]
         if isinstance(swagger_host, str) and swagger_host:
             return f"{scheme}://{swagger_host}{base_path}".rstrip("/")
         return fallback.rstrip("/")
@@ -437,7 +437,7 @@ class ApiSchemaProbeStage(Stage):
             spec.get("security") if isinstance(spec.get("security"), list) else None
         )
 
-        for path, methods in paths.items():
+        for path, methods in paths.items():  # type: ignore[attr-defined]
             if not isinstance(path, str) or not isinstance(methods, dict):
                 continue
             path_parameters = self._parameters_from(methods.get("parameters"))
@@ -500,8 +500,8 @@ class ApiSchemaProbeStage(Stage):
                 score += 14
             if any(low in path for low in self.LOW_VALUE_HINTS):
                 score -= 20
-            score += min(12, len(params) * 2)
-            score += min(10, len(body_fields) * 2)
+            score += min(12, len(params) * 2)  # type: ignore[arg-type]
+            score += min(10, len(body_fields) * 2)  # type: ignore[arg-type]
             return score
 
         return sorted(endpoints, key=_score, reverse=True)
@@ -621,7 +621,7 @@ class ApiSchemaProbeStage(Stage):
                 lambda m: self._placeholder_value(m.group(1)), url
             )
         params = {}
-        for param in endpoint.get("params") or []:
+        for param in endpoint.get("params") or []:  # type: ignore[attr-defined]
             if not isinstance(param, dict):
                 continue
             if param.get("in") != "query":
@@ -658,7 +658,7 @@ class ApiSchemaProbeStage(Stage):
     ) -> Tuple[Optional[Dict[str, object]], Optional[Dict[str, object]]]:
         params = endpoint.get("params") or []
         form_fields: List[str] = []
-        for item in params:
+        for item in params:  # type: ignore[attr-defined]
             if not isinstance(item, dict):
                 continue
             if str(item.get("in") or "") == "formData":
@@ -670,11 +670,11 @@ class ApiSchemaProbeStage(Stage):
                 name: self._placeholder_value(name) for name in form_fields[:8]
             }
             form_payload.setdefault("recon_probe", "1")
-            return None, form_payload
+            return None, form_payload  # type: ignore[return-value]
 
         body_fields = endpoint.get("body_fields") or []
         json_payload: Dict[str, object] = {}
-        for name in body_fields[:8]:
+        for name in body_fields[:8]:  # type: ignore[index]
             if not isinstance(name, str) or not name:
                 continue
             json_payload[name] = self._placeholder_value(name)

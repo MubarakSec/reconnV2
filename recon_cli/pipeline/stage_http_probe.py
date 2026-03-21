@@ -18,8 +18,8 @@ try:
     RATE_LIMITER_AVAILABLE = True
 except ImportError:  # pragma: no cover - optional dependency
     RATE_LIMITER_AVAILABLE = False
-    RateLimiter = None
-    RateLimitConfig = None
+    RateLimiter = None  # type: ignore[misc]
+    RateLimitConfig = None  # type: ignore[misc]
 
 
 class HttpProbeStage(Stage):
@@ -247,14 +247,14 @@ class HttpProbeStage(Stage):
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
             for (host, url, scheme), resp in zip(urls_to_check, responses):
-                if isinstance(resp, Exception) or resp.status == 0:
+                if isinstance(resp, Exception) or resp.status == 0:  # type: ignore[union-attr]
                     continue
 
-                if resp.status == 304 and not context.force:
+                if resp.status == 304 and not context.force:  # type: ignore[union-attr]
                     continue
 
-                body = resp.body[:2048] if resp.body else ""
-                raw_headers = resp.headers
+                body = resp.body[:2048] if resp.body else ""  # type: ignore[union-attr]
+                raw_headers = resp.headers  # type: ignore[union-attr]
                 headers_lower = {k.lower(): v for k, v in raw_headers.items()}
                 etag = headers_lower.get("etag")
                 last_modified = headers_lower.get("last-modified")
@@ -286,7 +286,7 @@ class HttpProbeStage(Stage):
                     "source": "probe",
                     "url": url,
                     "hostname": host,
-                    "status_code": resp.status,
+                    "status_code": resp.status,  # type: ignore[union-attr]
                     "server": headers_lower.get("server"),
                     "tls": scheme == "https",
                     "content_type": headers_lower.get("content-type"),
@@ -300,7 +300,7 @@ class HttpProbeStage(Stage):
                 if header_values:
                     tags.update(enrich_utils.infer_tech_tags(header_values))
                 tags.update(enrich_utils.infer_cookie_tags(set_cookie_headers))
-                tags.update(enrich_utils.detect_waf_tags(payload.get("server")))
+                tags.update(enrich_utils.detect_waf_tags(payload.get("server")))  # type: ignore[arg-type]
                 if tags:
                     payload["tags"] = sorted(tags)
 
@@ -368,14 +368,14 @@ class HttpProbeStage(Stage):
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
             for (host, url, scheme, path), resp in zip(urls_to_check, responses):
-                if isinstance(resp, Exception) or resp.status == 0:
+                if isinstance(resp, Exception) or resp.status == 0:  # type: ignore[union-attr]
                     continue
 
-                if resp.status == 304 and not context.force:
+                if resp.status == 304 and not context.force:  # type: ignore[union-attr]
                     continue
 
-                body = resp.body[:2048] if resp.body else ""
-                raw_headers = resp.headers
+                body = resp.body[:2048] if resp.body else ""  # type: ignore[union-attr]
+                raw_headers = resp.headers  # type: ignore[union-attr]
                 headers_lower = {k.lower(): v for k, v in raw_headers.items()}
                 etag = headers_lower.get("etag")
                 last_modified = headers_lower.get("last-modified")
@@ -417,13 +417,13 @@ class HttpProbeStage(Stage):
                     "source": "probe",
                     "url": url,
                     "hostname": host,
-                    "status_code": resp.status,
+                    "status_code": resp.status,  # type: ignore[union-attr]
                     "content_type": headers_lower.get("content-type"),
                     "length": len(body),
                     "body_md5": body_md5,
                     "tags": sorted(set(tags)),
                     "tls": scheme == "https",
-                    "response_time_ms": int(resp.elapsed * 1000)
+                    "response_time_ms": int(resp.elapsed * 1000)  # type: ignore[union-attr]
                     if getattr(resp, "elapsed", None)
                     else 0,
                     "etag": etag,
@@ -497,11 +497,11 @@ class HttpProbeStage(Stage):
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
             for (host, url), resp in zip(urls_to_check, responses):
-                if isinstance(resp, Exception) or resp.status == 0:
+                if isinstance(resp, Exception) or resp.status == 0:  # type: ignore[union-attr]
                     continue
                 if host in soft_hosts:
                     continue
-                body = resp.body or ""
+                body = resp.body or ""  # type: ignore[union-attr]
                 body_snippet = body[:2048]
                 title = ""
                 if "<title" in body_snippet.lower():
@@ -517,11 +517,11 @@ class HttpProbeStage(Stage):
                             title = match.group(1).strip()
                     except Exception:
                         pass
-                if enrich_utils.looks_like_soft_404(resp.status, body_snippet, title):
+                if enrich_utils.looks_like_soft_404(resp.status, body_snippet, title):  # type: ignore[union-attr]
                     soft_hosts[host] = enrich_utils.get_soft_404_fingerprint(
                         body, title
                     )
-                    soft_hosts[host]["status_code"] = resp.status
+                    soft_hosts[host]["status_code"] = resp.status  # type: ignore[union-attr]
 
         if soft_hosts:
             stats = context.record.metadata.stats.setdefault("soft_404", {})

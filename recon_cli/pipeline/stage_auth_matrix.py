@@ -174,11 +174,11 @@ class AuthMatrixStage(Stage):
                 record = AuthRecord(
                     url=url,
                     auth=auth_label,
-                    status=int(data["status"]),
+                    status=int(data["status"]),  # type: ignore[call-overload]
                     body_md5=str(data["body_md5"]),
-                    length=int(data["length"]),
-                    sensitive=dict(data["sensitive"]),
-                    subject_ids=set(data.get("subject_ids") or []),
+                    length=int(data["length"]),  # type: ignore[call-overload]
+                    sensitive=dict(data["sensitive"]),  # type: ignore[call-overload]
+                    subject_ids=set(data.get("subject_ids") or []),  # type: ignore[call-overload]
                     auth_error=bool(data.get("auth_error")),
                 )
                 records.append(record)
@@ -267,7 +267,7 @@ class AuthMatrixStage(Stage):
     def _url_priority(self, entry: Dict[str, object], url: str) -> int:
         parsed = urlparse(url)
         path = (parsed.path or "").lower()
-        score = int(entry.get("score") or 0)
+        score = int(entry.get("score") or 0)  # type: ignore[call-overload]
         if path.startswith("/api") or "/api/" in path:
             score += 30
         if any(hint in path for hint in self.PATH_HINTS):
@@ -290,7 +290,7 @@ class AuthMatrixStage(Stage):
             lowered_tags = {str(tag).lower() for tag in tags}
             if any(tag.startswith("api") for tag in lowered_tags):
                 score += 12
-        status = int(entry.get("status_code") or 0)
+        status = int(entry.get("status_code") or 0)  # type: ignore[call-overload]
         if status in {200, 401, 403}:
             score += 8
         return score

@@ -84,24 +84,24 @@ class ScannerStage(Stage):
             )
             url = entry.get("url")
             if url:
-                data["urls"].append(url)
+                data["urls"].append(url)  # type: ignore[attr-defined]
                 path = urlparse(url).path.lower()
                 if "/api" in path:
                     data["api"] = True
             for tag in entry.get("tags", []):
-                data["tags"].add(tag)
+                data["tags"].add(tag)  # type: ignore[attr-defined]
                 if tag == "service:api":
                     data["api"] = True
             server = entry.get("server")
             if server:
-                data["servers"].add(server.lower())
+                data["servers"].add(server.lower())  # type: ignore[attr-defined]
             technologies = entry.get("technologies") or []
             if isinstance(technologies, list):
-                data["technologies"].update(
+                data["technologies"].update(  # type: ignore[attr-defined]
                     {str(item).lower() for item in technologies if item}
                 )
             elif technologies:
-                data["technologies"].add(str(technologies).lower())
+                data["technologies"].add(str(technologies).lower())  # type: ignore[attr-defined]
 
         signal_index = context.signal_index()
         for host, info in host_info.items():
@@ -128,7 +128,7 @@ class ScannerStage(Stage):
             targets: List[str] = []
             for host in api_hosts:
                 urls = host_info[host]["urls"]
-                base_url = urls[0] if urls else f"https://{host}"
+                base_url = urls[0] if urls else f"https://{host}"  # type: ignore[index]
                 targets.append(base_url)
             batch_size = max(1, int(getattr(runtime, "nuclei_batch_size", 1)))
             pending_batches = [
@@ -213,7 +213,7 @@ class ScannerStage(Stage):
         if "wpscan" in available:
 
             def is_wordpress(info: Dict[str, object], host_value: str) -> bool:
-                tags = {t.lower() for t in info.get("tags", set())}
+                tags = {t.lower() for t in info.get("tags", set())}  # type: ignore[attr-defined]
                 if any("wordpress" in tag for tag in tags):
                     return True
                 if "cms:wordpress" in signal_index.get("by_host", {}).get(
@@ -221,13 +221,13 @@ class ScannerStage(Stage):
                 ):
                     return True
                 techs = info.get("technologies", set())
-                if any("wordpress" in tech for tech in techs):
+                if any("wordpress" in tech for tech in techs):  # type: ignore[attr-defined]
                     return True
                 servers = info.get("servers", set())
-                if any("wordpress" in server for server in servers):
+                if any("wordpress" in server for server in servers):  # type: ignore[attr-defined]
                     return True
                 urls = info.get("urls", [])
-                for url in urls:
+                for url in urls:  # type: ignore[attr-defined]
                     path = urlparse(url).path.lower()
                     if any(
                         token in path
@@ -249,7 +249,7 @@ class ScannerStage(Stage):
             findings = []
             for host in wp_hosts:
                 urls = host_info[host]["urls"]
-                base_url = urls[0] if urls else f"https://{host}"
+                base_url = urls[0] if urls else f"https://{host}"  # type: ignore[index]
                 result = scanner_integrations.run_wpscan(
                     context.executor,
                     context.logger,

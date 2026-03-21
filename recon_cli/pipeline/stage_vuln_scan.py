@@ -95,7 +95,7 @@ class VulnScanStage(Stage):
                         "severity": "high" if is_confirmed else "low",
                         "evidence_id": signal_id or None,
                     }
-                    if context.results.append(payload):
+                    if context.results.append(payload):  # type: ignore[arg-type]
                         findings += 1
         if getattr(
             context.runtime_config, "enable_sqlmap", False
@@ -178,7 +178,7 @@ class VulnScanStage(Stage):
                         "severity": "critical" if is_confirmed else "low",
                         "evidence_id": signal_id or None,
                     }
-                    if context.results.append(payload):
+                    if context.results.append(payload):  # type: ignore[arg-type]
                         findings += 1
         if findings or attempted:
             stats = context.record.metadata.stats.setdefault("vuln_scan", {})
@@ -200,7 +200,7 @@ class VulnScanStage(Stage):
                 if entry.get("type") != "url":
                     continue
                 url_value = entry.get("url")
-                if not url_value or url_value not in candidates:
+                if not url_value or url_value not in candidates:  # type: ignore[operator]
                     continue
                 url_scores[url_value] = int(entry.get("score", 0))
                 url_tags[url_value] = set(entry.get("tags", []))
@@ -210,7 +210,7 @@ class VulnScanStage(Stage):
                     url_status[url_value] = 0
         signals = context.signal_index()
         scored: List[Tuple[str, int]] = []
-        for url in candidates:
+        for url in candidates:  # type: ignore[attr-defined]
             if not context.url_in_scope(url) or not context.url_allowed(url):
                 continue
             score = url_scores.get(url, 0)

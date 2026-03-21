@@ -11,7 +11,7 @@ from recon_cli.pipeline.stage_base import Stage
 try:
     from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 except ImportError:
-    AsyncHTTPClient = None
+    AsyncHTTPClient = None  # type: ignore[misc]
 
 
 class UploadProbeStage(Stage):
@@ -100,11 +100,11 @@ class UploadProbeStage(Stage):
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
             for url, resp in zip(all_urls_to_check, responses):
-                if isinstance(resp, Exception) or resp.status == 0:
+                if isinstance(resp, Exception) or resp.status == 0:  # type: ignore[union-attr]
                     continue
                 checked += 1
 
-                body = resp.body or ""
+                body = resp.body or ""  # type: ignore[union-attr]
                 has_dir_listing = self._looks_like_dir_listing(body)
                 has_upload_indicators = self._has_upload_indicators(body)
                 is_candidate = url in candidates
@@ -129,7 +129,7 @@ class UploadProbeStage(Stage):
                         source="upload-probe",
                         tags=tags,
                         evidence={
-                            "status_code": resp.status,
+                            "status_code": resp.status,  # type: ignore[union-attr]
                             "has_indicators": has_upload_indicators,
                             "has_dir_listing": has_dir_listing,
                         },
@@ -153,14 +153,14 @@ class UploadProbeStage(Stage):
                     artifacts.append(
                         {
                             "url": url,
-                            "status": resp.status,
+                            "status": resp.status,  # type: ignore[union-attr]
                             "has_indicators": has_upload_indicators,
                             "has_dir_listing": has_dir_listing,
                         }
                     )
 
                 # Signal only: if it looks like an upload path but has no proof in body
-                elif (is_candidate or url in probe_urls) and resp.status in {
+                elif (is_candidate or url in probe_urls) and resp.status in {  # type: ignore[union-attr]
                     200,
                     401,
                     403,
@@ -186,10 +186,10 @@ class UploadProbeStage(Stage):
                         confidence=0.3,
                         source="upload-probe",
                         tags=tags,
-                        evidence={"status_code": resp.status},
+                        evidence={"status_code": resp.status},  # type: ignore[union-attr]
                     )
                     artifacts.append(
-                        {"url": url, "status": resp.status, "proof": False}
+                        {"url": url, "status": resp.status, "proof": False}  # type: ignore[union-attr]
                     )
 
         if artifacts:

@@ -234,17 +234,17 @@ class PipelineProgress:
             elements.append(header)
 
         # Progress bars
-        elements.append(self._progress)
+        elements.append(self._progress)  # type: ignore[arg-type]
 
         # Stages table
         if self.show_stages and self.stages:
-            elements.append(self._create_stages_table())
+            elements.append(self._create_stages_table())  # type: ignore[arg-type]
 
         # Stats
         if self.show_stats:
-            elements.append(self._create_stats_panel())
+            elements.append(self._create_stats_panel())  # type: ignore[arg-type]
 
-        return Panel(
+        return Panel(  # type: ignore[return-value]
             Group(*elements),
             title=f"🔍 {self.title}",
             border_style="cyan",

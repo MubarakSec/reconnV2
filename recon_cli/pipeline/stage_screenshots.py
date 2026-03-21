@@ -87,7 +87,7 @@ class ScreenshotStage(Stage):
                 try:
                     browser_context = browser.new_context(record_har_path=str(har_path))
                     page = browser_context.new_page()
-                    page.goto(url, timeout=15000, wait_until="networkidle")
+                    page.goto(url, timeout=15000, wait_until="networkidle")  # type: ignore[arg-type]
                     page.screenshot(path=str(screenshot_path), full_page=True)
                     html_content = page.content()
                     html_path.write_text(html_content, encoding="utf-8")
@@ -200,7 +200,7 @@ class ScreenshotStage(Stage):
                     "reason": f"score={score} source={entry.get('source')}",
                 }
             )
-        urls.sort(key=lambda item: item.get("score", 0), reverse=True)
+        urls.sort(key=lambda item: item.get("score", 0), reverse=True)  # type: ignore[arg-type, return-value]
         return urls[:limit]
 
     def _classify_portal(

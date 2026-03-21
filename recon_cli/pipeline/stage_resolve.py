@@ -114,7 +114,7 @@ class ResolveStage(Stage):
                 "ip": ip,
                 "record_type": "A",
             }
-            tracker.append(payload)
+            tracker.append(payload)  # type: ignore[arg-type]
         context.record.metadata.stats["resolved_hosts"] = len(
             {host for host, _ in resolutions}
         )

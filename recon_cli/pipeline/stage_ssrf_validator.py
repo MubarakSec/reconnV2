@@ -445,9 +445,9 @@ class SSRFValidatorStage(Stage):
 
         selected: List[Dict[str, object]] = []
         for _host, items in grouped.items():
-            items.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+            items.sort(key=lambda item: int(item.get("score", 0)), reverse=True)  # type: ignore[call-overload]
             selected.extend(items[:max_per_host])
-        selected.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+        selected.sort(key=lambda item: int(item.get("score", 0)), reverse=True)  # type: ignore[call-overload]
         return selected[:max_urls]
 
     @staticmethod

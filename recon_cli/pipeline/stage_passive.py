@@ -351,7 +351,7 @@ class PassiveEnumerationStage(Stage):
                                 "url": url,
                                 "hostname": hostname,
                             }
-                            tracker.append(payload)
+                            tracker.append(payload)  # type: ignore[arg-type]
                             url_added += 1
                             out_handle.write(url + "\n")
                             wrote_any = True
@@ -416,7 +416,7 @@ class PassiveEnumerationStage(Stage):
                             "url": url,
                             "hostname": hostname,
                         }
-                        tracker.append(payload)
+                        tracker.append(payload)  # type: ignore[arg-type]
                         url_added += 1
                         out_handle.write(url + "\n")
                         wrote_any = True

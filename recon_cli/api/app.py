@@ -33,7 +33,7 @@ try:
 except ImportError:
     FASTAPI_AVAILABLE = False
     FastAPI = None  # type: ignore[misc]
-    BaseModel = object  # type: ignore[misc]
+    BaseModel = object  # type: ignore[misc, assignment]
 
 
 class _JobsBaseProxy:

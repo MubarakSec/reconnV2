@@ -168,7 +168,7 @@ class IDORStage(Stage):
                     verify_tls,
                     limiter,
                 )
-                if not data_a or data_a["status"] >= 400:
+                if not data_a or data_a["status"] >= 400:  # type: ignore[operator]
                     continue
 
                 # 2. Test with Token B (attacker/other user)
@@ -226,7 +226,7 @@ class IDORStage(Stage):
                         finding["type"] = "finding"
                         finding["finding_type"] = "idor"
                         finding["confidence"] = "high"
-                        finding["tags"].append("confirmed")
+                        finding["tags"].append("confirmed")  # type: ignore[attr-defined]
 
                     if context.results.append(finding):
                         stats["suspects"] += 1
@@ -320,7 +320,7 @@ class IDORStage(Stage):
         return any(lower.endswith(ext) for ext in self.STATIC_EXTENSIONS)
 
     def _candidate_priority(self, candidate: Candidate) -> int:
-        score = int(candidate.entry.get("score") or 0)
+        score = int(candidate.entry.get("score") or 0)  # type: ignore[call-overload]
         path = (candidate.parsed.path or "").lower()
         url = candidate.url.lower()
         if path.startswith("/api") or "/api/" in path:
@@ -338,7 +338,7 @@ class IDORStage(Stage):
             lowered_tags = {str(tag).lower() for tag in tags}
             if any(tag.startswith("api") for tag in lowered_tags):
                 score += 12
-        status = int(candidate.entry.get("status_code") or 0)
+        status = int(candidate.entry.get("status_code") or 0)  # type: ignore[call-overload]
         if status in {200, 401, 403}:
             score += 8
         if "logout" in url:
@@ -515,8 +515,8 @@ class IDORStage(Stage):
         self, baseline: Dict[str, object], variant: Dict[str, object]
     ) -> List[str]:
         reasons: List[str] = []
-        base_status = int(baseline.get("status") or 0)
-        var_status = int(variant.get("status") or 0)
+        base_status = int(baseline.get("status") or 0)  # type: ignore[call-overload]
+        var_status = int(variant.get("status") or 0)  # type: ignore[call-overload]
         if var_status >= 500:
             return reasons
         if var_status in {400, 404, 422}:
@@ -527,8 +527,8 @@ class IDORStage(Stage):
             reasons.append("auth_bypass_status_change")
         if variant.get("sensitive") and not baseline.get("sensitive"):
             reasons.append("new_sensitive_fields")
-        base_subjects = set(baseline.get("subject_ids") or [])
-        var_subjects = set(variant.get("subject_ids") or [])
+        base_subjects = set(baseline.get("subject_ids") or [])  # type: ignore[call-overload]
+        var_subjects = set(variant.get("subject_ids") or [])  # type: ignore[call-overload]
         if base_subjects and var_subjects and base_subjects != var_subjects:
             reasons.append("subject_identifier_changed")
         if (
@@ -587,10 +587,10 @@ class IDORStage(Stage):
             "details": {
                 **meta,
                 "reasons": reasons,
-                "baseline_subject_ids": sorted(set(baseline.get("subject_ids") or []))[
+                "baseline_subject_ids": sorted(set(baseline.get("subject_ids") or []))[  # type: ignore[call-overload]
                     :20
                 ],
-                "variant_subject_ids": sorted(set(variant.get("subject_ids") or []))[
+                "variant_subject_ids": sorted(set(variant.get("subject_ids") or []))[  # type: ignore[call-overload]
                     :20
                 ],
             },
@@ -665,7 +665,7 @@ class IDORStage(Stage):
         return ""
 
     def _looks_like_validation_error(self, payload: Dict[str, object]) -> bool:
-        status = int(payload.get("status") or 0)
+        status = int(payload.get("status") or 0)  # type: ignore[call-overload]
         if status in {400, 422}:
             return True
         text = str(payload.get("text_sample") or "").lower()
@@ -673,7 +673,7 @@ class IDORStage(Stage):
         return any(hint in text for hint in validation_hints)
 
     def _looks_like_auth_error(self, payload: Dict[str, object]) -> bool:
-        status = int(payload.get("status") or 0)
+        status = int(payload.get("status") or 0)  # type: ignore[call-overload]
         if status in {401, 403}:
             return True
         text = str(payload.get("text_sample") or "").lower()

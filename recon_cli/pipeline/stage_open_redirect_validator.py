@@ -79,7 +79,7 @@ class OpenRedirectValidatorStage(Stage):
             validated = False
             for payload in payloads:
                 attempted += 1
-                test_url = self._inject_param(url, param, payload)
+                test_url = self._inject_param(url, param, payload)  # type: ignore[arg-type]
                 if not context.url_allowed(test_url):
                     skipped += 1
                     continue
@@ -122,7 +122,7 @@ class OpenRedirectValidatorStage(Stage):
                     limiter.on_response(test_url, status_code)
 
                 if status_code in self.REDIRECT_STATUS and self._is_external_redirect(
-                    url, location, payload
+                    url, location, payload  # type: ignore[arg-type]
                 ):
                     signal_id = context.emit_signal(
                         "open_redirect_confirmed",
@@ -150,7 +150,7 @@ class OpenRedirectValidatorStage(Stage):
                         "status_code": status_code,
                         "tags": ["redirect", "confirmed", "validator:open-redirect"],
                         "confidence_label": "verified",
-                        "score": max(85, int(candidate.get("score", 0) or 0)),
+                        "score": max(85, int(candidate.get("score", 0) or 0)),  # type: ignore[call-overload]
                         "signal_id": signal_id or None,
                     }
                     if context.results.append(finding):
@@ -234,9 +234,9 @@ class OpenRedirectValidatorStage(Stage):
 
         selected: List[Dict[str, object]] = []
         for _host, items in grouped.items():
-            items.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+            items.sort(key=lambda item: int(item.get("score", 0)), reverse=True)  # type: ignore[call-overload]
             selected.extend(items[:max_per_host])
-        selected.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+        selected.sort(key=lambda item: int(item.get("score", 0)), reverse=True)  # type: ignore[call-overload]
         return selected[:max_urls]
 
     @staticmethod

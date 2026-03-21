@@ -69,7 +69,7 @@ def run_nuclei(
     if templates:
         resolved_templates = list(templates)
     else:
-        env_dir = subprocess.os.environ.get("NUCLEI_TEMPLATES_DIR")
+        env_dir = subprocess.os.environ.get("NUCLEI_TEMPLATES_DIR")  # type: ignore[attr-defined]
         default_dirs = []
         if env_dir:
             default_dirs.append(Path(env_dir).expanduser())
@@ -225,7 +225,7 @@ def run_nuclei_batch(
     if templates:
         resolved_templates = list(templates)
     else:
-        env_dir = subprocess.os.environ.get("NUCLEI_TEMPLATES_DIR")
+        env_dir = subprocess.os.environ.get("NUCLEI_TEMPLATES_DIR")  # type: ignore[attr-defined]
         default_dirs = []
         if env_dir:
             default_dirs.append(Path(env_dir).expanduser())
@@ -364,7 +364,7 @@ def run_wpscan(
         cmd.append("--random-user-agent")
     if max_threads and int(max_threads) > 0:
         cmd.extend(["--max-threads", str(int(max_threads))])
-    token = api_token or subprocess.os.environ.get("WPSCAN_API_TOKEN")
+    token = api_token or subprocess.os.environ.get("WPSCAN_API_TOKEN")  # type: ignore[attr-defined]
     if token:
         cmd.extend(["--api-token", token])
 

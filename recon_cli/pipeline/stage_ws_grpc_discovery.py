@@ -104,7 +104,7 @@ class WsGrpcDiscoveryStage(Stage):
                 "tags": tags,
                 "score": 30 if signal_type == "ws_detected" else 15,
             }
-            context.results.append(payload)
+            context.results.append(payload)  # type: ignore[arg-type]
             context.emit_signal(
                 signal_type,
                 "url",
@@ -140,11 +140,11 @@ class WsGrpcDiscoveryStage(Stage):
     def _collect_ws_candidates(self, context: PipelineContext) -> List[str]:
         urls: List[str] = []
         js_ws_endpoints = context.get_data("js_ws_endpoints", []) or []
-        for url in js_ws_endpoints:
+        for url in js_ws_endpoints:  # type: ignore[attr-defined]
             if isinstance(url, str) and url:
                 urls.append(self._normalize_ws_url(url))
         js_endpoints = context.get_data("js_endpoints", []) or []
-        for url in js_endpoints:
+        for url in js_endpoints:  # type: ignore[attr-defined]
             if isinstance(url, str) and (
                 "ws://" in url or "wss://" in url or self._has_ws_hint(url)
             ):

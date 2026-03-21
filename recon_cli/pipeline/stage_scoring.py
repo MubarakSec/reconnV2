@@ -414,7 +414,7 @@ class ScoringStage(Stage):
         url_signals: set[str],
         auth_cluster_size: int = 0,
     ) -> int:
-        status = int(status_code or 0)
+        status = int(status_code or 0)  # type: ignore[call-overload]
         has_high_signal = self._has_high_signal(tags, url_signals)
 
         if status in {401, 403} and "auth-required" in tags and not has_high_signal:

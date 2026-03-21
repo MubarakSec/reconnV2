@@ -119,7 +119,7 @@ class FuzzStage(Stage):
                 context,
                 host,
                 wordlist_path,
-                path_words,
+                path_words,  # type: ignore[arg-type]
                 max_custom=fuzz_custom_max_words,
                 max_combined=fuzz_combined_max_words,
             )
@@ -152,12 +152,12 @@ class FuzzStage(Stage):
 
             if enable_param_fuzz:
                 if param_wordlist_words:
-                    param_words.update(param_wordlist_words)
+                    param_words.update(param_wordlist_words)  # type: ignore[attr-defined]
             if enable_param_fuzz and param_words:
                 param_wordlist = self._write_wordlist(
                     context,
                     f"ffuf_{host}_params.txt",
-                    param_words,
+                    param_words,  # type: ignore[arg-type]
                     limit=fuzz_param_max_words,
                 )
                 if param_wordlist and param_wordlist.exists():
@@ -251,11 +251,11 @@ class FuzzStage(Stage):
                 if not host:
                     continue
                 score = int(entry.get("score", 0))
-                if score > int(metadata[host].get("base_score", -1)):
+                if score > int(metadata[host].get("base_score", -1)):  # type: ignore[call-overload]
                     metadata[host]["base_url"] = url_value
                     metadata[host]["base_score"] = score
                 self._add_path_words(
-                    metadata[host]["path_words"], urlparse(url_value).path
+                    metadata[host]["path_words"], urlparse(url_value).path  # type: ignore[arg-type]
                 )
             elif etype == "form":
                 action = entry.get("action") or entry.get("url")
@@ -265,7 +265,7 @@ class FuzzStage(Stage):
                 if not host:
                     continue
                 self._add_path_words(
-                    metadata[host]["path_words"], urlparse(action).path
+                    metadata[host]["path_words"], urlparse(action).path  # type: ignore[arg-type]
                 )
             elif etype == "parameter":
                 name = entry.get("name")
@@ -279,15 +279,15 @@ class FuzzStage(Stage):
                         continue
                     host = urlparse(example).hostname
                     if host:
-                        metadata[host]["param_words"].add(str(name))
+                        metadata[host]["param_words"].add(str(name))  # type: ignore[attr-defined]
         js_endpoints = context.get_data("js_endpoints", []) or []
-        for endpoint in js_endpoints:
+        for endpoint in js_endpoints:  # type: ignore[attr-defined]
             if not isinstance(endpoint, str) or not endpoint:
                 continue
             host = urlparse(endpoint).hostname
             if not host:
                 continue
-            self._add_path_words(metadata[host]["path_words"], urlparse(endpoint).path)
+            self._add_path_words(metadata[host]["path_words"], urlparse(endpoint).path)  # type: ignore[arg-type]
         return metadata
 
     @staticmethod

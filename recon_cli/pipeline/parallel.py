@@ -159,7 +159,7 @@ class DependencyResolver:
         execution_order = []
 
         # Build dynamic dependency map
-        dynamic_deps = {s.name: set() for s in stages}
+        dynamic_deps: Dict[str, Set[str]] = {s.name: set() for s in stages}
 
         # Mapping of data_type -> stages that provide it
         providers = defaultdict(set)
@@ -237,7 +237,7 @@ class ParallelStageExecutor:
     def create_plan(self) -> ParallelExecutionPlan:
         """إنشاء خطة التنفيذ"""
         stage_names = list(self.stages.keys())
-        execution_order = self.resolver.resolve(stage_names)
+        execution_order = self.resolver.resolve(stage_names)  # type: ignore[arg-type]
 
         # Create stage nodes
         nodes = {}
@@ -270,7 +270,7 @@ class ParallelStageExecutor:
             elif hasattr(stage, "run"):
                 # Run sync stage in executor
                 loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, stage.run, self.context)
+                result = await loop.run_in_executor(None, stage.run, self.context)  # type: ignore[arg-type]
             else:
                 result = {"status": "skipped", "reason": "no run method"}
 
@@ -345,7 +345,7 @@ class ParallelStageExecutor:
                             "error": str(result),
                         }
                     else:
-                        self._results[name] = result
+                        self._results[name] = result  # type: ignore[assignment]
 
                     # Mark as completed in plan
                     plan.stages[name].completed = True

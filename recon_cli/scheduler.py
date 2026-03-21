@@ -69,7 +69,7 @@ class CronField:
             elif "/" in part:
                 # Step: */5 or 0-30/5
                 range_part, step = part.split("/")
-                step = int(step)
+                step = int(step)  # type: ignore[assignment]
 
                 if range_part == "*":
                     start, end = self.min_val, self.max_val

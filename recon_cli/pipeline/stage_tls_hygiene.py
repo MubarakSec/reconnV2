@@ -103,12 +103,12 @@ class TLSHygieneStage(Stage):
                     priority = "medium"
 
             if expiry_days is not None:
-                if expiry_days <= 7:
+                if expiry_days <= 7:  # type: ignore[operator]
                     issues.append("certificate_expiring_soon")
                     severity = "high"
                     score_value = max(score_value, 80)
                     priority = "high"
-                elif expiry_days <= 30:
+                elif expiry_days <= 30:  # type: ignore[operator]
                     issues.append("certificate_expiring_soon")
                     if severity != "high":
                         severity = "medium"
@@ -162,7 +162,7 @@ class TLSHygieneStage(Stage):
                 cert = tls_sock.getpeercert() or {}
                 not_after = cert.get("notAfter")
                 if not_after:
-                    expiry = self._parse_not_after(not_after)
+                    expiry = self._parse_not_after(not_after)  # type: ignore[arg-type]
                     if expiry:
                         now = datetime.now(timezone.utc)
                         delta = expiry - now

@@ -166,7 +166,7 @@ class GraphQLReconStage(Stage):
         urls_seen: set[str] = set()
 
         js_graphql_endpoints = context.get_data("js_graphql_endpoints", []) or []
-        for url in js_graphql_endpoints:
+        for url in js_graphql_endpoints:  # type: ignore[attr-defined]
             if isinstance(url, str) and url and url not in urls_seen:
                 candidates.append(url)
                 urls_seen.add(url)
@@ -184,7 +184,7 @@ class GraphQLReconStage(Stage):
                     urls_seen.add(url)
 
         js_endpoints = context.get_data("js_endpoints", []) or []
-        for url in js_endpoints:
+        for url in js_endpoints:  # type: ignore[attr-defined]
             if (
                 isinstance(url, str)
                 and "graphql" in url.lower()
@@ -228,7 +228,7 @@ class GraphQLReconStage(Stage):
     @staticmethod
     def _has_introspection_schema(data: Dict[str, object]) -> bool:
         schema = (
-            data.get("data", {}).get("__schema")
+            data.get("data", {}).get("__schema")  # type: ignore[attr-defined]
             if isinstance(data.get("data"), dict)
             else None
         )

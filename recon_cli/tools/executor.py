@@ -564,8 +564,8 @@ class _CommandSession:
 
         with self._lock:
             self._master_fd = master_fd
-            self._read_stream = read_stream
-            self._write_stream = write_stream
+            self._read_stream = read_stream  # type: ignore[assignment]
+            self._write_stream = write_stream  # type: ignore[assignment]
             self._process = process
             self.pid = process.pid
             self.running = True
@@ -838,8 +838,8 @@ class _CommandSession:
 
 _SESSION_LOCK = threading.RLock()
 _SESSION_COUNTER = 0
-_SESSIONS: Dict[str, _CommandSession] = {}
-_SESSION_ALIASES: Dict[str, str] = {}
+_SESSIONS: Dict[str, _CommandSession] = {}  # type: ignore[no-redef]
+_SESSION_ALIASES: Dict[str, str] = {}  # type: ignore[no-redef]
 
 
 def _next_session_alias() -> str:

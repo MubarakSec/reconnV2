@@ -993,14 +993,14 @@ class AlertManager:
             webhook_url = config.get("webhook_url", "")
             if not webhook_url:
                 return False
-            ch = SlackChannel(webhook_url=webhook_url)
+            ch = SlackChannel(webhook_url=webhook_url)  # type: ignore[assignment]
             return await ch.send(test_alert)
 
         elif channel == "discord":
             webhook_url = config.get("webhook_url", "")
             if not webhook_url:
                 return False
-            ch = DiscordChannel(webhook_url=webhook_url)
+            ch = DiscordChannel(webhook_url=webhook_url)  # type: ignore[assignment]
             return await ch.send(test_alert)
 
         elif channel == "email":
@@ -1012,7 +1012,7 @@ class AlertManager:
             to_addr = config.get("to", "")
             if not smtp_host or not to_addr:
                 return False
-            ch = EmailChannel(
+            ch = EmailChannel(  # type: ignore[assignment]
                 smtp_host=smtp_host,
                 smtp_port=smtp_port,
                 username=smtp_user,
@@ -1026,7 +1026,7 @@ class AlertManager:
             url = config.get("url", "")
             if not url:
                 return False
-            ch = WebhookChannel(url=url)
+            ch = WebhookChannel(url=url)  # type: ignore[assignment]
             return await ch.send(test_alert)
 
         return False

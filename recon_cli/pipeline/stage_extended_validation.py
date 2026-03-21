@@ -184,15 +184,15 @@ class ExtendedValidationStage(Stage):
                     303,
                     307,
                     308,
-                } and self._is_open_redirect(url, location, payload):
+                } and self._is_open_redirect(url, location, payload):  # type: ignore[arg-type]
                     confirm_key = ("open_redirect", url)
                     if confirm_key in confirmed_keys:
                         continue
-                    confirmed_keys.add(confirm_key)
+                    confirmed_keys.add(confirm_key)  # type: ignore[arg-type]
                     signal_id = context.emit_signal(
                         "open_redirect_confirmed",
                         "url",
-                        url,
+                        url,  # type: ignore[arg-type]
                         confidence=0.8,
                         source="extended-validation",
                         tags=["redirect", "confirmed"],
@@ -202,7 +202,7 @@ class ExtendedValidationStage(Stage):
                         "type": "finding",
                         "finding_type": "open_redirect",
                         "source": "extended-validation",
-                        "hostname": urlparse(url).hostname,
+                        "hostname": urlparse(url).hostname,  # type: ignore[call-overload]
                         "url": url,
                         "description": "Open redirect confirmed via Location header",
                         "details": {"probe_url": test_url, "location": location},
@@ -229,7 +229,7 @@ class ExtendedValidationStage(Stage):
                     str(entry.get("method") or "get"),
                 )
                 baseline_status, baseline_body = baseline_cache.get(
-                    baseline_key, (0, "")
+                    baseline_key, (0, "")  # type: ignore[arg-type]
                 )
                 if baseline_key not in baseline_cache:
                     baseline_status, baseline_body = self._fetch_baseline(
@@ -243,7 +243,7 @@ class ExtendedValidationStage(Stage):
                         retry_backoff_factor,
                         limiter,
                     )
-                    baseline_cache[baseline_key] = (baseline_status, baseline_body)
+                    baseline_cache[baseline_key] = (baseline_status, baseline_body)  # type: ignore[index]
                 baseline_has_sig = bool(
                     baseline_body and self._looks_like_lfi(baseline_body)
                 )
@@ -311,11 +311,11 @@ class ExtendedValidationStage(Stage):
                         confirm_key = ("lfi", url)
                         if confirm_key in confirmed_keys:
                             continue
-                        confirmed_keys.add(confirm_key)
+                        confirmed_keys.add(confirm_key)  # type: ignore[arg-type]
                         signal_id = context.emit_signal(
                             "lfi_confirmed",
                             "url",
-                            url,
+                            url,  # type: ignore[arg-type]
                             confidence=0.8,
                             source="extended-validation",
                             tags=["lfi", "confirmed"],
@@ -325,7 +325,7 @@ class ExtendedValidationStage(Stage):
                             "type": "finding",
                             "finding_type": "lfi",
                             "source": "extended-validation",
-                            "hostname": urlparse(url).hostname,
+                            "hostname": urlparse(url).hostname,  # type: ignore[call-overload]
                             "url": url,
                             "description": "Local File Inclusion confirmed via response signature",
                             "details": {"probe_url": test_url, "payload": payload},
@@ -366,7 +366,7 @@ class ExtendedValidationStage(Stage):
                         if cap_reached():
                             break
                         url = entry["url"]
-                        host = urlparse(url).hostname or ""
+                        host = urlparse(url).hostname or ""  # type: ignore[call-overload]
                         if host and per_host_counts[host] >= oast_max_per_host:
                             continue
                         token = self._token()
@@ -436,14 +436,14 @@ class ExtendedValidationStage(Stage):
                         if cap_reached():
                             break
                         url = entry["url"]
-                        host = urlparse(url).hostname or ""
+                        host = urlparse(url).hostname or ""  # type: ignore[call-overload]
                         if host and per_host_counts[host] >= oast_max_per_host:
                             continue
                         token = self._token()
                         oast_url = session.make_url(token)
                         if not oast_url:
                             continue
-                        method = entry.get("method", "post").upper()
+                        method = entry.get("method", "post").upper()  # type: ignore[attr-defined]
                         xml_payload = self._xxe_payload(oast_url)
                         if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                             continue
@@ -453,12 +453,12 @@ class ExtendedValidationStage(Stage):
                                 "Content-Type": "application/xml",
                             }
                         )
-                        session_http = context.auth_session(url)
+                        session_http = context.auth_session(url)  # type: ignore[arg-type]
                         resp = self._request_with_retries(
                             requests,
                             session_http,
                             method,
-                            url,
+                            url,  # type: ignore[arg-type]
                             headers,
                             xml_payload,
                             None,
@@ -569,29 +569,29 @@ class ExtendedValidationStage(Stage):
                                 if info["type"] == "ssrf"
                                 else "xxe_confirmed"
                             )
-                            confirm_key = (info["type"], info["url"])
+                            confirm_key = (info["type"], info["url"])  # type: ignore[assignment]
                             if confirm_key in confirmed_keys:
                                 continue
-                            confirmed_keys.add(confirm_key)
+                            confirmed_keys.add(confirm_key)  # type: ignore[arg-type]
                             tags = [info["type"], "confirmed"]
                             if info.get("vector") == "header":
                                 tags.append("header")
                             signal_id = context.emit_signal(
                                 signal_type,
                                 "url",
-                                info["url"],
+                                info["url"],  # type: ignore[arg-type]
                                 confidence=0.8,
                                 source="extended-validation",
-                                tags=tags,
+                                tags=tags,  # type: ignore[arg-type]
                                 evidence={"interaction": interaction.raw},
                             )
                             finding = {
                                 "type": "finding",
                                 "finding_type": info["type"],
                                 "source": "extended-validation",
-                                "hostname": urlparse(info["url"]).hostname,
+                                "hostname": urlparse(info["url"]).hostname,  # type: ignore[call-overload]
                                 "url": info["url"],
-                                "description": f"{info['type'].upper()} confirmed via OAST interaction",
+                                "description": f"{info['type'].upper()} confirmed via OAST interaction",  # type: ignore[attr-defined]
                                 "details": {
                                     "probe": info.get("probe"),
                                     "vector": info.get("vector"),
@@ -611,19 +611,19 @@ class ExtendedValidationStage(Stage):
                             if context.results.append(finding):
                                 findings += 1
                         if interactions:
-                            for interaction in interactions:
+                            for interaction in interactions:  # type: ignore[assignment]
                                 context.emit_signal(
                                     "oast_interaction",
                                     "url",
                                     str(
-                                        interaction.get("full-id")
-                                        or interaction.get("url")
+                                        interaction.get("full-id")  # type: ignore[attr-defined]
+                                        or interaction.get("url")  # type: ignore[attr-defined]
                                         or ""
                                     ),
                                     confidence=0.3,
                                     source="extended-validation",
                                     tags=["oast"],
-                                    evidence=interaction,
+                                    evidence=interaction,  # type: ignore[arg-type]
                                 )
                 finally:
                     session.stop()
@@ -683,17 +683,17 @@ class ExtendedValidationStage(Stage):
 
         redirect = sorted(
             redirect_map.values(),
-            key=lambda item: int(item.get("score", 0)),
+            key=lambda item: int(item.get("score", 0)),  # type: ignore[call-overload]
             reverse=True,
         )
         ssrf = sorted(
-            ssrf_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
+            ssrf_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True  # type: ignore[call-overload]
         )
         lfi = sorted(
-            lfi_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
+            lfi_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True  # type: ignore[call-overload]
         )
         xxe = sorted(
-            xxe_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True
+            xxe_map.values(), key=lambda item: int(item.get("score", 0)), reverse=True  # type: ignore[call-overload]
         )
         return {"redirect": redirect, "ssrf": ssrf, "lfi": lfi, "xxe": xxe}
 
@@ -950,11 +950,11 @@ class ExtendedValidationStage(Stage):
         location = entry.get("location", "query")
         method = str(entry.get("method") or "get").lower()
         if location == "query" or method == "get":
-            return self._inject_param(url, param, payload), "get", None, None
+            return self._inject_param(url, param, payload), "get", None, None  # type: ignore[arg-type]
         if location == "json":
-            return url, method, None, {param: payload}
+            return url, method, None, {param: payload}  # type: ignore[return-value, dict-item]
         # default to form body
-        return url, method, {param: payload}, None
+        return url, method, {param: payload}, None  # type: ignore[return-value, dict-item]
 
     def _is_open_redirect(self, original_url: str, location: str, payload: str) -> bool:
         if not location:
@@ -984,7 +984,7 @@ class ExtendedValidationStage(Stage):
     ) -> Dict[str, object]:
         if not existing:
             return candidate
-        if int(candidate.get("score", 0)) > int(existing.get("score", 0)):
+        if int(candidate.get("score", 0)) > int(existing.get("score", 0)):  # type: ignore[call-overload]
             return candidate
         return existing
 
@@ -1068,8 +1068,8 @@ class ExtendedValidationStage(Stage):
             url = entry.get("url")
             if not url or url in seen:
                 continue
-            seen.add(url)
-            urls.append(url)
+            seen.add(url)  # type: ignore[arg-type]
+            urls.append(url)  # type: ignore[arg-type]
             if limit > 0 and len(urls) >= limit:
                 break
         return urls

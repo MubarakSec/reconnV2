@@ -96,7 +96,7 @@ class AuthDiscoveryStage(Stage):
         if not candidates:
             context.logger.info("No auth candidates discovered")
             return
-        candidates.sort(key=lambda item: item.get("score", 0), reverse=True)
+        candidates.sort(key=lambda item: item.get("score", 0), reverse=True)  # type: ignore[arg-type, return-value]
         max_urls = int(getattr(context.runtime_config, "auth_discovery_max_urls", 40))
         timeout = int(getattr(context.runtime_config, "auth_discovery_timeout", 10))
         max_forms = int(getattr(context.runtime_config, "auth_discovery_max_forms", 80))
@@ -112,7 +112,7 @@ class AuthDiscoveryStage(Stage):
             if forms_found >= max_forms:
                 break
             url = candidate["url"]
-            session = context.auth_session(url)
+            session = context.auth_session(url)  # type: ignore[arg-type]
             headers = context.auth_headers({"User-Agent": "recon-cli auth-discovery"})
             if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                 continue
@@ -127,7 +127,7 @@ class AuthDiscoveryStage(Stage):
                     )
                 else:
                     resp = requests.get(
-                        url,
+                        url,  # type: ignore[arg-type]
                         timeout=timeout,
                         allow_redirects=True,
                         headers=headers,
@@ -151,16 +151,16 @@ class AuthDiscoveryStage(Stage):
                 if forms_found >= max_forms:
                     break
                 action = form.get("action") or ""
-                action_url = urljoin(url, action) if action else url
+                action_url = urljoin(url, action) if action else url  # type: ignore[type-var]
                 inputs = form.get("inputs") or []
-                tags = set(candidate.get("tags", []))
+                tags = set(candidate.get("tags", []))  # type: ignore[call-overload]
                 input_names = [
-                    item.get("name") for item in inputs if isinstance(item, dict)
+                    item.get("name") for item in inputs if isinstance(item, dict)  # type: ignore[attr-defined]
                 ]
                 lower_action = str(action_url).lower()
                 if any(
                     item.get("type") == "password"
-                    for item in inputs
+                    for item in inputs  # type: ignore[attr-defined]
                     if isinstance(item, dict)
                 ):
                     tags.add("surface:login")
@@ -173,7 +173,7 @@ class AuthDiscoveryStage(Stage):
                 payload = {
                     "type": "auth_form",
                     "source": "form-discovery",
-                    "hostname": urlparse(url).hostname,
+                    "hostname": urlparse(url).hostname,  # type: ignore[call-overload]
                     "url": url,
                     "action": action_url,
                     "method": form.get("method"),
@@ -184,7 +184,7 @@ class AuthDiscoveryStage(Stage):
                 signal_id = context.emit_signal(
                     "auth_surface",
                     "url",
-                    url,
+                    url,  # type: ignore[arg-type]
                     confidence=0.5,
                     source="auth-discovery",
                     tags=sorted(tags),

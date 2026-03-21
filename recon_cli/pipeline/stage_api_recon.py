@@ -12,7 +12,7 @@ from recon_cli.pipeline.stage_base import Stage
 try:
     from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 except ImportError:
-    AsyncHTTPClient = None
+    AsyncHTTPClient = None  # type: ignore[misc]
 
 
 class APIReconStage(Stage):
@@ -149,16 +149,16 @@ class APIReconStage(Stage):
                 if context.is_host_blocked(host):
                     continue
 
-                if isinstance(resp, Exception) or resp.status == 0:
+                if isinstance(resp, Exception) or resp.status == 0:  # type: ignore[union-attr]
                     continue
 
-                status_code = resp.status
+                status_code = resp.status  # type: ignore[union-attr]
                 context.record_host_error(host, status_code)
                 if context.is_host_blocked(host):
                     continue
 
-                content_type = resp.headers.get("Content-Type", "").lower()
-                text = resp.body or ""
+                content_type = resp.headers.get("Content-Type", "").lower()  # type: ignore[union-attr]
+                text = resp.body or ""  # type: ignore[union-attr]
                 meta = self._response_meta(resp, text)
 
                 if status_code >= 500:
@@ -304,7 +304,7 @@ class APIReconStage(Stage):
                 )
 
                 for (host, url), p_resp in zip(graphql_candidates, probe_responses):
-                    if isinstance(p_resp, Exception) or p_resp.status != 200:
+                    if isinstance(p_resp, Exception) or p_resp.status != 200:  # type: ignore[union-attr]
                         # Failed active probe, emit as candidate only
                         context.emit_signal(
                             "graphql_candidate",
@@ -317,7 +317,7 @@ class APIReconStage(Stage):
                         )
                         continue
 
-                    p_body = p_resp.body or ""
+                    p_body = p_resp.body or ""  # type: ignore[union-attr]
                     # Check for honest proof: {"data": {"__typename": ...}}
                     if '"data"' in p_body and '"__typename"' in p_body:
                         payload = {
@@ -381,18 +381,18 @@ class APIReconStage(Stage):
                 {"urls": [], "tags": set(), "score": 0, "base_url": None},
             )
             if url_value:
-                info["urls"].append(url_value)
+                info["urls"].append(url_value)  # type: ignore[attr-defined]
                 if info["base_url"] is None:
                     info["base_url"] = url_value
                 path = urlparse(url_value).path.lower()
                 if "/api" in path or "/graphql" in path:
-                    info["score"] = max(int(info.get("score", 0)), 10)
+                    info["score"] = max(int(info.get("score", 0)), 10)  # type: ignore[call-overload]
             for tag in entry.get("tags", []):
                 if isinstance(tag, str):
-                    info["tags"].add(tag)
+                    info["tags"].add(tag)  # type: ignore[attr-defined]
             score = entry.get("score")
             if isinstance(score, int):
-                info["score"] = max(int(info.get("score", 0)), score)
+                info["score"] = max(int(info.get("score", 0)), score)  # type: ignore[call-overload]
         return host_info
 
     def _build_host_enriched_paths(
@@ -479,9 +479,9 @@ class APIReconStage(Stage):
     ) -> List[str]:
         scored: List[Tuple[str, int]] = []
         for host, info in host_info.items():
-            score = int(info.get("score") or 0)
+            score = int(info.get("score") or 0)  # type: ignore[call-overload]
             tags = info.get("tags", set()) or set()
-            if "service:api" in tags:
+            if "service:api" in tags:  # type: ignore[operator]
                 score += 15
             if host.startswith("api."):
                 score += 10

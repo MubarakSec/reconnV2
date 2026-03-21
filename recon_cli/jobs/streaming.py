@@ -230,7 +230,7 @@ class ResultWriter:
 
     def __enter__(self) -> "ResultWriter":
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = open(self.file_path, "a", encoding="utf-8")
+        self._file = open(self.file_path, "a", encoding="utf-8")  # type: ignore[assignment]
         return self
 
     def __exit__(self, *args) -> None:
@@ -254,7 +254,7 @@ class ResultWriter:
             return 0
 
         if not self._file:
-            self._file = open(self.file_path, "a", encoding="utf-8")
+            self._file = open(self.file_path, "a", encoding="utf-8")  # type: ignore[assignment]
 
         count = 0
         for result in self._buffer:

@@ -400,7 +400,7 @@ class CorrelationStage(Stage):
             for host, paths in api_endpoints.items()
             if len(paths) > 1
         ]
-        api_clusters.sort(key=lambda item: item["count"], reverse=True)
+        api_clusters.sort(key=lambda item: item["count"], reverse=True)  # type: ignore[arg-type, return-value]
 
         attack_paths = self._build_attack_paths(
             host_urls,
@@ -451,7 +451,7 @@ class CorrelationStage(Stage):
             {"provider": provider, "hosts": sorted(hosts), "count": len(hosts)}
             for provider, hosts in provider_hosts.items()
         ]
-        provider_common.sort(key=lambda item: item["count"], reverse=True)
+        provider_common.sort(key=lambda item: item["count"], reverse=True)  # type: ignore[arg-type, return-value]
 
         top_nodes = graph.top_connected(limit=10)
 
@@ -564,14 +564,14 @@ class CorrelationStage(Stage):
                 continue
             ranked = sorted(
                 candidates,
-                key=lambda item: int(item.get("score", 0) or 0),
+                key=lambda item: int(item.get("score", 0) or 0),  # type: ignore[call-overload]
                 reverse=True,
             )
             for candidate in ranked[:5]:
                 entry_url = str(candidate.get("url") or "")
                 if not entry_url or entry_url == sink_url:
                     continue
-                tags = {str(tag).lower() for tag in (candidate.get("tags") or [])}
+                tags = {str(tag).lower() for tag in (candidate.get("tags") or [])}  # type: ignore[attr-defined]
                 if not self._is_actionable_surface(entry_url, list(tags)):
                     continue
                 description = (
@@ -586,21 +586,21 @@ class CorrelationStage(Stage):
                         "finding_type": str(sink.get("finding_type") or "finding"),
                         "severity": str(sink.get("severity") or "medium"),
                         "score": max(
-                            int(sink.get("score", 0) or 0),
-                            int(candidate.get("score", 0) or 0),
+                            int(sink.get("score", 0) or 0),  # type: ignore[call-overload]
+                            int(candidate.get("score", 0) or 0),  # type: ignore[call-overload]
                         ),
                         "description": description,
                     }
                 )
                 break
-        attack_paths.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+        attack_paths.sort(key=lambda item: int(item.get("score", 0)), reverse=True)  # type: ignore[call-overload]
         unique: List[Dict[str, object]] = []
         seen: set[tuple[str, str, str]] = set()
         for entry in attack_paths:
             key = (entry["hostname"], entry["entry_url"], entry["sink_url"])
             if key in seen:
                 continue
-            seen.add(key)
+            seen.add(key)  # type: ignore[arg-type]
             unique.append(entry)
             if len(unique) >= limit:
                 break

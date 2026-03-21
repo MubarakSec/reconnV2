@@ -54,7 +54,7 @@ class ParamMiningStage(Stage):
                                 str(url) if url else ""
                             )
         js_endpoints = context.get_data("js_endpoints", []) or []
-        for url in js_endpoints:
+        for url in js_endpoints:  # type: ignore[attr-defined]
             if url and "?" in url:
                 candidates.append(url)
         js_param_hints = context.get_data("js_param_hints", []) or []
@@ -159,7 +159,7 @@ class ParamMiningStage(Stage):
         stats["urls"] = len(candidates)
         stats["mutation_params"] = len(mutation_catalog)
         stats["mutation_values"] = sum(
-            len(item.get("values", [])) for item in mutation_catalog.values()
+            len(item.get("values", [])) for item in mutation_catalog.values()  # type: ignore[misc, arg-type]
         )
         context.manager.update_metadata(context.record)
 

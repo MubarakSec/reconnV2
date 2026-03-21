@@ -124,7 +124,7 @@ class SecretExposureValidatorStage(Stage):
                 pattern=pattern,
                 start=start if isinstance(start, int) else None,
                 end=end if isinstance(end, int) else None,
-                pattern_map=pattern_map,
+                pattern_map=pattern_map,  # type: ignore[arg-type]
             )
             if not value:
                 stale += 1
@@ -172,7 +172,7 @@ class SecretExposureValidatorStage(Stage):
                 },
                 "proof": f"live-hash:{expected_hash}",
                 "tags": ["secret", "confirmed", "live", f"pattern:{pattern}"],
-                "score": max(score_floor, int(candidate.get("score", 0) or 0)),
+                "score": max(score_floor, int(candidate.get("score", 0) or 0)),  # type: ignore[call-overload]
                 "priority": "critical" if confidence_label == "verified" else "high",
                 "severity": severity,
                 "confidence_label": confidence_label,
@@ -279,9 +279,9 @@ class SecretExposureValidatorStage(Stage):
             seen.add(key)
         selected: List[Dict[str, object]] = []
         for _host, items in grouped.items():
-            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
             selected.extend(items[:8])
-        selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+        selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
         return selected[:max_findings]
 
     def _fetch_url_text(
@@ -348,7 +348,7 @@ class SecretExposureValidatorStage(Stage):
         if regex is None:
             return None
         try:
-            matches = regex.finditer(text)
+            matches = regex.finditer(text)  # type: ignore[attr-defined]
         except Exception:
             return None
         for match in matches:

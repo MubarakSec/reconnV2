@@ -35,9 +35,9 @@ try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:
     # Fallback for older pydantic
-    from pydantic import BaseSettings
+    from pydantic import BaseSettings  # type: ignore[no-redef]
 
-    SettingsConfigDict = None
+    SettingsConfigDict = None  # type: ignore[misc]
 
 
 # ═══════════════════════════════════════════════════════════

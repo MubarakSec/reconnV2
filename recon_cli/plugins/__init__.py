@@ -201,7 +201,7 @@ def _annotation_from_schema(schema: Dict[str, Any], model_name: str) -> Any:
         return bool
     if schema_type == "array":
         item_schema = schema.get("items", {"type": "string"})
-        return list[_annotation_from_schema(item_schema, f"{model_name}Item")]
+        return list[_annotation_from_schema(item_schema, f"{model_name}Item")]  # type: ignore[misc]
     if schema_type == "object":
         properties = schema.get("properties", {})
         if not properties:
@@ -255,7 +255,7 @@ def _model_from_object_schema(
         )
         for field_name, field_schema in properties.items()
     }
-    return create_model(
+    return create_model(  # type: ignore[call-overload]
         model_name,
         __config__=ConfigDict(
             extra="allow" if normalized.get("additionalProperties") else "forbid"

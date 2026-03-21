@@ -67,7 +67,7 @@ class HTMLFormMiningStage(Stage):
                     self.forms.append(self._current)
                     self._current = None
 
-        params = defaultdict(int)
+        params: Dict[str, int] = defaultdict(int)
         examples: Dict[str, List[str]] = defaultdict(list)
         forms_saved = 0
         artifacts: List[Dict[str, object]] = []
@@ -118,7 +118,7 @@ class HTMLFormMiningStage(Stage):
                     break
                 inputs = form.get("inputs") or []
                 input_names = []
-                for item in inputs:
+                for item in inputs:  # type: ignore[attr-defined]
                     if not isinstance(item, dict):
                         continue
                     name = item.get("name")

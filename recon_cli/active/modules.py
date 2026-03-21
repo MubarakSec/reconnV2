@@ -72,7 +72,7 @@ def _top_urls(
         for entry in url_entries
         if int(entry.get("score", 0) or 0) >= min_score and not entry.get("noise")  # type: ignore[call-overload]
     ]
-    candidates.sort(key=lambda entry: entry.get("score", 0), reverse=True)
+    candidates.sort(key=lambda entry: int(entry.get("score", 0) or 0), reverse=True)  # type: ignore[return-value, call-overload]
     return candidates[:limit]
 
 

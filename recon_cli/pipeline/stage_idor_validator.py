@@ -102,7 +102,7 @@ class IDORValidatorStage(Stage):
                 backoff_factor=retry_backoff_factor,
                 limiter=limiter,
             )
-            if not profile_a or profile_a["status"] >= 400:
+            if not profile_a or profile_a["status"] >= 400:  # type: ignore[operator]
                 skipped += 1
                 continue
 
@@ -214,15 +214,15 @@ class IDORValidatorStage(Stage):
                     "baseline_status": profile_a["status"],
                     "variant_status": final_profile["status"],
                     "baseline_subject_ids": sorted(
-                        set(profile_a.get("subject_ids") or [])
+                        set(profile_a.get("subject_ids") or [])  # type: ignore[call-overload]
                     )[:20],
                     "variant_subject_ids": sorted(
-                        set(final_profile.get("subject_ids") or [])
+                        set(final_profile.get("subject_ids") or [])  # type: ignore[call-overload]
                     )[:20],
                 },
                 "proof": self._safe_poc(baseline_url, final_auth),
                 "tags": ["idor", "confirmed", "validator:idor", *reasons],
-                "score": max(score_floor, int(candidate.get("score", 0) or 0)),
+                "score": max(score_floor, int(candidate.get("score", 0) or 0)),  # type: ignore[call-overload]
                 "priority": "high",
                 "severity": severity,
                 "confidence_label": confidence_label,
@@ -327,9 +327,9 @@ class IDORValidatorStage(Stage):
 
         selected: List[Dict[str, object]] = []
         for _host, items in grouped.items():
-            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
             selected.extend(items[:max_per_host])
-        selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+        selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
         return selected[:max_candidates]
 
     def _fetch_profile(

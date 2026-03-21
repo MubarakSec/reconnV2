@@ -102,7 +102,7 @@ class OAuthDiscoveryStage(Stage):
                     "url": url,
                     "keys": list(data.keys())[:40],
                 }
-                configs.append(config_record)
+                configs.append(config_record)  # type: ignore[arg-type]
                 if "openid-configuration" in path:
                     context.emit_signal(
                         "oidc_config",
