@@ -314,7 +314,7 @@ class HybridCache:
 
     def __init__(self, cache_dir: Path, config: Optional[CacheConfig] = None):
         self.config = config or CacheConfig()
-        self._memory = MemoryCache(config)
+        self._memory: MemoryCache = MemoryCache(config)
         self._disk = DiskCache(cache_dir) if self.config.persist_to_disk else None
 
     def get(self, key: str) -> Optional[Any]:

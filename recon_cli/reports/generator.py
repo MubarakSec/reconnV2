@@ -213,7 +213,7 @@ class ReportGenerator:
             raise ValueError(f"Unsupported format: {format}")
 
         generator = generator_class(self.config)
-        content = generator.generate(data)
+        content = generator.generate(data)  # type: ignore[attr-defined]
 
         # Write to file if path provided
         if output_path:

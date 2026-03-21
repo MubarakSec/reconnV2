@@ -225,7 +225,7 @@ AnyResult = Union[
 ]
 
 # Type adapter for validation
-result_adapter = TypeAdapter(AnyResult)
+result_adapter: TypeAdapter = TypeAdapter(AnyResult)
 
 
 def validate_result(data: Dict[str, Any]) -> Dict[str, Any]:

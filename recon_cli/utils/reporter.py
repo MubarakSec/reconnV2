@@ -723,7 +723,7 @@ def _generate_severity_chart(severity_data: Dict, t: Dict) -> str:
 
 def _format_pct(value: object) -> str:
     try:
-        return f"{float(value) * 100:.2f}%"
+        return f"{float(value) * 100:.2f}%"  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return "n/a"
 

@@ -243,8 +243,8 @@ def compute_risk_score(entry: Dict[str, object]) -> int:
 
     tokens = {
         str(tag).lower()
-        for tag in (entry.get("tags") or [])
-        if isinstance(tag, str)  # type: ignore[attr-defined]
+        for tag in (entry.get("tags") or [])  # type: ignore[attr-defined]
+        if isinstance(tag, str)
     }
     context_blob = " ".join(
         [

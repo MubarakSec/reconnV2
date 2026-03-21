@@ -91,10 +91,10 @@ def generate_summary_data(record) -> Dict[str, Any]:
     if trimmed_path.exists() and trimmed_path.stat().st_size > 0:
         summary_path = trimmed_path
 
-    counts = Counter()
-    status_counter = Counter()
-    priority_counter = Counter()
-    signal_counter = Counter()
+    counts: Counter[str] = Counter()
+    status_counter: Counter[str] = Counter()
+    priority_counter: Counter[str] = Counter()
+    signal_counter: Counter[str] = Counter()
     noise_count = 0
     findings_total = 0
     verified_count = 0
@@ -400,7 +400,7 @@ class JobSummary:
         record = self.manager.load_job(job_id)
         if not record:
             return None
-        counts = Counter()
+        counts: Counter[str] = Counter()
         for entry in iter_jsonl(record.paths.results_jsonl):
             etype = entry.get("type", "unknown")
             counts[etype] += 1

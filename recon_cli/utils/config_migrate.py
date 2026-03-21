@@ -282,8 +282,8 @@ class ConfigMigrator:
             )
 
         # Execute migrations
-        all_changes = []
-        all_warnings = []
+        all_changes: List[str] = []
+        all_warnings: List[str] = []
 
         for migration in migrations:
             logger.info(
@@ -399,9 +399,9 @@ class ConfigMigrator:
                 for part in parts:
                     value = value[part]
 
-                if not isinstance(value, expected_type):
+                if not isinstance(value, expected_type):  # type: ignore[arg-type]
                     errors.append(
-                        f"{key_path} should be {expected_type.__name__}, "
+                        f"{key_path} should be {expected_type.__name__}, "  # type: ignore[attr-defined]
                         f"got {type(value).__name__}"
                     )
             except KeyError:
@@ -457,7 +457,7 @@ def migrate_config(
     Returns:
         True if successful
     """
-    migrator = ConfigMigrator(source)
+    migrator = ConfigMigrator(source)  # type: ignore[arg-type]
 
     if not migrator.needs_migration():
         print(f"✅ Config is already at version {migrator.get_version()}")
@@ -496,7 +496,7 @@ def migrate_config(
         return True
 
     # Save
-    save_path = migrator.save(target, backup=backup)
+    save_path = migrator.save(target, backup=backup)  # type: ignore[arg-type]
     print(f"\n💾 Saved to: {save_path}")
 
     return True

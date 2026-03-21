@@ -294,19 +294,19 @@ class ObjectPool:
         if hasattr(obj, "clear"):
             obj.clear()
 
-    def acquire(self) -> T:
+    def acquire(self) -> T:  # type: ignore[type-var]
         """الحصول على كائن"""
         if self._pool:
             self._reused += 1
-            return self._pool.pop()
+            return self._pool.pop()  # type: ignore[return-value]
         self._created += 1
-        return self.factory()
+        return self.factory()  # type: ignore[return-value]
 
     def release(self, obj: T) -> None:
         """إرجاع كائن للـ pool"""
         if len(self._pool) < self.max_size:
-            self.reset_func(obj)
-            self._pool.append(obj)
+            self.reset_func(obj)  # type: ignore[arg-type]
+            self._pool.append(obj)  # type: ignore[arg-type]
 
     @property
     def stats(self) -> Dict[str, int]:

@@ -148,7 +148,7 @@ class ResultNormalizer:
         Returns:
             {category: {key: record}}
         """
-        normalized = defaultdict(dict)
+        normalized: Dict[str, Dict[str, Any]] = defaultdict(dict)
 
         for record in results:
             category = self._detect_category(record)
@@ -590,7 +590,7 @@ class HistoryTracker:
             return {"error": "Not enough snapshots for trend analysis"}
 
         # Calculate trends
-        trends = {
+        trends: Dict[str, Any] = {
             "dates": [],
             "total_findings": [],
             "by_category": defaultdict(list),
