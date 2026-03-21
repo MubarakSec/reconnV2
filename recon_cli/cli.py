@@ -2102,9 +2102,7 @@ def start_telegram_bot(
 
     if not chat_id:
         typer.secho("🆔 Telegram Chat ID not found.", fg=typer.colors.YELLOW)
-        typer.secho(
-            "Tip: If you don't know your ID, enter 'discover' below.", dim=True
-        )
+        typer.secho("Tip: If you don't know your ID, enter 'discover' below.", dim=True)
         chat_id = typer.prompt("Please enter your Telegram Chat ID (or 'discover')")
         if chat_id != "discover":
             _save_to_env("RECON_TELEGRAM_CHAT_ID", chat_id)
@@ -2142,10 +2140,10 @@ def _save_to_env(key: str, value: str) -> None:
     env_path = config.RECON_HOME / ".env"
     if not env_path.exists():
         env_path.touch()
-    
+
     content = env_path.read_text(encoding="utf-8")
     pattern = re.compile(f"^{re.escape(key)}=.*", re.MULTILINE)
-    
+
     if pattern.search(content):
         # Update existing
         new_content = pattern.sub(f"{key}={value}", content)
@@ -2154,7 +2152,7 @@ def _save_to_env(key: str, value: str) -> None:
         if content and not content.endswith("\n"):
             content += "\n"
         new_content = content + f"{key}={value}\n"
-    
+
     env_path.write_text(new_content, encoding="utf-8")
 
 

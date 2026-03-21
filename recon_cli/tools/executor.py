@@ -1111,8 +1111,8 @@ class CommandExecutor:
                 final_returncode, \
                 attempt_used, \
                 trace_span
-            
-            # Pass recorder and parent_span_id explicitly to start_span logic if possible, 
+
+            # Pass recorder and parent_span_id explicitly to start_span logic if possible,
             # or ensure the contextvar is set before this call.
             trace_span = _start_command_trace_span(
                 cmd_list,
@@ -1138,7 +1138,10 @@ class CommandExecutor:
 
                         def _run_in_thread():
                             from recon_cli.utils.pipeline_trace import run_in_scope
-                            return run_in_scope(trace_scope, subprocess.run, 
+
+                            return run_in_scope(
+                                trace_scope,
+                                subprocess.run,
                                 cmd_list,
                                 cwd=str(cwd) if cwd else None,
                                 env=dict(env) if env else None,
@@ -1147,7 +1150,7 @@ class CommandExecutor:
                                 text=True,
                                 encoding="utf-8",
                                 errors="replace",
-                                check=check
+                                check=check,
                             )
 
                         completed = await loop.run_in_executor(None, _run_in_thread)
@@ -1199,6 +1202,7 @@ class CommandExecutor:
             try:
                 loop = asyncio.get_running_loop()
                 import contextvars
+
                 ctx = contextvars.copy_context()
                 return asyncio.run_coroutine_threadsafe(ctx.run(_run), loop).result()
             except RuntimeError:

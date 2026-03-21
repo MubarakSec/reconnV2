@@ -151,7 +151,9 @@ class ErrorAggregator:
             return f"{error_type}:{error_code}"
         elif self.group_by == "message":
             # Hash the message for grouping
-            msg_hash = hashlib.md5(message.encode(), usedforsecurity=False).hexdigest()[:8]
+            msg_hash = hashlib.md5(message.encode(), usedforsecurity=False).hexdigest()[
+                :8
+            ]
             return f"{error_type}:{msg_hash}"
         else:
             return error_type

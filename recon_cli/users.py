@@ -470,9 +470,8 @@ class UserManager:
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
 
         with self._get_conn() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM users {where} LIMIT ?", params + [limit]  # nosec B608
-            ).fetchall()
+            query = f"SELECT * FROM users {where} LIMIT ?"  # nosec B608
+            rows = conn.execute(query, params + [limit]).fetchall()
 
             return [self._row_to_user(row) for row in rows]
 

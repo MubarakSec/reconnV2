@@ -121,8 +121,12 @@ class WafProbeStage(Stage):
                 candidates.append((score, url))
             else:
                 fallback.append((score, url))
-        
-        context.logger.info("WAF Probe: processed %d items, found %d candidates", item_count, len(candidates))
+
+        context.logger.info(
+            "WAF Probe: processed %d items, found %d candidates",
+            item_count,
+            len(candidates),
+        )
         if not candidates:
             candidates = []
         max_urls = int(getattr(context.runtime_config, "waf_probe_max_urls", 25))
@@ -150,20 +154,28 @@ class WafProbeStage(Stage):
                 selected.append(url)
                 if len(selected) >= max_urls:
                     break
-        
-        context.logger.info("WAF Probe: selected %d URLs for probing (max_urls=%d)", len(selected), max_urls)
+
+        context.logger.info(
+            "WAF Probe: selected %d URLs for probing (max_urls=%d)",
+            len(selected),
+            max_urls,
+        )
         if not selected:
             return
 
         findings = 0
         checked = 0
-        context.logger.info("WAF Probe: beginning probe loop for %d URLs", len(selected))
+        context.logger.info(
+            "WAF Probe: beginning probe loop for %d URLs", len(selected)
+        )
         for url in selected:
             checked += 1
             context.logger.info("WAF Probe: checking URL %s", url)
             try:
                 if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-                    context.logger.info("WAF Probe: limiter slot wait failed for %s", url)
+                    context.logger.info(
+                        "WAF Probe: limiter slot wait failed for %s", url
+                    )
                     continue
                 resp_default = self._fetch(
                     context,
@@ -173,15 +185,21 @@ class WafProbeStage(Stage):
                     headers={"User-Agent": "recon-cli waf-probe"},
                 )
             except Exception as exc:
-                context.logger.info("WAF Probe: FAILED baseline fetch for %s: %s", url, exc)
+                context.logger.info(
+                    "WAF Probe: FAILED baseline fetch for %s: %s", url, exc
+                )
                 if limiter:
                     limiter.on_error(url)
                 continue
-            
+
             if limiter:
                 limiter.on_response(url, resp_default[0].status_code)
             baseline_resp, baseline_snip = resp_default
-            context.logger.info("WAF Probe: baseline fetched for %s (status %d)", url, baseline_resp.status_code)
+            context.logger.info(
+                "WAF Probe: baseline fetched for %s (status %d)",
+                url,
+                baseline_resp.status_code,
+            )
             try:
                 if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                     continue

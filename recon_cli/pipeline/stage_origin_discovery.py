@@ -25,10 +25,14 @@ class OriginDiscoveryStage(Stage):
 
     name = "origin_discovery"
 
-    async def _probe_origin_via_host_header(self, ip: str, domain: str, timeout: int = 5) -> bool:
+    async def _probe_origin_via_host_header(
+        self, ip: str, domain: str, timeout: int = 5
+    ) -> bool:
         """Verifies if the IP address responds to the domain's Host header."""
         urls = [f"http://{ip}", f"https://{ip}"]
-        async with httpx.AsyncClient(verify=False, timeout=timeout, follow_redirects=True) as client:  # nosec B501
+        async with httpx.AsyncClient(
+            verify=False, timeout=timeout, follow_redirects=True
+        ) as client:  # nosec B501
             for url in urls:
                 try:
                     resp = await client.get(url, headers={"Host": domain})

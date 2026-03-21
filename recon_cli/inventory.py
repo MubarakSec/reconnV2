@@ -479,9 +479,8 @@ class AssetInventory:
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
 
         with self._get_conn() as conn:
-            row = conn.execute(
-                f"SELECT COUNT(*) as cnt FROM assets {where}", params  # nosec B608
-            ).fetchone()
+            query = f"SELECT COUNT(*) as cnt FROM assets {where}"  # nosec B608
+            row = conn.execute(query, params).fetchone()
             return row["cnt"]
 
     # ─────────────────────────────────────────────────────────

@@ -209,7 +209,9 @@ def run_nuclei_batch(
         return ScannerExecution([], None, {"targets": len(targets)})
 
     if artifact_suffix is None:
-        digest = hashlib.sha1("\n".join(targets).encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
+        digest = hashlib.sha1(
+            "\n".join(targets).encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:10]
         artifact_suffix = digest
     safe_suffix = (
         "".join(ch for ch in str(artifact_suffix) if ch.isalnum() or ch in {"-", "_"})

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+
 try:
     import defusedxml.ElementTree as ET
 except ImportError:

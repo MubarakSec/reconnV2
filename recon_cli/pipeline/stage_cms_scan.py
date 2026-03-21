@@ -143,7 +143,9 @@ class CMSScanStage(Stage):
                 )
 
                 safe_host = host.replace(":", "_")
-                hash_id = hashlib.md5(base_url.encode(), usedforsecurity=False).hexdigest()[:8]
+                hash_id = hashlib.md5(
+                    base_url.encode(), usedforsecurity=False
+                ).hexdigest()[:8]
                 if artifact_path is None:
                     artifact_path = cms_dir / f"{cms}_{safe_host}_{hash_id}.txt"
                     artifact_path.write_text(scan_output, encoding="utf-8")

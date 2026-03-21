@@ -428,7 +428,7 @@ def run_in_scope(scope: Optional[PipelineTraceScope], func, *args, **kwargs):
     """Run a function within a specific trace scope."""
     if scope is None:
         return func(*args, **kwargs)
-    
+
     token = CURRENT_TRACE_SCOPE.set(scope)
     try:
         return func(*args, **kwargs)

@@ -372,9 +372,15 @@ class PipelineRunner:
                     else:
                         # Offload sync stage to thread pool to keep loop responsive
                         loop = asyncio.get_running_loop()
-                        from recon_cli.utils.pipeline_trace import CURRENT_TRACE_SCOPE, run_in_scope
+                        from recon_cli.utils.pipeline_trace import (
+                            CURRENT_TRACE_SCOPE,
+                            run_in_scope,
+                        )
+
                         trace_scope = CURRENT_TRACE_SCOPE.get()
-                        result = await loop.run_in_executor(None, run_in_scope, trace_scope, stage.run, context)
+                        result = await loop.run_in_executor(
+                            None, run_in_scope, trace_scope, stage.run, context
+                        )
                         if asyncio.iscoroutine(result):
                             result = await result
                 return StageExecutionOutcome(result=result, span=span)

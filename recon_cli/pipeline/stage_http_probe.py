@@ -258,7 +258,9 @@ class HttpProbeStage(Stage):
                 headers_lower = {k.lower(): v for k, v in raw_headers.items()}
                 etag = headers_lower.get("etag")
                 last_modified = headers_lower.get("last-modified")
-                body_md5 = hashlib.md5(body.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()
+                body_md5 = hashlib.md5(
+                    body.encode("utf-8", "ignore"), usedforsecurity=False
+                ).hexdigest()
 
                 if context.should_skip_due_to_cache(
                     url, etag=etag, last_modified=last_modified, body_md5=body_md5
@@ -377,7 +379,9 @@ class HttpProbeStage(Stage):
                 headers_lower = {k.lower(): v for k, v in raw_headers.items()}
                 etag = headers_lower.get("etag")
                 last_modified = headers_lower.get("last-modified")
-                body_md5 = hashlib.md5(body.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()
+                body_md5 = hashlib.md5(
+                    body.encode("utf-8", "ignore"), usedforsecurity=False
+                ).hexdigest()
 
                 if context.should_skip_due_to_cache(
                     url, etag=etag, last_modified=last_modified, body_md5=body_md5
