@@ -6,6 +6,7 @@ from typing import List, Tuple
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.tools.executor import CommandError
+from recon_cli.utils import validation
 
 
 class ResolveStage(Stage):
@@ -19,15 +20,33 @@ class ResolveStage(Stage):
             return
 
         hosts: List[str] = []
+        ip_targets: List[str] = []
         with hosts_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 host = line.strip()
-                if host:
+                if not host:
+                    continue
+                if validation.is_ip(host):
+                    ip_targets.append(host)
+                else:
                     hosts.append(host)
+
+        # Add IP targets directly to results without resolution
+        for ip in ip_targets:
+            context.results.append({
+                "type": "asset",
+                "source": "input",
+                "hostname": ip,
+                "ip": ip,
+                "record_type": "A",
+            })
 
         total_hosts = len(hosts)
         if total_hosts == 0:
-            context.logger.info("No hosts to resolve")
+            context.logger.info("No hostnames to resolve")
+            if ip_targets:
+                context.record.metadata.stats["resolved_hosts"] = len(ip_targets)
+                context.manager.update_metadata(context.record)
             return
 
         output_path = context.record.paths.artifact("massdns.out")

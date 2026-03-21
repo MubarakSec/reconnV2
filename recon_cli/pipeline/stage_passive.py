@@ -42,21 +42,30 @@ class PassiveEnumerationStage(Stage):
 
         # 1. Normalize and seed hosts (input hosts)
         seed_hosts: set[str] = set()
+        hostname_targets: list[str] = []
         for target in targets:
             if allow_ip and validation.is_ip(target):
                 seed_hosts.add(target)
                 continue
             try:
-                seed_hosts.add(validation.normalize_hostname(target))
+                norm = validation.normalize_hostname(target)
+                seed_hosts.add(norm)
+                hostname_targets.append(norm)
             except ValueError:
                 logger.debug("Skipping invalid target: %s", target)
                 continue
 
-        # 2. Subfinder
-        subfinder_hosts = self._run_subfinder(context, targets_file, tool_timeout)
+        subfinder_hosts: set[str] = set()
+        amass_hosts: set[str] = set()
 
-        # 3. Amass
-        amass_hosts = self._run_amass(context, targets_file, tool_timeout, amass_out)
+        if hostname_targets:
+            # 2. Subfinder
+            subfinder_hosts = self._run_subfinder(context, targets_file, tool_timeout)
+
+            # 3. Amass
+            amass_hosts = self._run_amass(context, targets_file, tool_timeout, amass_out)
+        else:
+            logger.info("Skipping passive subdomain discovery (targets are all IPs)")
 
         # 4. Wayback URL discovery (includes fallback)
         self._run_wayback(context, list(targets), tool_timeout, wayback_out)
