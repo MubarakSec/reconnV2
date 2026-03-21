@@ -516,8 +516,8 @@ class PipelineRunner:
         progress_map = self._initialize_progress(context, stage_list, parallel=True)
 
         # Build dependency graph
-        deps = {stage.name: set() for stage in stage_list}
-        rev_deps = {stage.name: set() for stage in stage_list}
+        deps: Dict[str, Set[str]] = {stage.name: set() for stage in stage_list}
+        rev_deps: Dict[str, Set[str]] = {stage.name: set() for stage in stage_list}
 
         known_deps = DependencyResolver.STAGE_DEPENDENCIES
         for stage in stage_list:

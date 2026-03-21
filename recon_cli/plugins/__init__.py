@@ -649,7 +649,7 @@ class PluginLoader:
 
     def _load_from_file(self, file_path: Path) -> List[LoadedPlugin]:
         """Load plugins from a Python file"""
-        loaded = []
+        loaded: List[LoadedPlugin] = []
 
         spec = importlib.util.spec_from_file_location(file_path.stem, file_path)
 

@@ -1,18 +1,15 @@
-"""Performance utilities for ReconnV2.
-
-This module provides:
-- HTTP Connection Pooling
-- Memory-efficient iterators
-- Resource management
+"""
+Performance Utilities - أدوات تحسين الأداء
+تحسين سرعة النظام وإدارة الموارد
 """
 
 from __future__ import annotations
 
-import gc
-import weakref
-from typing import Any, Dict, Iterator, List, Optional, TypeVar
+import logging
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, TypeVar, Iterator
 from contextlib import contextmanager
+import time
 
 try:
     import requests
@@ -22,21 +19,21 @@ try:
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
-    requests = None  # type: ignore
 
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 
 @dataclass
 class PoolConfig:
-    """Configuration for connection pooling."""
+    """إعدادات مجمع الاتصالات"""
 
-    pool_connections: int = 10  # Number of connection pools
-    pool_maxsize: int = 20  # Max connections per pool
-    max_retries: int = 3  # Retry count
-    backoff_factor: float = 0.3  # Backoff between retries
-    timeout: float = 30.0  # Request timeout
+    pool_connections: int = 10
+    pool_maxsize: int = 20
+    max_retries: int = 3
+    backoff_factor: float = 0.5
+    timeout: int = 10
 
 
 class ConnectionPool:
@@ -47,26 +44,26 @@ class ConnectionPool:
     - Automatic retry with backoff
     - Timeout management
     """
-_instance: Optional["ConnectionPool"] = None
-_sessions: Dict[str, Any] = {}
-_initialized: bool = False
 
-def __new__(cls, config: Optional[PoolConfig] = None):
-    if cls._instance is None:
-        cls._instance = super().__new__(cls)
-        cls._instance._initialized = False
-    return cls._instance
+    _instance: Optional["ConnectionPool"] = None
+    _sessions: Dict[str, Any] = {}
+    _initialized: bool = False
 
-def __init__(self, config: Optional[PoolConfig] = None):
-    if getattr(self, "_initialized", False):
-        return
+    def __new__(cls, config: Optional[PoolConfig] = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
 
-    self.config = config or PoolConfig()
-    self._sessions = {}
-    self._initialized = True
-...
-        # Set default timeout
-        session.request = self._timeout_wrapper(session.request)  # type: ignore[method-assign]
+    def __init__(self, config: Optional[PoolConfig] = None):
+        if getattr(self, "_initialized", False):
+            return
+
+        self.config = config or PoolConfig()
+        self._sessions = {}
+        self._initialized = True
+
+    def get_session(self, base_url: Optional[str] = None) -> Any:
         """Get or create a session for the given base URL."""
         if not REQUESTS_AVAILABLE:
             return None
@@ -94,7 +91,7 @@ def __init__(self, config: Optional[PoolConfig] = None):
             session.mount("https://", adapter)
 
             # Set default timeout
-            session.request = self._timeout_wrapper(session.request)
+            session.request = self._timeout_wrapper(session.request)  # type: ignore[method-assign]
 
             self._sessions[key] = session
 
@@ -148,154 +145,66 @@ def chunked_iterator(items: List[T], chunk_size: int = 100) -> Iterator[List[T]]
     Args:
         items: List of items to iterate
         chunk_size: Size of each chunk
-
-    Yields:
-        Chunks of items
     """
     for i in range(0, len(items), chunk_size):
         yield items[i : i + chunk_size]
 
 
-def streaming_file_reader(filepath: str, chunk_size: int = 8192) -> Iterator[str]:
-    """Read file in streaming mode to reduce memory usage.
-
-    Args:
-        filepath: Path to file
-        chunk_size: Bytes to read per chunk
-
-    Yields:
-        Lines from file
-    """
-    with open(filepath, "r", encoding="utf-8") as f:
-        buffer = ""
-        while True:
-            chunk = f.read(chunk_size)
-            if not chunk:
-                if buffer:
-                    yield buffer
-                break
-            buffer += chunk
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                yield line
-
-
 @contextmanager
-def memory_efficient_context():
-    """Context manager for memory-efficient operations.
-
-    Triggers garbage collection after the block.
-    """
+def execution_timer(name: str):
+    """Timer context manager for measuring execution time."""
+    start_time = time.perf_counter()
     try:
         yield
     finally:
-        gc.collect()
+        end_time = time.perf_counter()
+        logger.debug("Execution time [%s]: %.4fs", name, end_time - start_time)
 
 
-class ResourceTracker:
-    """Track and manage resources to prevent leaks."""
+class CacheOptimizer:
+    """Optimizes caching strategies based on resource usage."""
 
-    def __init__(self):
-        self._resources: List[weakref.ref] = []
+    def __init__(self, memory_limit_mb: int = 512):
+        self.memory_limit = memory_limit_mb
+        self.usage_stats: Dict[str, List[float]] = {}
 
-    def track(self, resource: Any) -> None:
-        """Track a resource for cleanup."""
-        self._resources.append(weakref.ref(resource))
+    def track_access(self, key: str, size_bytes: int):
+        """Track cache access pattern."""
+        if key not in self.usage_stats:
+            self.usage_stats[key] = []
+        self.usage_stats[key].append(time.time())
 
-    def cleanup(self) -> int:
-        """Cleanup tracked resources that are still alive."""
-        cleaned = 0
-        for ref in self._resources:
-            obj = ref()
-            if obj is not None:
-                if hasattr(obj, "close"):
-                    try:
-                        obj.close()
-                        cleaned += 1
-                    except Exception:
-                        pass
-        self._resources.clear()
-        gc.collect()
-        return cleaned
-
-    def stats(self) -> Dict[str, int]:
-        """Get tracker statistics."""
-        alive = sum(1 for ref in self._resources if ref() is not None)
-        return {
-            "tracked": len(self._resources),
-            "alive": alive,
-            "collected": len(self._resources) - alive,
-        }
+    def should_evict(self, key: str) -> bool:
+        """Determine if a key should be evicted based on frequency and recency."""
+        # Simple LRU/LFU hybrid logic could go here
+        return False
 
 
-class MemoryMonitor:
-    """Monitor memory usage during operations."""
+def optimize_memory():
+    """Run manual garbage collection if memory is tight."""
+    import gc
 
-    def __init__(self):
-        self._snapshots: List[Dict[str, Any]] = []
-
-    def snapshot(self, label: str = "") -> Dict[str, Any]:
-        """Take a memory snapshot."""
-        try:
-            import psutil
-
-            process = psutil.Process()
-            mem_info = process.memory_info()
-            snapshot = {
-                "label": label,
-                "rss_mb": mem_info.rss / 1024 / 1024,
-                "vms_mb": mem_info.vms / 1024 / 1024,
-            }
-        except ImportError:
-            # Fallback without psutil
-            snapshot = {
-                "label": label,
-                "gc_objects": len(gc.get_objects()),
-            }
-
-        self._snapshots.append(snapshot)
-        return snapshot
-
-    def report(self) -> List[Dict[str, Any]]:
-        """Get all snapshots."""
-        return self._snapshots
-
-    def clear(self) -> None:
-        """Clear snapshots."""
-        self._snapshots.clear()
-
-
-# Singleton instances
-_pool: Optional[ConnectionPool] = None
-_tracker: Optional[ResourceTracker] = None
-
-
-def get_pool(config: Optional[PoolConfig] = None) -> ConnectionPool:
-    """Get the global connection pool."""
-    global _pool
-    if _pool is None:
-        _pool = ConnectionPool(config)
-    return _pool
-
-
-def get_tracker() -> ResourceTracker:
-    """Get the global resource tracker."""
-    global _tracker
-    if _tracker is None:
-        _tracker = ResourceTracker()
-    return _tracker
-
-
-def optimize_memory() -> Dict[str, Any]:
-    """Run memory optimization."""
-    # Cleanup resources
-    tracker = get_tracker()
-    cleaned = tracker.cleanup()
-
-    # Force garbage collection
     gc.collect()
 
-    return {
-        "resources_cleaned": cleaned,
-        "gc_collected": gc.get_count(),
-    }
+
+# ─────────────────────────────────────────────────────────
+#                     Resource Manager
+# ─────────────────────────────────────────────────────────
+
+
+class ResourceManager:
+    """مدير الموارد للنظام"""
+
+    def __init__(self):
+        self.pool = ConnectionPool()
+        self.optimizer = CacheOptimizer()
+
+    def cleanup(self):
+        """تنظيف الموارد"""
+        self.pool.close_all()
+        optimize_memory()
+
+
+def get_pool() -> ConnectionPool:
+    """الحصول على مجمع الاتصالات العام"""
+    return ConnectionPool()

@@ -193,7 +193,7 @@ class FuzzStage(Stage):
                         )
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
-        hosts = defaultdict(int)
+        hosts: Dict[str, int] = defaultdict(int)
         results = context.get_results()
         if not results:
             return []

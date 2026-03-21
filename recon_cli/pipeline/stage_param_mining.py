@@ -76,7 +76,7 @@ class ParamMiningStage(Stage):
         candidates = list(dict.fromkeys(candidates))
         max_urls = int(getattr(context.runtime_config, "param_mining_max_urls", 150))
         candidates = candidates[:max_urls]
-        params = Counter()
+        params: Counter[str] = Counter()
         examples: Dict[str, List[str]] = defaultdict(list)
         for url in candidates:
             parsed = urlparse(url)

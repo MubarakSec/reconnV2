@@ -51,7 +51,7 @@ class CorrelationStage(Stage):
         asn_hosts: Dict[str, set] = defaultdict(set)
         provider_hosts: Dict[str, set] = defaultdict(set)
         api_endpoints: Dict[str, set] = defaultdict(set)
-        tech_counter = Counter()
+        tech_counter: Counter[str] = Counter()
         features_by_host: Dict[str, Dict[str, float]] = defaultdict(
             lambda: {key: 0.0 for key in FEATURE_KEYS}
         )

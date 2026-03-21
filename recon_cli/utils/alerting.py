@@ -782,7 +782,7 @@ class Alerter:
         with self._lock:
             active = self._active_alerts.values()
 
-            by_severity = {}
+            by_severity: Dict[str, int] = {}
             for alert in active:
                 sev = alert.severity.value
                 by_severity[sev] = by_severity.get(sev, 0) + 1
