@@ -51,8 +51,8 @@ class Command:
 
     name: str
     description: str
-    subcommands: List["Command"] = None
-    options: List["Option"] = None
+    subcommands: List["Command"] | None = None
+    options: List["Option"] | None = None
 
     def __post_init__(self):
         self.subcommands = self.subcommands or []
@@ -67,7 +67,7 @@ class Option:
     short: Optional[str] = None
     description: str = ""
     takes_value: bool = False
-    choices: List[str] = None
+    choices: List[str] | None = None
     file_completion: bool = False
     directory_completion: bool = False
 

@@ -303,7 +303,7 @@ class PipelineAbortedError(PipelineError):
 
     code = "PIPELINE_ABORTED"
 
-    def __init__(self, reason: str, completed_stages: List[str] = None):
+    def __init__(self, reason: str, completed_stages: List[str] | None = None):
         super().__init__(
             f"Pipeline aborted: {reason}",
             details={
@@ -329,7 +329,7 @@ class ToolNotFoundError(ToolError):
 
     code = "TOOL_NOT_FOUND"
 
-    def __init__(self, tool_name: str, searched_paths: List[str] = None):
+    def __init__(self, tool_name: str, searched_paths: List[str] | None = None):
         super().__init__(
             f"Tool not found: {tool_name}",
             details={
