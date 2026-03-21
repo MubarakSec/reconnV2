@@ -424,6 +424,18 @@ def current_parent_span_id() -> Optional[str]:
     return scope.parent_span_id
 
 
+def run_in_scope(scope: Optional[PipelineTraceScope], func, *args, **kwargs):
+    """Run a function within a specific trace scope."""
+    if scope is None:
+        return func(*args, **kwargs)
+    
+    token = CURRENT_TRACE_SCOPE.set(scope)
+    try:
+        return func(*args, **kwargs)
+    finally:
+        CURRENT_TRACE_SCOPE.reset(token)
+
+
 @contextmanager
 def bind_trace_scope(
     recorder: Optional[PipelineTraceRecorder],

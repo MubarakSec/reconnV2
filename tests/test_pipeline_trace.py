@@ -138,7 +138,6 @@ def test_parallel_pipeline_trace_records_stage_spans_and_batches(tmp_path: Path)
     assert "span.finished" in event_names
 
 
-@pytest.mark.skip(reason="Trace context propagation across run_in_executor needs deeper fix")
 def test_pipeline_trace_records_tool_execution_spans(tmp_path: Path):
 
     class ToolStage(Stage):

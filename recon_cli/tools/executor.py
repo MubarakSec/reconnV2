@@ -1101,11 +1101,12 @@ class CommandExecutor:
 
         recorder = current_trace_recorder()
         parent_span_id = current_parent_span_id()
+        trace_scope = CURRENT_TRACE_SCOPE.get()
         trace_span: Optional[PipelineTraceSpan] = None
 
         async def _run() -> subprocess.CompletedProcess:
-            if recorder:
-                CURRENT_TRACE_SCOPE.set(PipelineTraceScope(recorder, parent_span_id))
+            if trace_scope:
+                CURRENT_TRACE_SCOPE.set(trace_scope)
 
             nonlocal \
                 final_status, \
@@ -1113,6 +1114,9 @@ class CommandExecutor:
                 final_returncode, \
                 attempt_used, \
                 trace_span
+            
+            # Pass recorder and parent_span_id explicitly to start_span logic if possible, 
+            # or ensure the contextvar is set before this call.
             trace_span = _start_command_trace_span(
                 cmd_list,
                 policy=policy,
@@ -1136,18 +1140,18 @@ class CommandExecutor:
                         loop = asyncio.get_running_loop()
 
                         def _run_in_thread():
-                            with bind_trace_scope(recorder, parent_span_id):
-                                return subprocess.run(
-                                    cmd_list,
-                                    cwd=str(cwd) if cwd else None,
-                                    env=dict(env) if env else None,
-                                    timeout=policy.timeout,
-                                    capture_output=capture_output,
-                                    text=True,
-                                    encoding="utf-8",
-                                    errors="replace",
-                                    check=check,
-                                )
+                            from recon_cli.utils.pipeline_trace import run_in_scope
+                            return run_in_scope(trace_scope, subprocess.run, 
+                                cmd_list,
+                                cwd=str(cwd) if cwd else None,
+                                env=dict(env) if env else None,
+                                timeout=policy.timeout,
+                                capture_output=capture_output,
+                                text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                                check=check
+                            )
 
                         completed = await loop.run_in_executor(None, _run_in_thread)
 
@@ -1197,7 +1201,9 @@ class CommandExecutor:
         try:
             try:
                 loop = asyncio.get_running_loop()
-                return asyncio.run_coroutine_threadsafe(_run(), loop).result()
+                import contextvars
+                ctx = contextvars.copy_context()
+                return asyncio.run_coroutine_threadsafe(ctx.run(_run), loop).result()
             except RuntimeError:
                 return asyncio.run(_run())
         finally:
