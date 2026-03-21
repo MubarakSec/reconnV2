@@ -10,7 +10,7 @@ Features:
 - سجل النشاط
 
 Example:
-    >>> users = UserManager("./users.db")
+    >>> users = UserManager("./data/users.db")
     >>> user = users.create("admin", "admin@example.com", role=UserRole.ADMIN)
     >>> users.grant_permission(user.id, "jobs:create")
 """
@@ -237,7 +237,7 @@ class UserManager:
     إدارة المستخدمين.
 
     Example:
-        >>> manager = UserManager("./users.db")
+        >>> manager = UserManager("./data/users.db")
         >>>
         >>> # إنشاء مستخدم
         >>> user = manager.create(

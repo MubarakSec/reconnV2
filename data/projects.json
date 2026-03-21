@@ -1,0 +1,18 @@
+{
+  "alpha": {
+    "name": "alpha",
+    "scope": [
+      "alpha.example.com"
+    ]
+  },
+  "beta": {
+    "name": "beta",
+    "scope": [
+      "beta.example.com"
+    ]
+  },
+  "y": {
+    "name": "y",
+    "scope": []
+  }
+}

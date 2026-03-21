@@ -240,7 +240,7 @@ def create_app() -> "FastAPI":
             raise HTTPException(
                 status_code=401, detail="Authentication unavailable"
             ) from exc
-        user_manager = UserManager(str(config.RECON_HOME / "users.db"))
+        user_manager = UserManager(str(config.DATA_DIR / "users.db"))
         validated = user_manager.validate_api_key(x_api_key)
         if not validated:
             raise HTTPException(status_code=401, detail="Invalid API key")

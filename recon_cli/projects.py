@@ -5,7 +5,7 @@ from typing import Optional
 from recon_cli import config
 from recon_cli.utils import fs
 
-PROJECTS_FILE = config.RECON_HOME / "projects.json"
+PROJECTS_FILE = config.DATA_DIR / "projects.json"
 
 
 def list_projects() -> list[str]:
