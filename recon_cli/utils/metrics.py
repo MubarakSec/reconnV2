@@ -565,7 +565,7 @@ class MetricsRegistry:
         with self._lock:
             if name not in self._metrics:
                 self._metrics[name] = Counter(name, description, labels)
-            return self._metrics[name]
+            return self._metrics[name]  # type: ignore[return-value]
 
     def gauge(
         self,
@@ -577,7 +577,7 @@ class MetricsRegistry:
         with self._lock:
             if name not in self._metrics:
                 self._metrics[name] = Gauge(name, description, labels)
-            return self._metrics[name]
+            return self._metrics[name]  # type: ignore[return-value]
 
     def histogram(
         self,
@@ -590,7 +590,7 @@ class MetricsRegistry:
         with self._lock:
             if name not in self._metrics:
                 self._metrics[name] = Histogram(name, description, buckets, labels)
-            return self._metrics[name]
+            return self._metrics[name]  # type: ignore[return-value]
 
     def summary(
         self,
@@ -603,7 +603,7 @@ class MetricsRegistry:
         with self._lock:
             if name not in self._metrics:
                 self._metrics[name] = Summary(name, description, quantiles, labels)
-            return self._metrics[name]
+            return self._metrics[name]  # type: ignore[return-value]
 
     def register(self, metric: Union[Counter, Gauge, Histogram, Summary]) -> None:
         with self._lock:

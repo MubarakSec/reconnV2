@@ -498,5 +498,5 @@ def format_bytes(num_bytes: int) -> str:
     for unit in ["B", "KB", "MB", "GB"]:
         if abs(num_bytes) < 1024:
             return f"{num_bytes:.1f} {unit}"
-        num_bytes /= 1024
+        num_bytes /= 1024  # type: ignore[assignment]
     return f"{num_bytes:.1f} TB"

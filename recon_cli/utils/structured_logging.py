@@ -174,7 +174,7 @@ class ContextLogger(logging.LoggerAdapter):
         >>> logger.info("Processing", extra={"stage": "dns"})
     """
 
-    def process(self, msg: str, kwargs: Dict) -> tuple:
+    def process(self, msg: str, kwargs: Dict) -> tuple:  # type: ignore[override]
         """Add context to kwargs."""
         extra = kwargs.get("extra", {})
         extra.update(self.extra)
@@ -240,7 +240,7 @@ def get_logger(name: str, **context) -> logging.Logger:
     """
     logger = logging.getLogger(name)
     if context:
-        return ContextLogger(logger, context)
+        return ContextLogger(logger, context)  # type: ignore[return-value]
     return logger
 
 

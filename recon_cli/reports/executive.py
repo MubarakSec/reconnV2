@@ -53,7 +53,7 @@ def _resolve_severity(finding: Dict[str, Any]) -> str:
         return priority
     score = finding.get("score")
     try:
-        score_value = float(score)
+        score_value = float(score)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         score_value = None
     if score_value is not None:

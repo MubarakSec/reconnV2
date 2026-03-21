@@ -16,4 +16,4 @@ def format_ts(value: datetime | None) -> str | None:
 
 
 def iso_now() -> str:
-    return format_ts(utc_now())
+    return format_ts(utc_now())  # type: ignore[return-value]

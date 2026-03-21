@@ -242,7 +242,7 @@ def compute_risk_score(entry: Dict[str, object]) -> int:
         exploitability_score += 6
 
     tokens = {
-        str(tag).lower() for tag in (entry.get("tags") or []) if isinstance(tag, str)
+        str(tag).lower() for tag in (entry.get("tags") or []) if isinstance(tag, str)  # type: ignore[attr-defined]
     }
     context_blob = " ".join(
         [
@@ -273,7 +273,7 @@ def resolve_severity(entry: Dict[str, object]) -> str:
         return priority
     score = entry.get("score")
     try:
-        score_value = float(score)
+        score_value = float(score)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         score_value = None
     if score_value is not None:
@@ -295,7 +295,7 @@ def resolve_finding_type(entry: Dict[str, object]) -> str:
     raw_type = entry.get("type", "unknown")
     if raw_type != "finding":
         return str(raw_type)
-    tags = set(entry.get("tags", []) or [])
+    tags = set(entry.get("tags", []) or [])  # type: ignore[call-overload]
     source = str(entry.get("source", "") or "").lower()
     if "sqli" in tags or source == "sqlmap":
         return "sql_injection"
@@ -336,7 +336,7 @@ def resolve_confidence_label(entry: Dict[str, object]) -> str:
     confidence = entry.get("confidence")
     if confidence is not None:
         try:
-            value = float(confidence)
+            value = float(confidence)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             value = None
         if value is not None:
@@ -387,7 +387,7 @@ def rank_findings(
 
     def _key(entry: Dict[str, object]) -> tuple[int, int, int, int, int, int]:
         risk_score = compute_risk_score(entry)
-        score = int(entry.get("score", 0) or 0)
+        score = int(entry.get("score", 0) or 0)  # type: ignore[call-overload]
         severity = resolve_severity(entry)
         priority = str(entry.get("priority") or severity)
         confidence = resolve_confidence_label(entry)
@@ -558,7 +558,7 @@ def build_triage_entry(entry: Dict[str, object], *, job_id: str) -> Dict[str, ob
 def _infer_auth_requirement(entry: Dict[str, object]) -> str:
     tags = {
         str(tag).strip().lower()
-        for tag in (entry.get("tags") or [])
+        for tag in (entry.get("tags") or [])  # type: ignore[attr-defined]
         if isinstance(tag, str)
     }
     if any(token in tags for token in {"auth", "authenticated", "admin", "privileged"}):

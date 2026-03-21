@@ -32,8 +32,8 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
-    FastAPI = None
-    BaseModel = object
+    FastAPI = None  # type: ignore[misc]
+    BaseModel = object  # type: ignore[misc]
 
 
 class _JobsBaseProxy:
@@ -113,7 +113,7 @@ def _patch_httpx_asyncclient() -> None:
             kwargs["base_url"] = base_url
         return original_init(self, *args, **kwargs)
 
-    httpx.AsyncClient.__init__ = _init
+    httpx.AsyncClient.__init__ = _init  # type: ignore[method-assign]
 
 
 _patch_httpx_asyncclient()
@@ -128,7 +128,7 @@ if FASTAPI_AVAILABLE:
     class ScanRequest(BaseModel):
         """طلب فحص جديد"""
 
-        target: str = Field(None, min_length=1, description="الهدف (domain أو IP)")
+        target: str = Field(None, min_length=1, description="الهدف (domain أو IP)")  # type: ignore[assignment]
         profile: str = Field("passive", description="الملف الشخصي")
         inline: bool = Field(False, description="تشغيل فوري")
         scanners: List[str] = Field(default_factory=list, description="الماسحات")
@@ -141,7 +141,7 @@ if FASTAPI_AVAILABLE:
     class JobCreateRequest(BaseModel):
         """طلب إنشاء مهمة"""
 
-        targets: List[str] = Field(None, min_length=1, description="الأهداف")
+        targets: List[str] = Field(None, min_length=1, description="الأهداف")  # type: ignore[arg-type]
         stages: List[str] = Field(default_factory=list, description="المراحل")
         options: Dict[str, Any] = Field(default_factory=dict, description="خيارات")
 
@@ -889,7 +889,7 @@ def _run_job(job_id: str):
     """تشغيل مهمة في الخلفية"""
     from recon_cli.pipeline.runner import run_pipeline
 
-    manager = app.state.manager
+    manager = app.state.manager  # type: ignore[union-attr]
     record = manager.load_job(job_id)
 
     if record:

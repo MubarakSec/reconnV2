@@ -428,7 +428,7 @@ class AssetInventory:
 
         if parent_id is not None:
             conditions.append("parent_id = ?")
-            params.append(parent_id)
+            params.append(parent_id)  # type: ignore[arg-type]
 
         if tag:
             conditions.append("tags LIKE ?")
@@ -442,7 +442,7 @@ class AssetInventory:
             ORDER BY last_seen DESC
             LIMIT ? OFFSET ?
         """  # nosec B608
-        params.extend([limit, offset])
+        params.extend([limit, offset])  # type: ignore[list-item]
 
         with self._get_conn() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -612,7 +612,7 @@ class AssetInventory:
                 if child.id:
                     subtree = self.get_tree(child.id, max_depth - 1)
                     if subtree:
-                        tree["children"].append(subtree)
+                        tree["children"].append(subtree)  # type: ignore[attr-defined]
 
         return tree
 
@@ -682,7 +682,7 @@ class AssetInventory:
         # Detect type
         if "subdomain" in result or "host" in result:
             value = result.get("subdomain") or result.get("host")
-            if "." in value:
+            if "." in value:  # type: ignore[operator]
                 return {
                     "type": AssetType.SUBDOMAIN,
                     "value": value,

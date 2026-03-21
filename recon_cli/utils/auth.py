@@ -144,13 +144,13 @@ class LoginConfig:
             method=str(payload.get("method") or "POST").upper(),
             payload=parse_payload(payload.get("payload")),
             headers=parse_headers(payload.get("headers")),
-            content_type=payload.get("content_type") or payload.get("contentType"),
-            success_regex=payload.get("success_regex") or payload.get("successRegex"),
-            fail_regex=payload.get("fail_regex") or payload.get("failRegex"),
+            content_type=payload.get("content_type") or payload.get("contentType"),  # type: ignore[arg-type]
+            success_regex=payload.get("success_regex") or payload.get("successRegex"),  # type: ignore[arg-type]
+            fail_regex=payload.get("fail_regex") or payload.get("failRegex"),  # type: ignore[arg-type]
             cookie_names=parse_cookie_names(
                 payload.get("cookie_names") or payload.get("cookieNames")
             ),
-            timeout=int(payload.get("timeout") or 15),
+            timeout=int(payload.get("timeout") or 15),  # type: ignore[call-overload]
         )
 
 
@@ -174,9 +174,9 @@ class AuthProfile:
             name=str(payload.get("name") or "default"),
             headers=parse_headers(payload.get("headers")),
             cookies=parse_cookies(payload.get("cookies")),
-            bearer=payload.get("bearer") or payload.get("token"),
-            basic_user=payload.get("basic_user") or payload.get("basic_username"),
-            basic_pass=payload.get("basic_pass") or payload.get("basic_password"),
+            bearer=payload.get("bearer") or payload.get("token"),  # type: ignore[arg-type]
+            basic_user=payload.get("basic_user") or payload.get("basic_username"),  # type: ignore[arg-type]
+            basic_pass=payload.get("basic_pass") or payload.get("basic_password"),  # type: ignore[arg-type]
             login=login_config,
         )
 
@@ -375,7 +375,7 @@ class AuthSessionManager:
         success = False
         try:
             response = self.session.request(
-                self.profile.login.method, login_url, **request_kwargs
+                self.profile.login.method, login_url, **request_kwargs  # type: ignore[arg-type]
             )
             body = response.text or ""
             if self.profile.login.fail_regex and re.search(

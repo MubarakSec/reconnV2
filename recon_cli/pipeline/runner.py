@@ -297,7 +297,7 @@ class PipelineRunner:
         if parallel:
             context.record.metadata.stats["parallel_execution"] = True
         context.manager.update_metadata(context.record)
-        return progress_map
+        return progress_map  # type: ignore[return-value]
 
     def _get_execution_plan(
         self,

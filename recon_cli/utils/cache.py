@@ -191,7 +191,7 @@ class DiskCache:
 
     def _init_db(self) -> None:
         """إنشاء قاعدة البيانات"""
-        with self._get_connection() as conn:
+        with self._get_connection() as conn:  # type: sqlite3.Connection
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS cache (
                     key TEXT PRIMARY KEY,
@@ -207,7 +207,7 @@ class DiskCache:
             """)
 
     @contextmanager
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
         """الحصول على اتصال بقاعدة البيانات"""
         conn = sqlite3.connect(str(self.db_path), timeout=10)
         try:
@@ -229,7 +229,7 @@ class DiskCache:
         now = time.time()
 
         with self._lock:
-            with self._get_connection() as conn:
+            with self._get_connection() as conn:  # type: sqlite3.Connection
                 cursor = conn.execute(
                     "SELECT value, expires_at FROM cache WHERE key = ?", (key,)
                 )
@@ -255,7 +255,7 @@ class DiskCache:
         value_bytes = self._serialize(value)
 
         with self._lock:
-            with self._get_connection() as conn:
+            with self._get_connection() as conn:  # type: sqlite3.Connection
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO cache 
@@ -268,14 +268,14 @@ class DiskCache:
     def delete(self, key: str) -> bool:
         """حذف عنصر"""
         with self._lock:
-            with self._get_connection() as conn:
+            with self._get_connection() as conn:  # type: sqlite3.Connection
                 cursor = conn.execute("DELETE FROM cache WHERE key = ?", (key,))
                 return cursor.rowcount > 0
 
     def clear(self) -> None:
         """مسح كل العناصر"""
         with self._lock:
-            with self._get_connection() as conn:
+            with self._get_connection() as conn:  # type: sqlite3.Connection
                 conn.execute("DELETE FROM cache")
 
     def cleanup(self) -> int:
@@ -283,14 +283,14 @@ class DiskCache:
         now = time.time()
 
         with self._lock:
-            with self._get_connection() as conn:
+            with self._get_connection() as conn:  # type: sqlite3.Connection
                 cursor = conn.execute("DELETE FROM cache WHERE expires_at < ?", (now,))
                 return cursor.rowcount
 
     def stats(self) -> Dict[str, Any]:
         """إحصائيات"""
         with self._lock:
-            with self._get_connection() as conn:
+            with self._get_connection() as conn:  # type: sqlite3.Connection
                 cursor = conn.execute("SELECT COUNT(*), SUM(hits) FROM cache")
                 count, total_hits = cursor.fetchone()
 

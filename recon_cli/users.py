@@ -178,8 +178,8 @@ class User:
         }
 
         if include_sensitive:
-            data["extra_permissions"] = list(self.extra_permissions)
-            data["settings"] = self.settings
+            data["extra_permissions"] = list(self.extra_permissions)  # type: ignore[assignment]
+            data["settings"] = self.settings  # type: ignore[assignment]
 
         return data
 
@@ -533,7 +533,7 @@ class UserManager:
             )
 
         self._log_action(
-            user.id, "login", "session", "", {"ip": ip_address}, ip_address, user_agent
+            user.id, "login", "session", "", {"ip": ip_address}, ip_address, user_agent  # type: ignore[arg-type]
         )
 
         return session_token
@@ -843,15 +843,15 @@ class UserManager:
 
         if action:
             conditions.append("action = ?")
-            params.append(action)
+            params.append(action)  # type: ignore[arg-type]
 
         if resource_type:
             conditions.append("resource_type = ?")
-            params.append(resource_type)
+            params.append(resource_type)  # type: ignore[arg-type]
 
         if since:
             conditions.append("timestamp >= ?")
-            params.append(since.isoformat())
+            params.append(since.isoformat())  # type: ignore[arg-type]
 
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
 

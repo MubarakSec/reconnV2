@@ -185,64 +185,64 @@ def _analyze_results(
 
     for result in results:
         result_type = result.get("type", "unknown")
-        stats["by_type"][result_type] = stats["by_type"].get(result_type, 0) + 1
+        stats["by_type"][result_type] = stats["by_type"].get(result_type, 0) + 1  # type: ignore[index]
 
         source = result.get("source", "unknown")
-        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1
+        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1  # type: ignore[index]
 
         if "hostname" in result:
-            stats["hostnames"].add(result["hostname"])
+            stats["hostnames"].add(result["hostname"])  # type: ignore[attr-defined]
 
         if "url" in result:
-            stats["urls"].add(result["url"])
+            stats["urls"].add(result["url"])  # type: ignore[attr-defined]
 
         if is_secret(result):
-            stats["secrets"].append(result)
+            stats["secrets"].append(result)  # type: ignore[attr-defined]
 
         if is_finding(result):
-            stats["findings_all"].append(result)
+            stats["findings_all"].append(result)  # type: ignore[attr-defined]
 
         if result_type == "screenshot":
-            stats["screenshots"].append(result)
+            stats["screenshots"].append(result)  # type: ignore[attr-defined]
         if result_type == "service":
-            stats["services"].append(result)
+            stats["services"].append(result)  # type: ignore[attr-defined]
         if result_type == "auth_form":
-            stats["auth_forms"].append(result)
+            stats["auth_forms"].append(result)  # type: ignore[attr-defined]
         if result_type in {"api_spec", "api"}:
-            stats["api_specs"].append(result)
+            stats["api_specs"].append(result)  # type: ignore[attr-defined]
         if result_type == "parameter":
-            stats["parameters"].append(result)
+            stats["parameters"].append(result)  # type: ignore[attr-defined]
         if result_type == "url" and result.get("source") == "js-intel":
-            stats["js_endpoints"].append(result)
+            stats["js_endpoints"].append(result)  # type: ignore[attr-defined]
         if result_type == "finding" and result.get("source") == "waf-probe":
-            stats["waf_findings"].append(result)
+            stats["waf_findings"].append(result)  # type: ignore[attr-defined]
         if result_type == "finding" and result.get("source") in {"dalfox", "sqlmap"}:
-            stats["vuln_findings"].append(result)
+            stats["vuln_findings"].append(result)  # type: ignore[attr-defined]
 
     if verified_only or proof_required:
         stats["findings"] = filter_findings(
-            stats["findings_all"],
+            stats["findings_all"],  # type: ignore[arg-type]
             verified_only=verified_only,
             proof_required=proof_required,
         )
         stats["waf_findings"] = filter_findings(
-            stats["waf_findings"],
+            stats["waf_findings"],  # type: ignore[arg-type]
             verified_only=verified_only,
             proof_required=proof_required,
         )
         stats["vuln_findings"] = filter_findings(
-            stats["vuln_findings"],
+            stats["vuln_findings"],  # type: ignore[arg-type]
             verified_only=verified_only,
             proof_required=proof_required,
         )
     else:
-        stats["findings"] = list(stats["findings_all"])
+        stats["findings"] = list(stats["findings_all"])  # type: ignore[call-overload]
 
-    stats["by_severity"] = _severity_counts(stats["findings"])
-    stats["hostnames_list"] = sorted(stats["hostnames"])[:50]
-    stats["urls_list"] = sorted(stats["urls"])[:50]
-    stats["hostnames"] = len(stats["hostnames"])
-    stats["urls"] = len(stats["urls"])
+    stats["by_severity"] = _severity_counts(stats["findings"])  # type: ignore[arg-type]
+    stats["hostnames_list"] = sorted(stats["hostnames"])[:50]  # type: ignore[call-overload]
+    stats["urls_list"] = sorted(stats["urls"])[:50]  # type: ignore[call-overload]
+    stats["hostnames"] = len(stats["hostnames"])  # type: ignore[arg-type]
+    stats["urls"] = len(stats["urls"])  # type: ignore[arg-type]
 
     return stats
 

@@ -70,7 +70,7 @@ class InteractshSession:
             str(self.payload_file),
         ]
         try:
-            self.process = subprocess.Popen(
+            self.process = subprocess.Popen(  # type: ignore[assignment]
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

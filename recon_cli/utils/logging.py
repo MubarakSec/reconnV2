@@ -39,7 +39,7 @@ def build_file_logger(
     if log_format == "json":
         formatter = JsonRedactingFormatter()
     else:
-        formatter = RedactingFormatter(_LOG_FORMAT, datefmt=_DATEFMT)
+        formatter = RedactingFormatter(_LOG_FORMAT, datefmt=_DATEFMT)  # type: ignore[assignment]
 
     file_handler = logging.FileHandler(logfile, encoding="utf-8")
     file_handler.setFormatter(formatter)

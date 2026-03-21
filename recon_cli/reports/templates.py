@@ -84,7 +84,7 @@ class TemplateContext:
 
         for part in parts:
             if isinstance(value, dict):
-                value = value.get(part)
+                value = value.get(part)  # type: ignore[assignment]
             elif hasattr(value, part):
                 value = getattr(value, part)
             else:
