@@ -8,7 +8,6 @@ from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.takeover import TakeoverDetector
 from recon_cli.takeover.detector import TAKEOVER_FINGERPRINTS
 from recon_cli.utils import validation
-from recon_cli.utils.jsonl import iter_jsonl
 
 try:
     import dns.resolver
@@ -44,7 +43,7 @@ class TakeoverStage(Stage):
 
         hosts: List[str] = []
         seen = set()
-        for entry in iter_jsonl(results_path):
+        for entry in context.iter_results():
             hostname = entry.get("hostname") or entry.get("host")
             if not hostname:
                 url_value = entry.get("url")
@@ -246,8 +245,10 @@ class TakeoverStage(Stage):
     def _assess_claimability(
         self, provider: str, providers: Set[str], dns_state: Dict[str, object]
     ) -> Dict[str, object]:
+        # Fingerprint provider must match one of the DNS-detected providers
         dns_provider_match = bool(providers and provider in providers)
         dns_dangling = bool(dns_state.get("dangling"))
+
         if dns_provider_match and dns_dangling:
             return {
                 "level": "high",
@@ -256,20 +257,33 @@ class TakeoverStage(Stage):
                 "priority": "critical",
                 "severity": "critical",
             }
-        if dns_provider_match or dns_dangling:
+        
+        # If we have a provider match but it's not dangling, it's a high confidence "resolved" takeover (edge case)
+        if dns_provider_match and not dns_dangling:
             return {
                 "level": "medium",
                 "confidence": "high",
-                "score": 86,
+                "score": 80,
                 "priority": "high",
                 "severity": "high",
             }
+
+        # If it's dangling but the provider doesn't match, it's lower confidence
+        if dns_dangling:
+            return {
+                "level": "medium",
+                "confidence": "medium",
+                "score": 75,
+                "priority": "medium",
+                "severity": "medium",
+            }
+
         return {
             "level": "low",
-            "confidence": "medium",
-            "score": 70,
-            "priority": "medium",
-            "severity": "medium",
+            "confidence": "low",
+            "score": 40,
+            "priority": "low",
+            "severity": "low",
         }
 
     @staticmethod

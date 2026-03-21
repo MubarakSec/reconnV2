@@ -12,7 +12,6 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.pipeline.stage_idor import IDORStage
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import iter_jsonl
 
 
 class IDORValidatorStage(Stage):
@@ -280,7 +279,7 @@ class IDORValidatorStage(Stage):
     ) -> List[Dict[str, object]]:
         grouped: Dict[str, List[Dict[str, object]]] = defaultdict(list)
         seen: Set[Tuple[str, str]] = set()
-        for entry in iter_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             if not isinstance(entry, dict):
                 continue
             if str(entry.get("type") or "").lower() != "idor_suspect":

@@ -11,7 +11,6 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.feature_defs import FEATURE_KEYS, compute_asn_score
 from recon_cli.pipeline.progress import ProgressLogger
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import iter_jsonl
 
 
 def root_domain(host: str) -> str:
@@ -28,17 +27,22 @@ class CorrelationStage(Stage):
         return bool(getattr(context.runtime_config, "enable_correlation", False))
 
     def execute(self, context: PipelineContext) -> None:
-        results_path = context.record.paths.results_jsonl
-        trimmed_path = context.record.paths.trimmed_results_jsonl
-        logger = context.logger
-        source_path = trimmed_path if trimmed_path.exists() else results_path
-        if trimmed_path.exists():
-            logger.info("Correlation using trimmed results (%s)", trimmed_path.name)
-        records = iter_jsonl(source_path)
-        if records is None:
-            logger.info("No results recorded; skipping correlation stage")
+        results = context.get_results()
+        if not results:
             return
 
+        trimmed_path = context.record.paths.trimmed_results_jsonl
+        # If we have trimmed results, we still prefer them for performance if this stage
+        # is running in a mode that needs pruning.
+        if trimmed_path.exists():
+            try:
+                from recon_cli.utils.jsonl import read_jsonl
+                results = read_jsonl(trimmed_path)
+                context.logger.info("Correlation using trimmed results (%s)", trimmed_path.name)
+            except Exception as e:
+                context.logger.debug("Failed to read trimmed results: %s", e)
+
+        logger = context.logger
         graph = Graph()
         ip_hosts: Dict[str, set] = defaultdict(set)
         asn_hosts: Dict[str, set] = defaultdict(set)
@@ -76,7 +80,7 @@ class CorrelationStage(Stage):
             registered_hosts[host] = (root, host)
             return registered_hosts[host]
 
-        for entry in records:
+        for entry in results:
             if max_records and processed >= max_records:
                 truncated = True
                 logger.info(

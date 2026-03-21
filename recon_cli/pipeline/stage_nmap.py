@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import xml.etree.ElementTree as ET
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
@@ -109,13 +110,22 @@ class NmapStage(Stage):
                 cmd.extend(["-p", str(ports)])
             elif top_ports:
                 cmd.extend(["--top-ports", str(top_ports)])
+            
             if nmap_scripts:
                 cmd.extend(["--script", str(nmap_scripts)])
+            
             if nmap_args:
+                forbidden = {"--script", "-iL", "--interactive", "--privileged", "--unprivileged", "-o", "--stylesheet"}
                 try:
-                    cmd.extend(shlex.split(str(nmap_args)))
+                    args_list = shlex.split(str(nmap_args))
+                    dangerous = [a for a in args_list if any(f in a for f in forbidden)]
+                    if dangerous:
+                        context.logger.warning("Dangerous nmap_args detected and stripped: %s", dangerous)
+                        args_list = [a for a in args_list if not any(f in a for f in forbidden)]
+                    cmd.extend(args_list)
                 except ValueError:
                     context.logger.warning("Invalid nmap_args; ignoring: %s", nmap_args)
+
             try:
                 executor.run(cmd, check=False, timeout=timeout)
             except CommandError:
@@ -126,8 +136,6 @@ class NmapStage(Stage):
             if not xml_path.exists():
                 continue
             try:
-                import xml.etree.ElementTree as ET
-
                 tree = ET.parse(xml_path)
             except Exception:
                 continue
@@ -238,7 +246,9 @@ class NmapStage(Stage):
                 udp_cmd.extend(["--script", str(nmap_scripts)])
             if nmap_args:
                 try:
-                    udp_cmd.extend(shlex.split(str(nmap_args)))
+                    args_list = shlex.split(str(nmap_args))
+                    args_list = [a for a in args_list if not any(f in a for f in forbidden)]
+                    udp_cmd.extend(args_list)
                 except ValueError:
                     pass
             try:
@@ -248,8 +258,6 @@ class NmapStage(Stage):
                 return
             if udp_xml.exists():
                 try:
-                    import xml.etree.ElementTree as ET
-
                     tree = ET.parse(udp_xml)
                 except Exception:
                     return

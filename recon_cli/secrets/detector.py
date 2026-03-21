@@ -26,11 +26,14 @@ import json
 import math
 import re
 import hashlib
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════
 #                     Secret Patterns
@@ -179,7 +182,7 @@ class SecretsDetector:
             try:
                 requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
             except Exception:
-                pass
+                logger.debug("Failed to disable urllib3 warnings", exc_info=True)
         if "User-Agent" not in self.session.headers:
             self.session.headers.update({"User-Agent": USER_AGENT})
         self.timeout = timeout

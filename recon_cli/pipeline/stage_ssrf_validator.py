@@ -11,7 +11,6 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.oast import InteractshSession
 
 
@@ -392,7 +391,7 @@ class SSRFValidatorStage(Stage):
     ) -> List[Dict[str, object]]:
         grouped: Dict[str, List[Dict[str, object]]] = defaultdict(list)
         seen: Set[Tuple[str, str, str, str]] = set()
-        for entry in iter_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             if not isinstance(entry, dict):
                 continue
             url = str(entry.get("url") or "").strip()

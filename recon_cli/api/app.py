@@ -7,9 +7,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Header
@@ -105,7 +108,7 @@ def _patch_httpx_asyncclient() -> None:
 
                 kwargs["transport"] = ASGITransport(app=app)
             except Exception:
-                pass
+                logger.debug("ASGITransport not available in httpx", exc_info=True)
         if base_url is not None and "base_url" not in kwargs:
             kwargs["base_url"] = base_url
         return original_init(self, *args, **kwargs)
@@ -125,7 +128,7 @@ if FASTAPI_AVAILABLE:
     class ScanRequest(BaseModel):
         """طلب فحص جديد"""
 
-        target: str = Field("", description="الهدف (domain أو IP)")
+        target: str = Field(None, min_length=1, description="الهدف (domain أو IP)")
         profile: str = Field("passive", description="الملف الشخصي")
         inline: bool = Field(False, description="تشغيل فوري")
         scanners: List[str] = Field(default_factory=list, description="الماسحات")
@@ -138,7 +141,7 @@ if FASTAPI_AVAILABLE:
     class JobCreateRequest(BaseModel):
         """طلب إنشاء مهمة"""
 
-        targets: List[str] = Field(default_factory=list, description="الأهداف")
+        targets: List[str] = Field(None, min_length=1, description="الأهداف")
         stages: List[str] = Field(default_factory=list, description="المراحل")
         options: Dict[str, Any] = Field(default_factory=dict, description="خيارات")
 
@@ -196,7 +199,7 @@ if FASTAPI_AVAILABLE:
 # ═══════════════════════════════════════════════════════════
 
 
-def create_app() -> "FastAPI":
+def create_app(manager: Optional[JobManager] = None) -> "FastAPI":
     """إنشاء تطبيق FastAPI"""
 
     if not FASTAPI_AVAILABLE:
@@ -211,7 +214,6 @@ def create_app() -> "FastAPI":
     )
 
     # CORS - Restricted to localhost for security
-    # For production, add your domain to allow_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -223,13 +225,13 @@ def create_app() -> "FastAPI":
             "http://127.0.0.1:3000",
         ],
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["X-API-Key", "Content-Type", "Authorization"],
     )
 
     # حالة التطبيق
     app.state.start_time = datetime.now()
-    app.state.manager = JobManager()
+    app.state.manager = manager or JobManager()
 
     async def _maybe_authenticate(x_api_key: Optional[str]) -> Optional[Dict[str, Any]]:
         if not x_api_key:
@@ -281,23 +283,23 @@ def create_app() -> "FastAPI":
 
     def _validate_job_id_or_400(job_id: str) -> None:
         if not JobManager.is_safe_job_id(job_id):
-            raise HTTPException(status_code=400, detail="Invalid job_id")
+            raise HTTPException(status_code=422, detail="Invalid job_id")
 
     def _normalize_profile_or_400(profile: str) -> str:
         normalized = str(profile or "").strip().lower()
         if not normalized:
-            raise HTTPException(status_code=400, detail="profile is required")
+            raise HTTPException(status_code=422, detail="profile is required")
         if len(normalized) > MAX_API_TOKEN_LENGTH or not SAFE_TOKEN_RE.fullmatch(
             normalized
         ):
-            raise HTTPException(status_code=400, detail="Invalid profile value")
+            raise HTTPException(status_code=422, detail="Invalid profile value")
         available_profiles = set(config.available_profiles().keys())
         fallback_profiles = {"passive", "full", "safe", "aggressive"}
         allowed_profiles = fallback_profiles | available_profiles
         if normalized not in allowed_profiles:
             allowed_display = ", ".join(sorted(allowed_profiles))
             raise HTTPException(
-                status_code=400,
+                status_code=422,
                 detail=f"Unknown profile '{normalized}'. Allowed: {allowed_display}",
             )
         return normalized
@@ -311,21 +313,21 @@ def create_app() -> "FastAPI":
     ) -> List[str]:
         if len(values) > max_items:
             raise HTTPException(
-                status_code=400, detail=f"{field_name} exceeds max items ({max_items})"
+                status_code=422, detail=f"{field_name} exceeds max items ({max_items})"
             )
         normalized: List[str] = []
         seen = set()
         for raw in values:
             if not isinstance(raw, str):
                 raise HTTPException(
-                    status_code=400, detail=f"{field_name} must contain strings only"
+                    status_code=422, detail=f"{field_name} must contain strings only"
                 )
             token = raw.strip()
             if not token:
                 continue
             if len(token) > MAX_API_TOKEN_LENGTH or not pattern.fullmatch(token):
                 raise HTTPException(
-                    status_code=400, detail=f"Invalid {field_name} value '{token}'"
+                    status_code=422, detail=f"Invalid {field_name} value '{token}'"
                 )
             if token not in seen:
                 seen.add(token)
@@ -334,33 +336,33 @@ def create_app() -> "FastAPI":
 
     def _normalize_targets_or_400(targets: List[str], *, allow_ip: bool) -> List[str]:
         if not targets:
-            raise HTTPException(status_code=400, detail="targets is required")
+            raise HTTPException(status_code=422, detail="targets is required")
         if len(targets) > MAX_API_TARGETS:
             raise HTTPException(
-                status_code=400, detail=f"Too many targets (max {MAX_API_TARGETS})"
+                status_code=422, detail=f"Too many targets (max {MAX_API_TARGETS})"
             )
         normalized: List[str] = []
         seen = set()
         for raw in targets:
             if not isinstance(raw, str):
                 raise HTTPException(
-                    status_code=400, detail="targets must contain strings only"
+                    status_code=422, detail="targets must contain strings only"
                 )
             target = raw.strip()
             if not target:
                 raise HTTPException(
-                    status_code=400, detail="targets cannot contain empty values"
+                    status_code=422, detail="targets cannot contain empty values"
                 )
             if len(target) > MAX_API_TARGET_LENGTH:
                 raise HTTPException(
-                    status_code=400,
+                    status_code=422,
                     detail=f"target too long (max {MAX_API_TARGET_LENGTH} chars)",
                 )
             try:
                 clean = validation.validate_target(target, allow_ip=allow_ip)
             except ValueError as exc:
                 raise HTTPException(
-                    status_code=400, detail=f"Invalid target '{target}': {exc}"
+                    status_code=422, detail=f"Invalid target '{target}': {exc}"
                 ) from exc
             if clean not in seen:
                 seen.add(clean)
@@ -370,20 +372,20 @@ def create_app() -> "FastAPI":
     def _validate_option_value(value: Any, *, path: str, depth: int) -> Any:
         if depth > MAX_API_OPTIONS_DEPTH:
             raise HTTPException(
-                status_code=400, detail=f"options nesting too deep at {path}"
+                status_code=422, detail=f"options nesting too deep at {path}"
             )
         if value is None or isinstance(value, (bool, int, float)):
             return value
         if isinstance(value, str):
             if len(value) > MAX_API_OPTIONS_STRING_LENGTH:
                 raise HTTPException(
-                    status_code=400, detail=f"options value too long at {path}"
+                    status_code=422, detail=f"options value too long at {path}"
                 )
             return value
         if isinstance(value, list):
             if len(value) > MAX_API_OPTIONS_LIST_ITEMS:
                 raise HTTPException(
-                    status_code=400, detail=f"options list too large at {path}"
+                    status_code=422, detail=f"options list too large at {path}"
                 )
             return [
                 _validate_option_value(item, path=f"{path}[{idx}]", depth=depth + 1)
@@ -392,13 +394,13 @@ def create_app() -> "FastAPI":
         if isinstance(value, dict):
             if len(value) > MAX_API_OPTIONS_KEYS:
                 raise HTTPException(
-                    status_code=400, detail=f"options object too large at {path}"
+                    status_code=422, detail=f"options object too large at {path}"
                 )
             clean_obj: Dict[str, Any] = {}
             for raw_key, raw_value in value.items():
                 if not isinstance(raw_key, str):
                     raise HTTPException(
-                        status_code=400,
+                        status_code=422,
                         detail=f"options keys must be strings at {path}",
                     )
                 key = raw_key.strip()
@@ -408,7 +410,7 @@ def create_app() -> "FastAPI":
                     or not SAFE_TOKEN_RE.fullmatch(key)
                 ):
                     raise HTTPException(
-                        status_code=400,
+                        status_code=422,
                         detail=f"Invalid options key '{raw_key}' at {path}",
                     )
                 clean_obj[key] = _validate_option_value(
@@ -416,18 +418,18 @@ def create_app() -> "FastAPI":
                 )
             return clean_obj
         raise HTTPException(
-            status_code=400, detail=f"Unsupported options value at {path}"
+            status_code=422, detail=f"Unsupported options value at {path}"
         )
 
     def _normalize_options_or_400(options: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(options, dict):
-            raise HTTPException(status_code=400, detail="options must be an object")
+            raise HTTPException(status_code=422, detail="options must be an object")
         cleaned = _validate_option_value(options, path="options", depth=0)
         try:
             serialized = json.dumps(cleaned, separators=(",", ":"))
         except TypeError as exc:
             raise HTTPException(
-                status_code=400, detail=f"options contain unsupported values: {exc}"
+                status_code=422, detail=f"options contain unsupported values: {exc}"
             ) from exc
         if len(serialized.encode("utf-8")) > MAX_API_OPTIONS_BYTES:
             raise HTTPException(
@@ -589,7 +591,7 @@ def create_app() -> "FastAPI":
         x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ):
         """عرض قائمة المهام"""
-        await _maybe_authenticate(x_api_key)
+        await _require_authenticate(x_api_key)
         jobs: List[JobResponse] = []
         try:
             lifecycle = JobLifecycle(manager=app.state.manager)
@@ -632,7 +634,7 @@ def create_app() -> "FastAPI":
     ):
         """الحصول على معلومات مهمة"""
         _validate_job_id_or_400(job_id)
-        await _maybe_authenticate(x_api_key)
+        await _require_authenticate(x_api_key)
         lifecycle = JobLifecycle(manager=app.state.manager)
         record = lifecycle.get_job(job_id)
         if record is None:
@@ -664,7 +666,7 @@ def create_app() -> "FastAPI":
     ):
         """الحصول على نتائج المهمة"""
         _validate_job_id_or_400(job_id)
-        await _maybe_authenticate(x_api_key)
+        await _require_authenticate(x_api_key)
         results_manager = JobResults(manager=app.state.manager)
         results = results_manager.get_results(
             job_id, limit=limit, result_type=result_type
@@ -680,7 +682,7 @@ def create_app() -> "FastAPI":
     ):
         """الحصول على ملخص المهمة"""
         _validate_job_id_or_400(job_id)
-        await _maybe_authenticate(x_api_key)
+        await _require_authenticate(x_api_key)
         summary_manager = JobSummary(manager=app.state.manager)
         summary_data = summary_manager.get_summary(job_id)
         if summary_data is None:
@@ -694,7 +696,7 @@ def create_app() -> "FastAPI":
     ):
         """الحصول على سجلات المهمة"""
         _validate_job_id_or_400(job_id)
-        await _maybe_authenticate(x_api_key)
+        await _require_authenticate(x_api_key)
         record = app.state.manager.load_job(job_id)
         if not record:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
@@ -713,16 +715,7 @@ def create_app() -> "FastAPI":
         await _require_capability(x_api_key, Permission.JOBS_CREATE.value)
         manager = app.state.manager
 
-        raw_target = request.target if isinstance(request.target, str) else ""
-        if not raw_target.strip():
-            raise HTTPException(status_code=400, detail="target is required")
-        allow_ip = bool(request.allow_ip)
-        try:
-            if validation.is_ip(validation._coerce_hostname(raw_target)):
-                allow_ip = True
-        except Exception:
-            allow_ip = bool(request.allow_ip)
-        target = _normalize_targets_or_400([raw_target], allow_ip=allow_ip)[0]
+        target = _normalize_targets_or_400([request.target], allow_ip=request.allow_ip)[0]
         profile = _normalize_profile_or_400(request.profile)
         scanners = _normalize_token_list_or_400(
             request.scanners,
@@ -743,7 +736,7 @@ def create_app() -> "FastAPI":
                 profile=profile,
                 inline=request.inline,
                 force=request.force,
-                allow_ip=allow_ip,
+                allow_ip=request.allow_ip,
                 scanners=scanners if scanners else None,
                 active_modules=active_modules if active_modules else None,
             )
@@ -767,7 +760,7 @@ def create_app() -> "FastAPI":
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post("/api/jobs")
     async def create_job(
@@ -782,7 +775,7 @@ def create_app() -> "FastAPI":
         allow_ip = bool(options.get("allow_ip"))
         if "allow_ip" in options and not isinstance(options.get("allow_ip"), bool):
             raise HTTPException(
-                status_code=400, detail="options.allow_ip must be a boolean"
+                status_code=422, detail="options.allow_ip must be a boolean"
             )
         targets = _normalize_targets_or_400(request.targets, allow_ip=allow_ip)
         stages = _normalize_token_list_or_400(
@@ -798,7 +791,7 @@ def create_app() -> "FastAPI":
                 options=options,
             )
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"job_id": job_id, "status": "queued"}
 
     @app.post("/api/jobs/{job_id}/requeue")
@@ -893,9 +886,8 @@ def _find_job_dir(job_id: str) -> Optional[Path]:
 def _run_job(job_id: str):
     """تشغيل مهمة في الخلفية"""
     from recon_cli.pipeline.runner import run_pipeline
-    from recon_cli.jobs.manager import JobManager
 
-    manager = JobManager()
+    manager = app.state.manager
     record = manager.load_job(job_id)
 
     if record:

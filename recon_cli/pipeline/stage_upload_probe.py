@@ -7,7 +7,6 @@ from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.jsonl import read_jsonl
 
 try:
     from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
@@ -219,7 +218,7 @@ class UploadProbeStage(Stage):
 
     def _collect_candidates(self, context: PipelineContext) -> List[str]:
         candidates: List[str] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             etype = entry.get("type")
             if etype in {"form", "auth_form"}:
                 action = entry.get("action") or entry.get("url")
@@ -235,7 +234,7 @@ class UploadProbeStage(Stage):
 
     def _collect_hosts(self, context: PipelineContext) -> List[str]:
         hosts: List[str] = []
-        for entry in read_jsonl(context.record.paths.results_jsonl):
+        for entry in context.get_results():
             if entry.get("type") == "hostname":
                 h = entry.get("hostname")
                 if h:

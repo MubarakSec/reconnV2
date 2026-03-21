@@ -15,19 +15,15 @@ class JobLifecycle:
         manager: Optional[JobManager] = None,
         jobs_dir: Optional[Path] = None,
     ) -> None:
-        if jobs_dir is not None:
-            self._configure_jobs_root(Path(jobs_dir))
-        self.manager = manager or JobManager()
-        self.jobs_dir = jobs_dir or config.JOBS_ROOT
-
-    def _configure_jobs_root(self, jobs_dir: Path) -> None:
-        jobs_dir = jobs_dir.resolve()
-        config.JOBS_ROOT = jobs_dir
-        config.QUEUED_JOBS = jobs_dir / "queued"
-        config.RUNNING_JOBS = jobs_dir / "running"
-        config.FINISHED_JOBS = jobs_dir / "finished"
-        config.FAILED_JOBS = jobs_dir / "failed"
-        config.ensure_base_directories()
+        if manager:
+            self.manager = manager
+        elif jobs_dir:
+            # If we are given a jobs_dir, we treat its parent as the home for JobManager
+            self.manager = JobManager(home=Path(jobs_dir).parent)
+        else:
+            self.manager = JobManager()
+        
+        self.jobs_dir = jobs_dir or self.manager.jobs_root
 
     def create_job(
         self,
@@ -94,7 +90,7 @@ class JobLifecycle:
     ) -> Optional[JobRecord]:
         if not self.manager.acquire_lock(job_id, owner=owner or "worker"):
             return None
-        new_root = self.manager.move_job(job_id, config.RUNNING_JOBS)
+        new_root = self.manager.move_job(job_id, self.manager.running_dir)
         if not new_root:
             self.manager.release_lock(job_id)
             return None
@@ -109,7 +105,7 @@ class JobLifecycle:
     def move_to_finished(
         self, job_id: str, status: str = "finished"
     ) -> Optional[JobRecord]:
-        new_root = self.manager.move_job(job_id, config.FINISHED_JOBS)
+        new_root = self.manager.move_job(job_id, self.manager.finished_dir)
         if not new_root:
             return None
         record = self.manager.load_job(job_id)
@@ -120,7 +116,7 @@ class JobLifecycle:
         return record
 
     def move_to_failed(self, job_id: str) -> Optional[JobRecord]:
-        new_root = self.manager.move_job(job_id, config.FAILED_JOBS)
+        new_root = self.manager.move_job(job_id, self.manager.failed_dir)
         if not new_root:
             return None
         record = self.manager.load_job(job_id)
@@ -131,7 +127,7 @@ class JobLifecycle:
         return record
 
     def requeue(self, job_id: str) -> Optional[JobRecord]:
-        new_root = self.manager.move_job(job_id, config.QUEUED_JOBS)
+        new_root = self.manager.move_job(job_id, self.manager.queued_dir)
         if not new_root:
             return None
         self.manager.release_lock(job_id)

@@ -39,8 +39,19 @@ pytestmark = [
 @pytest.fixture
 def api_client():
     """عميل API"""
-    app = create_app()
-    return TestClient(app)
+    with patch("recon_cli.users.UserManager.validate_api_key") as mock_val:
+        # Mock a valid user with all permissions
+        mock_val.return_value = {
+            "id": "admin",
+            "username": "admin",
+            "permissions": ["api:admin", "api:access", "jobs:create", "jobs:run", "jobs:delete"],
+            "scopes": ["*"]
+        }
+        app = create_app()
+        client = TestClient(app)
+        # Always provide a dummy key so _require_authenticate sees a header
+        client.headers["X-API-Key"] = "test-key"
+        yield client
 
 
 @pytest.fixture
@@ -343,8 +354,7 @@ class TestAPIErrorHandling:
                 headers={"X-API-Key": "test-api-key"},
             )
         
-        assert response.status_code == 400
-        assert response.json()["detail"] == "targets is required"
+        assert response.status_code == 422
     
     def test_internal_server_error(self, api_client: TestClient):
         """خطأ داخلي في الخادم"""

@@ -563,12 +563,12 @@ class _CommandSession:
             try:
                 read_stream.close()
             except Exception:
-                pass
+                self.logger.debug("Error closing session read stream", exc_info=True)
         if write_stream is not None and write_stream is not read_stream:
             try:
                 write_stream.close()
             except Exception:
-                pass
+                self.logger.debug("Error closing session write stream", exc_info=True)
         if self.trace_span is not None and self._dropped_output_chars > 0:
             self.trace_span.set_attribute("session_output_truncated", True)
             self.trace_span.set_attribute("session_dropped_output_chars", self._dropped_output_chars)
@@ -686,7 +686,7 @@ class _CommandSession:
             try:
                 process.terminate()
             except Exception:
-                pass
+                _MODULE_LOGGER.debug("Error closing session stream", exc_info=True)
         try:
             process.wait(timeout=1.0)
         except subprocess.TimeoutExpired:
@@ -696,7 +696,7 @@ class _CommandSession:
                 try:
                     process.kill()
                 except Exception:
-                    pass
+                    self.logger.debug("Failed to kill process %d", process.pid, exc_info=True)
         self.wait(timeout=1.0)
 
     def snapshot(self, *, clear_output: bool = False) -> CommandSessionInfo:
@@ -825,7 +825,7 @@ def _cleanup_executor_sessions(*, terminate_running: bool) -> Dict[str, int]:
                 session.terminate()
                 terminated += 1
             except Exception:
-                pass
+                _MODULE_LOGGER.debug("Error closing session stream", exc_info=True)
         _remove_session_registry_entry(session)
         removed += 1
     return {

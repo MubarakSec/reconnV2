@@ -7,11 +7,14 @@ import shutil
 import json
 import os
 import errno
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from recon_cli import config
+
+logger = logging.getLogger(__name__)
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.utils import fs, time as time_utils
 from recon_cli.utils.last_run import clear_job_pointers, refresh_job_pointers
@@ -53,7 +56,15 @@ class JobManager:
 
     def __init__(self, home: Path | None = None) -> None:
         self.home = home or config.RECON_HOME
-        config.ensure_base_directories()
+        self.jobs_root = self.home / "jobs"
+        self.queued_dir = self.jobs_root / "queued"
+        self.running_dir = self.jobs_root / "running"
+        self.finished_dir = self.jobs_root / "finished"
+        self.failed_dir = self.jobs_root / "failed"
+        
+        # Ensure directories exist
+        for d in [self.queued_dir, self.running_dir, self.finished_dir, self.failed_dir]:
+            d.mkdir(parents=True, exist_ok=True)
 
     def _sanitize_target(self, target: str) -> str:
         """Sanitize target for use in job ID (filesystem-safe)."""
@@ -162,7 +173,7 @@ class JobManager:
         incremental_from: Optional[str] = None,
     ) -> JobRecord:
         job_id = self.generate_job_id(target)
-        root = config.QUEUED_JOBS / job_id
+        root = self.queued_dir / job_id
         paths = JobPaths(root)
         paths.root.mkdir(parents=True, exist_ok=True)
         paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -238,7 +249,7 @@ class JobManager:
 
                 ensure_project(project)
             except Exception:
-                pass
+                logger.debug("Failed to ensure project %s", project, exc_info=True)
         fs.write_json(paths.spec_path, spec.to_dict())
         fs.write_json(paths.metadata_path, metadata.to_dict())
         paths.results_jsonl.touch(exist_ok=True)
@@ -266,15 +277,15 @@ class JobManager:
     ) -> List[str]:
         groups = {
             None: [
-                config.QUEUED_JOBS,
-                config.RUNNING_JOBS,
-                config.FINISHED_JOBS,
-                config.FAILED_JOBS,
+                self.queued_dir,
+                self.running_dir,
+                self.finished_dir,
+                self.failed_dir,
             ],
-            "queued": [config.QUEUED_JOBS],
-            "running": [config.RUNNING_JOBS],
-            "finished": [config.FINISHED_JOBS],
-            "failed": [config.FAILED_JOBS],
+            "queued": [self.queued_dir],
+            "running": [self.running_dir],
+            "finished": [self.finished_dir],
+            "failed": [self.failed_dir],
         }
         dirs = groups.get(status)
         if dirs is None:
@@ -345,10 +356,10 @@ class JobManager:
         if not self.is_safe_job_id(job_id):
             return None
         search_locations = [
-            config.QUEUED_JOBS,
-            config.RUNNING_JOBS,
-            config.FINISHED_JOBS,
-            config.FAILED_JOBS,
+            self.queued_dir,
+            self.running_dir,
+            self.finished_dir,
+            self.failed_dir,
         ]
         for location in search_locations:
             location_resolved = location.resolve()

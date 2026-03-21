@@ -51,6 +51,15 @@ api:
 #                     الـ Pipeline
 # ═══════════════════════════════════════════════════════════
 pipeline:
+  # تفعيل المراحل (stages)
+  enable_secrets: true
+  enable_runtime_crawl: false  # ثقيلة على الموارد
+  enable_screenshots: true
+  enable_idor: false           # تهاجم أهداف نشطة
+  enable_github_recon: true
+  enable_nmap: false           # تحتاج صلاحيات root لبعض الخصائص
+  enable_takeover: true
+
   # الحد الأقصى للعمليات المتزامنة
   max_concurrent: 50
   

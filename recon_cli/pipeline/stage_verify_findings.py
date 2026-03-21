@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import iter_jsonl
 
 
 class VerifyFindingsStage(Stage):
@@ -44,7 +43,7 @@ class VerifyFindingsStage(Stage):
             defaultdict(list)
         )
         trash_count = 0
-        for entry in iter_jsonl(results_path):
+        for entry in context.iter_results():
             if not isinstance(entry, dict):
                 continue
             if not self._is_finding(entry):

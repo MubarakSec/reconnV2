@@ -857,6 +857,9 @@ def doctor(
         "--fix-deps",
         help="Attempt to install missing dependencies (python packages, playwright browsers, interactsh-client)",
     ),
+    exit_on_fail: bool = typer.Option(
+        True, "--exit-on-fail/--no-exit-on-fail", help="Exit with code 1 if issues are found"
+    ),
 ) -> None:
     """Run quick environment & source sanity checks."""
     config.ensure_base_directories(force=fix)
@@ -1203,7 +1206,8 @@ def doctor(
     if issues:
         for issue in issues:
             typer.echo(f"[fail] {issue}")
-        raise typer.Exit(code=1)
+        if exit_on_fail:
+            raise typer.Exit(code=1)
 
     typer.echo("")
     typer.echo("== API Key Health ==")
@@ -1225,11 +1229,14 @@ def doctor(
             typer.echo("")
 
     if warnings:
+        typer.echo("")
         typer.secho(
             f"Doctor completed with {len(warnings)} warning(s)", fg=typer.colors.YELLOW
         )
+        # We don't raise Exit(1) for warnings (like missing API keys) to allow CI/CD and tests to pass
         return
 
+    typer.echo("")
     typer.secho("All checks passed", fg=typer.colors.GREEN)
 
 

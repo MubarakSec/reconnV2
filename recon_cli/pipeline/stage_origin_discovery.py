@@ -9,6 +9,7 @@ from typing import List, Set, Dict, Any
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.enrich import classify_provider
 
 class OriginDiscoveryStage(Stage):
     """
@@ -118,7 +119,8 @@ class OriginDiscoveryStage(Stage):
                     mx_host = str(rdata.exchange).rstrip('.')
                     if domain in mx_host:
                         try:
-                            mx_ips = socket.gethostbyname_ex(mx_host)[2]
+                            loop = asyncio.get_running_loop()
+                            mx_ips = (await loop.run_in_executor(None, lambda: socket.gethostbyname_ex(mx_host)))[2]
                             for ip in mx_ips:
                                 potential_ips[ip] = f"MX Record ({mx_host})"
                         except socket.error:
@@ -135,10 +137,11 @@ class OriginDiscoveryStage(Stage):
 
             # 4. Verify and Filter
             for ip, method in potential_ips.items():
-                # Filter out known CDNs
-                # We can't do full ASN lookup here easily without an external API, 
-                # but we can at least check if it resolves to a CDN name if we had reverse DNS.
-                # For now, we'll verify via Host header which is more reliable.
+                # Filter out known CDNs to avoid false positives
+                _, is_cdn, _ = classify_provider(ip)
+                if is_cdn:
+                    context.logger.debug("Skipping CDN IP %s found via %s", ip, method)
+                    continue
                 
                 context.logger.debug("Verifying potential origin IP %s found via %s", ip, method)
                 

@@ -1,34 +1,35 @@
-# ReconnV2 Upgrade Roadmap
+# ReconnV2 Security & Stability Overhaul Roadmap (Phase 2)
 
-This document outlines the strategic upgrades required to transform the current ReconnV2 tool from a rigid, synchronous pipeline into a modern, high-performance, asynchronous reconnaissance engine.
+Following the initial async transformation, this roadmap focuses on resolving critical security vulnerabilities, architectural bottlenecks, and logic errors identified during the security review.
 
-## Phase 1: Performance & Deep Concurrency
-**Goal**: Eliminate sequential bottlenecks inside individual pipeline stages and drastically reduce process spawning overhead.
+## Phase 1: Security Hardening & API Integrity
+- [ ] **Fix API Auth Bypass**: Change `_maybe_authenticate` to `_require_authenticate` for all sensitive endpoints.
+- [ ] **Harden CORS Policy**: Remove wildcard methods/headers and restrict to specific, safe defaults.
+- [ ] **Nmap Command Guard**: Implement argument sanitization for `nmap_args` to prevent script/file injection.
+- [ ] **Secure JSONL I/O**: Complete the migration to `context.get_results()` to eliminate redundant disk reads.
 
-- [x] **Audit Core Network Stages**: Identify all stages relying on sequential `for` loops.
-- [x] **Integrate AsyncHTTPClient**: Replace synchronous `requests` with `AsyncHTTPClient`.
-- [x] **Implement TaskGroups**: Rewrite internal stage loops to use `asyncio.gather`.
-- [x] **Reduce Subprocess Overhead**: Native python implementations for lightweight tasks.
+## Phase 2: Correctness & Verification
+- [ ] **Origin Verification Upgrade**: Add CDN IP range filtering to `OriginDiscoveryStage` to eliminate false positives.
+- [ ] **Stricter Takeover Scoring**: Require evidence-provider alignment before marking findings as Critical.
+- [ ] **Async DNS Fix**: Migrate all remaining blocking `socket.gethostbyname` calls to `run_in_executor`.
 
-## Phase 2: Architecture & Data Flow
-**Goal**: Move away from disk I/O bottlenecks and rigid execution graphs.
+## Phase 3: Feature Enablement & OSINT
+- [ ] **Enable Hidden Stages**: Expose `secrets`, `crawl`, `screenshots`, and `github_recon` flags in `default.yaml`.
+- [ ] **Wayback CDX API**: Finalize the httpx-based fallback for historical endpoint discovery.
+- [ ] **Bulk Reverse WHOIS**: Integrate production-ready API keys for registrar-based expansion.
 
-- [x] **In-Memory Event Bus**: Replace "Pass-by-File" architecture with an `asyncio.Queue`.
-- [x] **Real-time Stage Triggers**: Enable inter-stage streaming via event bus subscription.
-- [x] **Dynamic Dependency Resolution**: Refactor `DependencyResolver` for dynamic stage declarations.
+## Phase 4: Code Quality
+- [ ] **Error Visibility**: Replace remaining `except Exception: pass` with debug logging.
+- [ ] **Refactor Long Methods**: Continue breaking down logic in discovery stages into testable units.
 
-## Phase 3: State Management & Intelligence
-**Goal**: Prevent redundant work across scans and ensure data consistency.
+## Phase 5: Delta & Deduplication Intelligence
+- [ ] Build DeltaStage: diff current run against last finished run for same target, tag new findings with "delta:new"
+- [ ] Persist result fingerprints per-target across runs so re-scans surface only new attack surface
+- [ ] Add delta summary to Telegram notifications (X new findings, Y new hosts since last run)
 
-- [x] **Global Command Caching**: Caching layer for `CommandExecutor` implemented.
-- [x] **Strict Data Typing (Pydantic)**: Foundation implemented in `recon_cli/db/schemas.py`.
-- [x] **Global Rate Limiting Service**: Unify stage-specific limiters into a single, global service.
+## Phase 6: Active Validation Pipeline
+- [ ] Wire nuclei to auto-select templates based on what earlier stages found (CMS tags → CMS templates, exposed ports → CVE templates)
+- [ ] Add missing takeover fingerprints: Acquia, Bitbucket, DigitalOcean Spaces, Kinsta, Squarespace, Tumblr, UserVoice, Webflow, Launchrock (12 providers total)
 
-## Phase 4: Integration & Cleanup
-**Goal**: Wire up orphaned logic and finalize structural stability.
-
-- [x] **Consolidate Error Handling**: Systematically replaced bare except blocks.
-- [x] **Integrate Learning & Correlation**: Fully woven into core dependency graph.
-- [x] **Remove Mixed Paradigms**: Deprecated thread-based orchestrator in favor of async runner.
-- [x] **Unified Observability**: Fixed trace context propagation across async/thread boundaries.
-- [x] **Scalable Results Engine**: Implemented streaming LRU buffering for results.
+## Phase 7: Performance
+- [ ] Replace synchronous requests.get() with httpx.AsyncClient in all 15 stages that still use it (js_intel, html_forms, security_headers, auth_discovery, cms_scan, verify_findings, ws_grpc_discovery, open_redirect_validator, cloud_assets)

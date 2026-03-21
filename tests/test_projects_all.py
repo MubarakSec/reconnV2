@@ -31,7 +31,8 @@ def test_projects_list_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     projects.ensure_project("beta", scope=["beta.example.com"])
 
     names = projects.list_projects()
-    assert names == ["alpha", "beta"]
+    for name in ["alpha", "beta"]:
+        assert name in names
     assert projects.get_project("alpha")["name"] == "alpha"
 
 

@@ -10,7 +10,6 @@ from urllib.parse import urlparse, urlunparse
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import iter_jsonl
 
 
 class AuthBypassValidatorStage(Stage):
@@ -330,7 +329,7 @@ class AuthBypassValidatorStage(Stage):
     ) -> List[Dict[str, object]]:
         grouped: Dict[str, List[Dict[str, object]]] = defaultdict(list)
         seen: Set[str] = set()
-        for entry in iter_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             if not isinstance(entry, dict):
                 continue
             url = str(entry.get("url") or "").strip()

@@ -82,7 +82,7 @@ def test_wizard_command_executes_async_run(monkeypatch):
 
 def test_doctor_reports_python_dependency_section():
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["doctor"])
+    result = runner.invoke(cli.app, ["doctor", "--no-exit-on-fail"])
     assert result.exit_code in {0, 1}
     assert "== Tool Health ==" in result.stdout
     assert "interactsh-client" in result.stdout
@@ -98,7 +98,7 @@ def test_doctor_reports_missing_external_tools(monkeypatch):
 
     monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(lambda _tool: False))
 
-    result = runner.invoke(cli.app, ["doctor"])
+    result = runner.invoke(cli.app, ["doctor", "--no-exit-on-fail"])
     assert result.exit_code == 0
     assert "httpx        : missing" in result.stdout
     assert "nuclei       : missing" in result.stdout
@@ -116,7 +116,7 @@ def test_doctor_reports_tool_probe_errors(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", _fake_run)
 
-    result = runner.invoke(cli.app, ["doctor"])
+    result = runner.invoke(cli.app, ["doctor", "--no-exit-on-fail"])
     assert result.exit_code == 0
     assert "droopescan   : error" in result.stdout
 
@@ -152,7 +152,7 @@ def test_doctor_fix_deps_attempts_installs(monkeypatch):
     monkeypatch.setattr(cli.CommandExecutor, "available", staticmethod(_fake_available))
     monkeypatch.setattr("subprocess.run", _fake_run)
 
-    result = runner.invoke(cli.app, ["doctor", "--fix-deps"])
+    result = runner.invoke(cli.app, ["doctor", "--fix-deps", "--no-exit-on-fail"])
     assert result.exit_code == 0
     assert "== Dependency Fix Attempts ==" in result.stdout
     assert any(cmd[:4] == [sys.executable, "-m", "pip", "install"] for cmd in calls)

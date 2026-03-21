@@ -11,7 +11,6 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.secrets.detector import SECRETS_PATTERNS, shannon_entropy
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.jsonl import iter_jsonl
 
 
 class SecretExposureValidatorStage(Stage):
@@ -234,7 +233,7 @@ class SecretExposureValidatorStage(Stage):
     ) -> List[Dict[str, object]]:
         grouped: Dict[str, List[Dict[str, object]]] = defaultdict(list)
         seen: Set[Tuple[str, str, str]] = set()
-        for entry in iter_jsonl(context.record.paths.results_jsonl):
+        for entry in context.iter_results():
             if not isinstance(entry, dict):
                 continue
             if str(entry.get("finding_type") or "").lower() != "exposed_secret":
