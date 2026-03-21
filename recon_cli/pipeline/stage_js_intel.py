@@ -186,7 +186,7 @@ class JSIntelligenceStage(Stage):
 
     def execute(self, context: PipelineContext) -> None:
         try:
-            import requests
+            pass
         except Exception:
             context.logger.warning("js intelligence requires requests; skipping")
             return

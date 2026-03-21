@@ -5,11 +5,10 @@ import socket
 import asyncio
 import dns.resolver
 import httpx
-from typing import List, Set, Dict, Any, Optional
+from typing import List, Set, Dict, Any
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.enrich import classify_provider
 
 class OriginDiscoveryStage(Stage):
     """
