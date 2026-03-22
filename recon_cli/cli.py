@@ -875,16 +875,31 @@ def doctor(
     if seclists:
         seclists_path = config.RECON_HOME / "seclists"
         if seclists_path.exists():
-            typer.secho("✅ SecLists already exists in project root.", fg=typer.colors.GREEN)
+            typer.secho(
+                "✅ SecLists already exists in project root.", fg=typer.colors.GREEN
+            )
         else:
-            typer.secho("⏳ SecLists not found. Downloading to project root...", fg=typer.colors.YELLOW)
+            typer.secho(
+                "⏳ SecLists not found. Downloading to project root...",
+                fg=typer.colors.YELLOW,
+            )
             try:
                 import subprocess
+
                 subprocess.run(
-                    ["git", "clone", "--depth", "1", "https://github.com/danielmiessler/SecLists.git", str(seclists_path)],
-                    check=True
+                    [
+                        "git",
+                        "clone",
+                        "--depth",
+                        "1",
+                        "https://github.com/danielmiessler/SecLists.git",
+                        str(seclists_path),
+                    ],
+                    check=True,
                 )
-                typer.secho("✅ SecLists downloaded successfully.", fg=typer.colors.GREEN)
+                typer.secho(
+                    "✅ SecLists downloaded successfully.", fg=typer.colors.GREEN
+                )
             except Exception as e:
                 typer.secho(f"❌ Failed to download SecLists: {e}", fg=typer.colors.RED)
 

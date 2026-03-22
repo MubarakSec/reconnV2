@@ -7,6 +7,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 
 def _default_home() -> Path:
     env = os.environ.get("RECON_HOME")
