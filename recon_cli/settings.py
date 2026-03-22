@@ -31,9 +31,9 @@ from pydantic import (
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
-except ImportError:
-    # Fallback for older pydantic
-    from pydantic import BaseSettings  # type: ignore[no-redef]
+except (ImportError, AttributeError):
+    # Fallback if pydantic-settings is not available
+    from pydantic import BaseModel as BaseSettings  # type: ignore[assignment]
 
     SettingsConfigDict = None  # type: ignore[misc]
 
