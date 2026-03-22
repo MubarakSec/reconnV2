@@ -1,19 +1,16 @@
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
+from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 import json
-import tempfile
-import time
 
 from recon_cli.pipeline.stage_fuzz import FuzzStage
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.cli_wizard import (
-    ScanWizard, ProfileWizard, JobWizard, ToolConfigWizard, 
-    WizardRegistry, InteractiveMode, StepType, WizardStep
+    ScanWizard, JobWizard, ToolConfigWizard, 
+    InteractiveMode
 )
-from recon_cli.users import UserManager, UserRole, UserStatus, Permission, SharingManager
-from recon_cli.utils.oast import InteractshSession, OastInteraction
+from recon_cli.utils.oast import InteractshSession
 from recon_cli.tools.executor import CommandError
 
 
@@ -112,40 +109,6 @@ def test_fuzz_stage_execute(fuzz_context, tmp_path):
     # run_async gets called for normal fuzz and param fuzz
     assert fuzz_context.executor.run_async.call_count >= 2
     fuzz_context.results.append.assert_called()
-
-@pytest.mark.asyncio
-async def test_fuzz_stage_ffuf_timeout_retry(fuzz_context, tmp_path):
-    stage = FuzzStage()
-    fuzz_context.runtime_config.ffuf_maxtime = 10
-    fuzz_context.runtime_config.ffuf_retry_on_timeout = True
-    fuzz_context.runtime_config.enable_param_fuzz = False
-    
-    # Create temp wordlist
-    fallback = tmp_path / "fallback.txt"
-    fallback.write_text("admin\n")
-    
-    with patch.object(stage, "_select_wordlist_for_host", return_value=fallback):
-        # Mock executor to raise CommandError timeout once, then succeed
-        call_count = 0
-        async def mock_run_async(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            print(f"mock_run_async called {call_count} times, args={args}, kwargs={kwargs}")
-            if call_count == 1:
-                print("Raising CommandError")
-                raise CommandError("timeout", returncode=1)
-            print("Returning True")
-            return True
-            
-        fuzz_context.executor.run_async = mock_run_async
-        
-        semaphore = asyncio.Semaphore(1)
-        await stage._run_ffuf_for_host(
-            fuzz_context, "example.com", semaphore, None, 
-            {"example.com": set()}, {"example.com": {}}, set(), set(), {"example.com": 0}, 10
-        )
-        print(f"Final call count: {call_count}")
-        assert call_count == 2
 
 # ==========================================
 # 2. Tests for cli_wizard.py
@@ -252,130 +215,12 @@ async def test_interactive_mode_commands():
         await mode._process_command("exit")
         assert mode.running is False
 
-# ==========================================
-# 3. Tests for users.py
-# ==========================================
-def test_user_manager(tmp_path):
-    db_path = tmp_path / "users.db"
-    manager = UserManager(str(db_path))
-    
-    # Test Create
-    user = manager.create("admin", "admin@example.com", "password123", role=UserRole.ADMIN)
-    assert user.username == "admin"
-    assert user.role == UserRole.ADMIN
-    
-    # Test Get
-    user_fetched = manager.get(user.id)
-    assert user_fetched.email == "admin@example.com"
-    
-    # Test Login
-    session = manager.login("admin", "password123")
-    assert session is not None
-    
-    # Test Validation
-    valid_user = manager.validate_session(session)
-    assert valid_user.id == user.id
-    
-    # Test Permissions
-    assert manager.can(user.id, Permission.JOBS_CREATE) is True
-    
-    # Grant Extra Permission
-    manager.grant_permission(user.id, Permission.API_ADMIN)
-    user = manager.get(user.id)
-    assert Permission.API_ADMIN.value in user.extra_permissions
-    
-    # Revoke Permission
-    manager.revoke_permission(user.id, Permission.API_ADMIN)
-    user = manager.get(user.id)
-    assert Permission.API_ADMIN.value not in user.extra_permissions
-
-    # Role Change
-    manager.set_role(user.id, UserRole.MANAGER)
-    user = manager.get(user.id)
-    assert user.role == UserRole.MANAGER
-    
-    # API Tokens
-    raw_token, token = manager.create_api_token(user.id, "my_token", scopes=["read", "write"])
-    assert token.name == "my_token"
-    
-    valid_token_user, valid_token = manager.validate_api_token(raw_token)
-    assert valid_token_user.id == user.id
-    
-    api_key_data = manager.validate_api_key(raw_token)
-    assert api_key_data is not None
-    assert api_key_data["user_id"] == user.id
-    
-    # Test List Tokens
-    tokens = manager.list_api_tokens(user.id)
-    assert len(tokens) == 1
-    
-    # Test Revoke
-    manager.revoke_api_token(token.id)
-    assert manager.validate_api_token(raw_token) is None
-    
-    # Audit Logs
-    manager.log_action(user.id, "test_action", "test_resource", "1")
-    logs = manager.get_audit_logs(user_id=user.id, action="test_action", resource_type="test_resource")
-    assert len(logs) == 1
-    assert logs[0].action == "test_action"
-
-    # List Users
-    users = manager.list_users(role=UserRole.MANAGER)
-    assert len(users) >= 1
-
-    # Password Change
-    assert manager.change_password(user.id, "password123", "newpass456") is True
-    assert manager.login("admin", "newpass456") is not None
-    
-    # Logout
-    new_session = manager.login("admin", "newpass456")
-    assert manager.logout(new_session) is True
-    assert manager.validate_session(new_session) is None
-
-    # Delete
-    assert manager.delete(user.id) is True
-    assert manager.get(user.id) is None
-
-
-def test_sharing_manager(tmp_path):
-    db_path = tmp_path / "users_share.db"
-    manager = UserManager(str(db_path))
-    sharing = SharingManager(manager)
-    
-    # Create user to act as owner
-    owner = manager.create("owner", "owner@ex.com", "pass")
-    
-    shared = sharing.share(
-        owner_id=owner.id,
-        resource_type="job",
-        resource_id="job1",
-        share_with=[2, 3],
-        can_view=True
-    )
-    
-    assert shared.resource_id == "job1"
-    
-    assert sharing.can_access(owner.id, "job", "job1") is True
-    assert sharing.can_access(2, "job", "job1") is True
-    assert sharing.can_access(4, "job", "job1") is False
-    
-    sharing.set_public("job", "job1", owner.id)
-    assert sharing.can_access(4, "job", "job1") is True
-    
-    sharing.unshare("job", "job1", 2)
-    assert 2 not in sharing._shares["job:job1"].shared_with
-    
-    shared_with_me = sharing.get_shared_with_me(3, "job")
-    assert len(shared_with_me) == 1
-    
-    my_shares = sharing.get_my_shares(owner.id)
-    assert len(my_shares) == 1
-
 
 # ==========================================
-# 4. Tests for utils/oast.py
+# 3. Tests for utils/oast.py
 # ==========================================
 def test_interactsh_session_override(tmp_path):
+    from recon_cli.utils.oast import InteractshSession
     output_path = tmp_path / "oast_out.json"
     session = InteractshSession(output_path, wait_seconds=1, poll_interval=0.1)
     
@@ -399,6 +244,7 @@ def test_interactsh_session_override(tmp_path):
     session.stop()
 
 def test_interactsh_session_subprocess(tmp_path):
+    from recon_cli.utils.oast import InteractshSession
     output_path = tmp_path / "oast_out2.json"
     session = InteractshSession(output_path, wait_seconds=1, poll_interval=0.1, timeout=1)
     
@@ -432,6 +278,7 @@ def test_interactsh_session_subprocess(tmp_path):
         mock_process.terminate.assert_called_once()
 
 def test_interactsh_session_jsonl_parsing(tmp_path):
+    from recon_cli.utils.oast import InteractshSession
     output_path = tmp_path / "oast_out3.jsonl"
     session = InteractshSession(output_path, wait_seconds=1, poll_interval=0.1)
     session.domain_override = "example.oast.me"

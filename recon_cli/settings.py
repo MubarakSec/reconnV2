@@ -14,8 +14,6 @@ Example:
     >>> from recon_cli.settings import settings
     >>> print(settings.max_concurrent)
     50
-    >>> print(settings.api.port)
-    8080
 """
 
 from __future__ import annotations
@@ -59,31 +57,6 @@ class DatabaseSettings(BaseModel):
     @classmethod
     def ensure_parent_exists(cls, v: Path) -> Path:
         v.parent.mkdir(parents=True, exist_ok=True)
-        return v
-
-
-class APISettings(BaseModel):
-    """إعدادات الـ API"""
-
-    host: str = Field(default="127.0.0.1", description="عنوان الاستماع")
-    port: int = Field(default=8080, ge=1024, le=65535, description="المنفذ")
-    workers: int = Field(default=4, ge=1, le=32, description="عدد workers")
-    cors_origins: List[str] = Field(default=["*"], description="CORS origins المسموحة")
-    rate_limit: int = Field(
-        default=100, ge=1, description="الحد الأقصى للطلبات في الدقيقة"
-    )
-    api_key: Optional[SecretStr] = Field(
-        default=None, description="مفتاح API (اختياري)"
-    )
-
-    @field_validator("host")
-    @classmethod
-    def validate_host(cls, v: str) -> str:
-        if v not in ("0.0.0.0", "127.0.0.1", "localhost") and not v.startswith(  # nosec B104
-            "192.168."
-        ):
-            # Allow any IP but warn about public binding
-            pass
         return v
 
 
@@ -303,7 +276,6 @@ class Settings(BaseSettings):
 
     # Sub-settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
-    api: APISettings = Field(default_factory=APISettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
     http: HTTPSettings = Field(default_factory=HTTPSettings)
     dns: DNSSettings = Field(default_factory=DNSSettings)

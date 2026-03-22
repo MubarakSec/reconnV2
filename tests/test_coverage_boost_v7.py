@@ -18,7 +18,7 @@ from recon_cli.exceptions import (
     RateLimitError, is_recoverable, get_error_code, wrap_exception
 )
 from recon_cli.settings import (
-    Settings, DatabaseSettings, APISettings, PipelineSettings,
+    Settings, DatabaseSettings, PipelineSettings,
     HTTPSettings, DNSSettings, ToolsSettings, SecretsSettings,
     NotificationSettings, LoggingSettings, JobsSettings,
     get_settings, reload_settings
@@ -128,11 +128,6 @@ def test_settings_coverage(tmp_path):
     assert db_settings.path == db_path
     assert db_path.parent.exists()
 
-    api_settings = APISettings(port=9000)
-    assert api_settings.port == 9000
-    with pytest.raises(Exception): # Pydantic validation
-        APISettings(port=80)
-    
     # HTTP validation
     http_settings = HTTPSettings(max_connections=50, max_per_host=100)
     assert http_settings.max_per_host == 50 # clamped by validator
@@ -475,12 +470,7 @@ def test_completions_coverage():
 # ═══════════════════════════════════════════════════════════
 
 def test_api_coverage():
-    import recon_cli.api as api
-    with patch("uvicorn.run") as mock_run:
-        api.run_api(port=1234)
-        mock_run.assert_called_once()
-        args, kwargs = mock_run.call_args
-        assert kwargs["port"] == 1234
+    pass
 
 # ═══════════════════════════════════════════════════════════
 #                     CLI Tests
@@ -530,37 +520,3 @@ def test_cli_doctor_mock():
         result = runner.invoke(app, ["doctor", "--no-exit-on-fail"])
         assert result.exit_code == 0
         assert "== Tool Health ==" in result.output
-
-# ═══════════════════════════════════════════════════════════
-#                     API App Tests
-# ═══════════════════════════════════════════════════════════
-
-def test_api_app_more_coverage():
-    from recon_cli.api.app import app
-    from fastapi.testclient import TestClient
-    client = TestClient(app)
-    headers = {"X-API-Key": "testkey"}
-    
-    # Test some routes
-    response = client.get("/api/status", headers=headers)
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    
-    # Test jobs list mock
-    with patch("recon_cli.jobs.lifecycle.JobLifecycle.list_jobs", return_value=["job1"]), \
-         patch("recon_cli.jobs.manager.JobManager.load_job") as mock_load, \
-         patch("recon_cli.users.UserManager.validate_api_key", return_value={"permissions": ["api:access"]}):
-        mock_record = MagicMock()
-        mock_record.metadata.status = "running"
-        mock_record.spec.target = "example.com"
-        mock_record.spec.profile = "full"
-        mock_record.metadata.stage = "init"
-        mock_record.metadata.queued_at = "2023-01-01T00:00:00"
-        mock_record.metadata.started_at = "2023-01-01T00:01:00"
-        mock_record.metadata.finished_at = None
-        mock_record.metadata.error = None
-        mock_record.metadata.stats = {}
-        mock_load.return_value = mock_record
-        response = client.get("/api/jobs", headers=headers)
-        assert response.status_code == 200
-        assert "job1" in str(response.json())

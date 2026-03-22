@@ -1558,20 +1558,6 @@ def projects() -> None:
         typer.echo(name)
 
 
-@app.command()
-def schema(
-    fmt: str = typer.Option("json", "--format", help="Output format: json"),
-) -> None:
-    """Emit machine-readable schema for automation clients."""
-    from recon_cli.api import schema_json
-
-    fmt = fmt.lower()
-    if fmt != "json":
-        typer.echo(f"Unsupported format: {fmt}", err=True)
-        raise typer.Exit(code=1)
-    typer.echo(schema_json())
-
-
 @app.command("cache-stats")
 def cache_stats() -> None:
     """Show cache statistics."""
@@ -1595,29 +1581,6 @@ def cache_clear() -> None:
     cache = HybridCache(config.RECON_HOME / "cache")
     cache.clear()
     typer.secho("✅ Cache cleared", fg=typer.colors.GREEN)
-
-
-@app.command("serve")
-def serve(
-    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind"),
-    port: int = typer.Option(8080, "--port", help="Port to bind"),
-) -> None:
-    """Start the REST API server."""
-    try:
-        import uvicorn
-        from recon_cli.api.app import app as api_app
-
-        typer.secho(
-            f"🚀 Starting API server at http://{host}:{port}", fg=typer.colors.GREEN
-        )
-        typer.echo(f"   Docs: http://{host}:{port}/docs")
-        uvicorn.run(api_app, host=host, port=port)  # type: ignore[arg-type]
-    except ImportError:
-        typer.echo(
-            "❌ FastAPI/Uvicorn not installed. Run: pip install fastapi uvicorn",
-            err=True,
-        )
-        raise typer.Exit(code=1)
 
 
 @app.command("notify")

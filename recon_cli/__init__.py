@@ -5,13 +5,11 @@ This package provides comprehensive tools for security reconnaissance:
 - Multi-stage scanning pipeline with parallel execution
 - Vulnerability and secret detection
 - Integration with external tools (nuclei, subfinder, httpx, naabu, dalfox, etc.)
-- REST API
 - Extensible plugin system
 - Prometheus metrics and distributed tracing
 - Multi-channel alerting (Slack, Discord, Telegram, Email)
 - Job scheduling with cron expressions
 - Asset inventory management
-- Multi-user support with RBAC
 
 Version: 0.2.0
 """
@@ -24,7 +22,6 @@ __license__ = "MIT"
 
 _LAZY_SUBMODULES = {
     "active",
-    "api",
     "cli",
     "cli_wizard",
     "completions",
@@ -45,7 +42,6 @@ _LAZY_SUBMODULES = {
     "settings",
     "takeover",
     "tools",
-    "users",
     "utils",
 }
 
@@ -56,7 +52,6 @@ __all__ = [
     # Core
     "config",
     "cli",
-    "api",
     "jobs",
     "pipeline",
     "tools",
@@ -77,7 +72,6 @@ __all__ = [
     "settings",
     "scheduler",
     "inventory",
-    "users",
     # Phase 8 - CLI Polish & Reports
     "cli_wizard",
     "completions",

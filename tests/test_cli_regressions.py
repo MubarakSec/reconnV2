@@ -15,13 +15,6 @@ from recon_cli.jobs.manager import JobManager
 from recon_cli.utils.last_run import update_last_trace_pointers
 
 
-def test_schema_command_outputs_json():
-    runner = CliRunner()
-    result = runner.invoke(cli.app, ["schema", "--format", "json"])
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout.strip())
-    assert "job_spec" in payload
-    assert "job_metadata" in payload
 
 
 def test_completions_command_uses_command_tree():
@@ -184,28 +177,7 @@ def test_rerun_invalid_stage_returns_cli_error():
     assert not isinstance(result.exception, TypeError)
 
 
-def test_serve_defaults_to_loopback(monkeypatch):
-    captured: dict[str, object] = {}
-
-    def _fake_run(app_obj, host, port):
-        captured["app"] = app_obj
-        captured["host"] = host
-        captured["port"] = port
-
-    import uvicorn
-    import recon_cli.api.app as api_app
-
-    monkeypatch.setattr(uvicorn, "run", _fake_run)
-
-    runner = CliRunner()
-    result = runner.invoke(cli.app, ["serve"])
-    assert result.exit_code == 0
-    assert captured["app"] is api_app.app
-    assert captured["host"] == "127.0.0.1"
-    assert captured["port"] == 8080
-
-
-def test_trace_command_uses_last_pointer(tmp_path: Path, monkeypatch):
+def test_trace_command_uses_last_pointer(tmp_path, monkeypatch):
     _configure_test_home(tmp_path, monkeypatch)
     manager = JobManager()
     record = manager.create_job(target="example.com", profile="passive")

@@ -586,37 +586,6 @@ def memory_db() -> str:
 
 
 # ═══════════════════════════════════════════════════════════
-#                     API Testing
-# ═══════════════════════════════════════════════════════════
-
-
-@pytest.fixture
-def api_client():
-    """عميل API للاختبار"""
-    try:
-        from fastapi.testclient import TestClient
-        from recon_cli.api.app import create_app
-
-        app = create_app()
-        return TestClient(app)
-    except ImportError:
-        pytest.skip("FastAPI not installed")
-
-
-@pytest.fixture
-def async_api_client():
-    """عميل API async"""
-    try:
-        from httpx import AsyncClient
-        from recon_cli.api.app import create_app
-
-        app = create_app()
-        return AsyncClient(app=app, base_url="http://test")
-    except ImportError:
-        pytest.skip("httpx not installed")
-
-
-# ═══════════════════════════════════════════════════════════
 #                     Assertions
 # ═══════════════════════════════════════════════════════════
 
