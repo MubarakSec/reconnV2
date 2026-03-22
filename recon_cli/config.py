@@ -913,6 +913,7 @@ class RuntimeConfig:
     )
     github_token: Optional[str] = os.environ.get("RECON_GITHUB_TOKEN")
     viewdns_api_key: Optional[str] = os.environ.get("RECON_VIEWDNS_API_KEY")
+    whoisfreaks_api_key: Optional[str] = os.environ.get("RECON_WHOISFREAKS_API_KEY")
     seclists_root: Path = DEFAULT_SECLISTS_ROOT
     fallback_dns_limit: int = int(os.environ.get("RECON_FALLBACK_DNS_LIMIT", 200))
     correlation_max_records: int = int(

@@ -1257,6 +1257,11 @@ def doctor(
             "Required for deep WordPress vulnerability scanning",
         ),
         (
+            "WhoisFreaks",
+            config.RUNTIME_CONFIG.whoisfreaks_api_key,
+            "Used for enhanced WHOIS and reverse lookup data",
+        ),
+        (
             "Telegram Bot",
             config.RUNTIME_CONFIG.telegram_token,
             "Required for Telegram notifications and bot control",
