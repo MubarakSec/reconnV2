@@ -498,6 +498,16 @@ class AuthBypassValidatorStage(Stage):
                 "url": base_clean,
                 "headers": {"X-Forwarded-For": "127.0.0.1"},
             },
+            {
+                "name": "x_forwarded_host",
+                "url": base_clean,
+                "headers": {"X-Forwarded-Host": "localhost"},
+            },
+            {
+                "name": "x_host",
+                "url": base_clean,
+                "headers": {"X-Host": "localhost"},
+            },
             {"name": "path_dot_bypass", "url": path_dot_url, "headers": {}},
             {"name": "path_encoded_dot_bypass", "url": path_encoded_url, "headers": {}},
         ]

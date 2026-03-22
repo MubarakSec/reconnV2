@@ -178,24 +178,16 @@ class PipelineContext:
         return self._data_store.get(key, default)
 
     def get_results(self) -> List[Dict[str, Any]]:
-        """Read and cache the full results file for the current job."""
-        cached = self.get_data("_results_cache")
-        if cached is not None and isinstance(cached, list):
-            return cached
-        results = self.results.read_all()
-        self.set_data("_results_cache", results)
-        return results
+        """Read the full results file for the current job."""
+        return self.results.read_all()
 
     def iter_results(self) -> Iterable[Dict[str, Any]]:
-        """Iterate over results, using cache if available."""
-        cached = self.get_data("_results_cache")
-        if cached is not None and isinstance(cached, list):
-            return cached
+        """Iterate over results."""
         return self.results.iter_results()
 
     def clear_results_cache(self) -> None:
-        """Clear the results cache (call after significant modifications)."""
-        self._data_store.pop("_results_cache", None)
+        """Clear the results cache (no-op now)."""
+        pass
 
     def record_host_error(self, host: str, code: int) -> None:
         if not host:
@@ -290,10 +282,15 @@ class PipelineContext:
             parsed = urlparse(
                 candidate if "://" in candidate else f"https://{candidate}"
             )
-        elif ":" in candidate and not validation.is_ip(candidate):
+        elif ":" in candidate:
+            # Handle host:port even if it's an IP:port
             parsed = urlparse(f"https://{candidate}")
+
         if parsed and parsed.hostname:
-            candidate = parsed.hostname
+            if parsed.port and parsed.port not in (80, 443):
+                candidate = f"{parsed.hostname}:{parsed.port}"
+            else:
+                candidate = parsed.hostname
         return str(candidate).strip().rstrip(".").lower()
 
     def scope_targets(self) -> List[str]:
@@ -323,11 +320,24 @@ class PipelineContext:
         targets = self.scope_targets()
         if not targets:
             return True
+
+        def _get_ip_part(value: str) -> str:
+            if ":" in value and not (value.startswith("[") and "]" in value):
+                parts = value.rsplit(":", 1)
+                if parts[1].isdigit():
+                    return parts[0]
+            return value
+
+        host_ip_only = _get_ip_part(normalized_host)
+
         for target in targets:
-            if validation.is_ip(normalized_host) or validation.is_ip(target):
-                if normalized_host == target:
+            target_ip_only = _get_ip_part(target)
+
+            if validation.is_ip(host_ip_only) or validation.is_ip(target_ip_only):
+                if normalized_host == target or host_ip_only == target_ip_only:
                     return True
                 continue
+
             if normalized_host == target or normalized_host.endswith(f".{target}"):
                 return True
         return False

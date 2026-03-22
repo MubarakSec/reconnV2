@@ -70,7 +70,7 @@ class PassiveEnumerationStage(Stage):
             logger.info("Skipping passive subdomain discovery (targets are all IPs)")
 
         # 4. Wayback URL discovery (includes fallback)
-        self._run_wayback(context, list(targets), tool_timeout, wayback_out)
+        wayback_hosts = self._run_wayback(context, list(targets), tool_timeout, wayback_out)
 
         # 5. Result Collation & Tracking
         for hostname in sorted(subfinder_hosts):
@@ -96,7 +96,7 @@ class PassiveEnumerationStage(Stage):
 
         # 6. Final Host Consolidation and Artifact Generation
         passive_hosts_set: set[str] = set()
-        for host in subfinder_hosts | amass_hosts | seed_hosts:
+        for host in subfinder_hosts | amass_hosts | seed_hosts | wayback_hosts:
             if not host:
                 continue
             if allow_ip and validation.is_ip(host):
@@ -215,13 +215,14 @@ class PassiveEnumerationStage(Stage):
         targets: list[str],
         tool_timeout: int,
         wayback_out: Any,
-    ) -> None:
+    ) -> set[str]:
         logger = context.logger
         executor = context.executor
         artifacts = context.record.paths
         wayback_tmp = artifacts.artifact("wayback_tmp.txt")
         allow_ip = context.record.spec.allow_ip
         tracker = context.results
+        found_hosts: set[str] = set()
 
         wayback_cmd = None
         if executor.available("waybackurls"):
@@ -240,7 +241,7 @@ class PassiveEnumerationStage(Stage):
             wayback_targets.append(target)
 
         if not wayback_targets:
-            return
+            return found_hosts
 
         max_wayback_urls = max(
             0, int(getattr(context.runtime_config, "wayback_max_urls", 0) or 0)
@@ -337,6 +338,9 @@ class PassiveEnumerationStage(Stage):
                             if host:
                                 try:
                                     hostname = validation.normalize_hostname(host)
+                                    if parsed.port and parsed.port not in (80, 443):
+                                        hostname = f"{hostname}:{parsed.port}"
+                                    found_hosts.add(hostname)
                                 except ValueError:
                                     logger.debug(
                                         "Failed to normalize hostname: %s", host
@@ -404,6 +408,9 @@ class PassiveEnumerationStage(Stage):
                         if host:
                             try:
                                 hostname = validation.normalize_hostname(host)
+                                if parsed.port and parsed.port not in (80, 443):
+                                    hostname = f"{hostname}:{parsed.port}"
+                                found_hosts.add(hostname)
                             except ValueError:
                                 logger.debug("Failed to normalize hostname: %s", host)
 
@@ -477,6 +484,7 @@ class PassiveEnumerationStage(Stage):
                 wayback_targets_skipped,
                 wayback_total,
             )
+        return found_hosts
 
     def _run_wayback_api_fallback(
         self, context: PipelineContext, domain: str, limit: int

@@ -86,7 +86,15 @@ def run_nuclei(
         except FileNotFoundError:  # pragma: no cover - defensive
             pass
 
-        cmd: List[str] = ["nuclei", "-u", base_url, json_flag, "-o", str(artifact_path)]
+        cmd: List[str] = [
+            "nuclei",
+            "-u",
+            base_url,
+            json_flag,
+            "-o",
+            str(artifact_path),
+            "-silent",
+        ]
         if resolved_templates:
             for template in resolved_templates:
                 cmd.extend(["-t", template])
@@ -243,6 +251,7 @@ def run_nuclei_batch(
         "-jsonl",
         "-o",
         str(artifact_path),
+        "-silent",
     ]
     if resolved_templates:
         for template in resolved_templates:

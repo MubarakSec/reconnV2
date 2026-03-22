@@ -248,6 +248,9 @@ class OpenRedirectValidatorStage(Stage):
         return [
             f"https://{host}/cb",
             f"//{host}/cb",
+            "https://google.com/",
+            "/\/\google.com/",
+            "//google.com/%2f..",
         ]
 
     @staticmethod

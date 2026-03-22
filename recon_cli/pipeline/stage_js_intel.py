@@ -157,7 +157,15 @@ class JSIntelligenceStage(Stage):
         "organization",
         "workspace",
     )
-    SPEC_HINTS = ("swagger", "openapi", "api-docs")
+    SPEC_HINTS = (
+        "swagger",
+        "openapi",
+        "api-docs",
+        "swagger-ui",
+        "redoc",
+        "graphiql",
+        "postman",
+    )
     STATIC_EXTENSIONS = (
         ".png",
         ".jpg",
@@ -513,7 +521,7 @@ class JSIntelligenceStage(Stage):
                     map_data = {}
 
                 sources_content = map_data.get("sourcesContent") or []
-                for source_blob in sources_content[:5]:
+                for source_blob in sources_content[:50]:
                     if not source_blob or not isinstance(source_blob, str):
                         continue
                     extraction.merge(

@@ -44,6 +44,7 @@ class NormalizeStage(Stage):
             )
         context.targets = targets
         spec.target = targets[0]
+        spec.targets = targets
         context.manager.update_spec(context.record)
         targets_artifact = context.record.paths.artifact("targets.txt")
         targets_artifact.write_text("\n".join(targets) + "\n", encoding="utf-8")

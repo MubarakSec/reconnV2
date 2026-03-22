@@ -59,6 +59,10 @@ def _is_confirmed(entry: dict) -> bool:
     if isinstance(source, str) and source in {
         "extended-validation",
         "exploit-validation",
+        "ssrf-validator",
+        "open-redirect-validator",
+        "idor-validator",
+        "input-validator",
     }:
         return True
     return False
@@ -178,6 +182,7 @@ def generate_summary(context) -> None:
 
     metadata = record.metadata
     spec = record.spec
+    job_id = spec.job_id
 
     def _extract_context(entry: dict) -> str:
         host = entry.get("hostname") or entry.get("host")

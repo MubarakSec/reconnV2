@@ -173,6 +173,32 @@
       "retry_count": 5
     }
   },
+  "benchmark": {
+    "base_profile": "full",
+    "runtime": {
+      "enable_fuzz": true,
+      "enable_runtime_crawl": true,
+      "enable_secrets": true,
+      "enable_js_intel": true,
+      "enable_api_recon": true,
+      "enable_graphql_recon": true,
+      "enable_vuln_scan": true,
+      "enable_ssrf_validator": true,
+      "enable_open_redirect_validator": true,
+      "enable_idor_validator": true,
+      "enable_auth_bypass_validator": true,
+      "enable_secret_exposure_validator": true,
+      "enable_cms_scan": true,
+      "nuclei_batch_size": 10,
+      "tool_timeout": 600,
+      "scanner_timeout": 1200,
+      "runtime_crawl_max_urls": 100,
+      "fuzz_max_urls": 50,
+      "js_intel_max_files": 50,
+      "timeout_http": 10,
+      "httpx_threads": 50
+    }
+  },
   "api-only": {
     "base_profile": "full",
     "runtime": {

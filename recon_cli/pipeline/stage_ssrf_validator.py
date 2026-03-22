@@ -32,6 +32,8 @@ class SSRFValidatorStage(Stage):
         "http://127.0.0.1/",
         "http://localhost/",
         "http://169.254.169.254/latest/meta-data/",
+        "http://metadata.google.internal/computeMetadata/v1/",
+        "file:///etc/passwd",
     )
     INTERNAL_INDICATORS = (
         "127.0.0.1",
@@ -40,10 +42,10 @@ class SSRFValidatorStage(Stage):
         "latest/meta-data",
         "instance-id",
         "ami-id",
+        "computeMetadata",
+        "root:x:0:0",
         "connection refused",
         "econnrefused",
-        "no route to host",
-        "dial tcp",
     )
 
     def is_enabled(self, context: PipelineContext) -> bool:
@@ -586,9 +588,11 @@ class SSRFValidatorStage(Stage):
         baseline_status: int,
     ) -> bool:
         lowered = (body or "").lower()
-        if any(indicator in lowered for indicator in self.INTERNAL_INDICATORS):
-            return True
-        if baseline_body and lowered and lowered != baseline_body.lower():
-            if "internal" in lowered and status != baseline_status:
+        # 1. Direct Indicator Match (High Confidence)
+        for indicator in self.INTERNAL_INDICATORS:
+            if indicator in lowered:
                 return True
+
+        # 2. Response Code Anomaly (Experimental - keep for internal tracking but maybe not finding yet)
+        # For now, we only trust direct indicators as per Objective.md
         return False

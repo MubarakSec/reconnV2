@@ -226,7 +226,9 @@ class IDORStage(Stage):
                         finding["type"] = "finding"
                         finding["finding_type"] = "idor"
                         finding["confidence"] = "high"
-                        finding["tags"].append("confirmed")  # type: ignore[attr-defined]
+                        if "tags" not in finding:
+                            finding["tags"] = []
+                        finding["tags"].append("confirmed")  # type: ignore[union-attr]
 
                     if context.results.append(finding):
                         stats["suspects"] += 1
@@ -597,6 +599,7 @@ class IDORStage(Stage):
             "poc": poc_command,
             "score": score,
             "priority": "high",
+            "tags": ["idor"],
         }
 
     @staticmethod
