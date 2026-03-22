@@ -17,6 +17,18 @@ class NucleiStage(Stage):
     """
     name = "nuclei"
 
+    # Map project tech tags to nuclei tags
+    TECH_MAPPING = {
+        "tech:wordpress": "wordpress",
+        "tech:php": "php",
+        "tech:java": "java",
+        "tech:node": "nodejs",
+        "tech:asp": "iis",
+        "cms:drupal": "drupal",
+        "cms:joomla": "joomla",
+        "service:api": "api",
+    }
+
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_nuclei", True))
 
@@ -32,30 +44,44 @@ class NucleiStage(Stage):
             context.logger.info("No targets found for nuclei scanning")
             return
 
+        # Collect relevant tech tags for all targets
+        tech_tags = self._collect_tech_tags(context)
+        nuclei_tags = {"cve", "vulnerability", "critical", "high"}
+        for t in tech_tags:
+            if t in self.TECH_MAPPING:
+                nuclei_tags.add(self.TECH_MAPPING[t])
+
         # Prepare targets file
         target_file = context.record.paths.artifact("nuclei_targets.txt")
         target_file.write_text("\n".join(targets))
 
         artifact = context.record.paths.artifact("nuclei_results.json")
         
-        # Run Nuclei
-        # -s critical,high: only high impact
-        # -jsonl: for easier parsing
+        # Run Nuclei with targeted tags and high severity
         cmd = [
             "nuclei",
             "-list", str(target_file),
             "-severity", "critical,high",
+            "-tags", ",".join(nuclei_tags),
             "-jsonl",
             "-o", str(artifact),
             "-silent"
         ]
 
-        context.logger.info("Running nuclei against %d targets", len(targets))
+        context.logger.info("Running nuclei against %d targets with tags: %s", len(targets), ",".join(nuclei_tags))
         try:
-            executor.run(cmd, check=False, timeout=1800) # 30 min timeout
+            executor.run(cmd, check=False, timeout=1800)
             self._ingest_results(context, artifact)
         except CommandError as e:
             context.logger.error("Nuclei execution failed: %s", e)
+
+    def _collect_tech_tags(self, context: PipelineContext) -> set[str]:
+        tags = set()
+        for r in context.get_results():
+            for t in r.get("tags", []):
+                if t.startswith(("tech:", "cms:", "service:")):
+                    tags.add(t)
+        return tags
 
     def _select_targets(self, context: PipelineContext) -> List[str]:
         results = context.get_results()

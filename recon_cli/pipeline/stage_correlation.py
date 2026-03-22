@@ -562,6 +562,22 @@ class CorrelationStage(Stage):
                         "score": 98,
                         "tags": ["chain", "critical", "auth-destruction"]
                     })
+
+        # 3. JS Secret -> Auth/IDOR Chain
+        js_secrets = [f for f in findings if "js_secret" in str(f.get("finding_type") or "")]
+        for secret in js_secrets:
+            for i in idor:
+                if secret.get("hostname") == i.get("hostname"):
+                    chains.append({
+                        "type": "vulnerability_chain",
+                        "source": "correlation",
+                        "hostname": i.get("hostname"),
+                        "description": f"High-Impact Chain: Leaked JS Secret -> IDOR",
+                        "details": {"secret": secret.get("id"), "sink": i.get("id")},
+                        "severity": "critical",
+                        "score": 99,
+                        "tags": ["chain", "critical", "secret-led-attack"]
+                    })
         
         return chains
 
