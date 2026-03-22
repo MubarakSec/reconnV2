@@ -76,6 +76,7 @@ class JobSpec:
     execution_profile: Optional[str] = None
     runtime_overrides: Dict[str, Any] = field(default_factory=dict)
     incremental_from: Optional[str] = None
+    mode: str = "default"
 
     def __post_init__(self) -> None:
         if self.targets and not self.target:

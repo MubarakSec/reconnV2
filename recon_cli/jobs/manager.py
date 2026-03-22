@@ -176,6 +176,7 @@ class JobManager:
         runtime_overrides: Optional[Dict[str, Any]] = None,
         insecure: bool = False,
         incremental_from: Optional[str] = None,
+        mode: str = "default",
     ) -> JobRecord:
         job_id = self.generate_job_id(target)
         root = self.queued_dir / job_id
@@ -246,6 +247,7 @@ class JobManager:
             runtime_overrides=prepared_overrides,
             insecure=insecure,
             incremental_from=incremental_from,
+            mode=mode,
         )
         metadata = JobMetadata(job_id=job_id, queued_at=time_utils.iso_now())
         if project:

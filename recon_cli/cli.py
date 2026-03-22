@@ -336,9 +336,17 @@ def scan(
         "--split-targets",
         help="When using --targets-file, create one job per target",
     ),
+    mode: str = typer.Option(
+        "default",
+        "--mode",
+        case_sensitive=False,
+        help="Scan mode (e.g., hunter, default). Hunter mode prioritizes bounty-relevant findings.",
+        show_default=True,
+    ),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
+    mode_input = mode.lower()
     available_profiles = config.available_profiles()
     profile_choices = BASE_PROFILES | set(available_profiles.keys())
     if quickstart and "quick" in available_profiles:
@@ -436,6 +444,7 @@ def scan(
                 runtime_overrides=runtime_overrides,
                 insecure=insecure,
                 incremental_from=incremental_from,
+                mode=mode_input,
             )
             created.append(record.spec.job_id)
         typer.echo(f"Jobs created: {', '.join(created)}")
@@ -456,6 +465,7 @@ def scan(
         runtime_overrides=runtime_overrides,
         insecure=insecure,
         incremental_from=incremental_from,
+        mode=mode_input,
     )
     job_id = record.spec.job_id
     typer.echo(f"Job created: {job_id}")
