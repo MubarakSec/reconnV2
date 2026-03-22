@@ -80,8 +80,9 @@ class IDORValidatorStage(Stage):
             # 2. Fetch victim data with Token B (if it succeeds and matches A, it's an IDOR)
             # 3. Fetch victim data with Anon (if it succeeds and matches A, it's a Public Access/IDOR)
 
-            token_a = self._resolve_token("token-a", runtime)
-            token_b = self._resolve_token("token-b", runtime)
+            host = urlparse(baseline_url).hostname or ""
+            token_a = self._resolve_token(context, "token-a", host, runtime)
+            token_b = self._resolve_token(context, "token-b", host, runtime)
 
             if not token_a:
                 skipped += 1
@@ -449,14 +450,38 @@ class IDORValidatorStage(Stage):
                 return urlunparse(parsed._replace(path="/" + "/".join(parts)))
         return ""
 
-    @staticmethod
-    def _resolve_token(auth_label: str, runtime) -> Optional[str]:
+    def _resolve_token(self, context: PipelineContext, auth_label: str, host: str, runtime) -> Optional[str]:
+        # 1. Try manual override from runtime config
         if auth_label == "token-a":
             token = str(getattr(runtime, "idor_token_a", "") or "").strip()
-            return token or None
-        if auth_label == "token-b":
+            if token: return token
+        elif auth_label == "token-b":
             token = str(getattr(runtime, "idor_token_b", "") or "").strip()
-            return token or None
+            if token: return token
+
+        # 2. Try to pull from captured sessions (ActiveAuthStage artifacts)
+        # We look for session_{host}.json or global accounts.json
+        try:
+            artifact_name = f"session_{host}.json"
+            artifact_path = context.record.paths.artifact(artifact_name)
+            if artifact_path.exists():
+                from recon_cli.utils import fs
+                data = fs.read_json(artifact_path)
+                # If we need two different tokens, we might need a way to distinguish them.
+                # For now, if we only have one captured session, we use it as token-a.
+                # In a real IDOR test, we'd need two DIFFERENT sessions.
+                if auth_label == "token-a":
+                    # Check for Bearer token first, then fallback to cookie header
+                    tokens = data.get("tokens", {})
+                    if "access_token" in tokens:
+                        return f"Bearer {tokens['access_token']}"
+                    
+                    cookies = data.get("cookies", {})
+                    if cookies:
+                        return "; ".join([f"{k}={v}" for k, v in cookies.items()])
+        except Exception as e:
+            context.logger.debug("Failed to resolve session for IDOR validation: %s", e)
+            
         return None
 
     @staticmethod

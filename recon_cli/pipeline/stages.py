@@ -21,6 +21,7 @@ from recon_cli.pipeline.stage_scoring import ScoringStage
 from recon_cli.pipeline.stage_security_headers import SecurityHeadersStage
 from recon_cli.pipeline.stage_tls_hygiene import TLSHygieneStage
 from recon_cli.pipeline.stage_auth_discovery import AuthDiscoveryStage
+from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
 from recon_cli.pipeline.stage_waf import WafProbeStage
 from recon_cli.pipeline.stage_idor import IDORStage
 from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage
@@ -80,6 +81,7 @@ PIPELINE_STAGES: List[Stage] = [
     SecurityHeadersStage(),
     TLSHygieneStage(),
     AuthDiscoveryStage(),
+    ActiveAuthStage(),
     WafProbeStage(),
     IDORStage(),
     AuthMatrixStage(),

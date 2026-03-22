@@ -103,7 +103,8 @@ class DependencyResolver:
         "tls_hygiene": {"security_headers"},
         # مراحل تحليل/هجوم لاحقة (مرتبة لتقليل الضغط على الهدف)
         "auth_discovery": {"scoring_tagging"},
-        "waf_probe": {"auth_discovery"},
+        "active_auth": {"auth_discovery"},
+        "waf_probe": {"active_auth"},
         "idor_probe": {"waf_probe"},
         "auth_matrix": {"idor_probe"},
         "fuzzing": {"auth_matrix"},

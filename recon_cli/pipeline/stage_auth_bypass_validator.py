@@ -94,14 +94,6 @@ class AuthBypassValidatorStage(Stage):
             context.logger.info("No auth bypass validator candidates")
             return
 
-        tokens: List[Tuple[str, str]] = []
-        token_a = str(getattr(runtime, "idor_token_a", "") or "").strip()
-        token_b = str(getattr(runtime, "idor_token_b", "") or "").strip()
-        if token_a:
-            tokens.append(("token-a", token_a))
-        if token_b:
-            tokens.append(("token-b", token_b))
-
         attempted = 0
         confirmed = 0
         confirmed_forced = 0
@@ -110,15 +102,47 @@ class AuthBypassValidatorStage(Stage):
         skipped = 0
         artifacts: List[Dict[str, object]] = []
 
+        # Cache sessions per host to avoid repeated disk reads
+        session_cache: Dict[str, List[Tuple[str, str]]] = {}
+
         for candidate in candidates:
             url = str(candidate.get("url") or "")
             if not url:
                 continue
             parsed_url = urlparse(url)
+            host = parsed_url.hostname or ""
             path = str(parsed_url.path or "/")
             if not context.url_allowed(url):
                 skipped += 1
                 continue
+
+            # Resolve tokens for this host
+            if host not in session_cache:
+                host_tokens = []
+                # 1. Try manual
+                t_a = str(getattr(runtime, "idor_token_a", "") or "").strip()
+                t_b = str(getattr(runtime, "idor_token_b", "") or "").strip()
+                if t_a: host_tokens.append(("token-a", t_a))
+                if t_b: host_tokens.append(("token-b", t_b))
+                
+                # 2. Try artifacts if manual is missing
+                if not host_tokens:
+                    try:
+                        art_path = context.record.paths.artifact(f"session_{host}.json")
+                        if art_path.exists():
+                            from recon_cli.utils import fs
+                            data = fs.read_json(art_path)
+                            sess_token = ""
+                            if "access_token" in data.get("tokens", {}):
+                                sess_token = f"Bearer {data['tokens']['access_token']}"
+                            elif data.get("cookies"):
+                                sess_token = "; ".join([f"{k}={v}" for k, v in data["cookies"].items()])
+                            if sess_token:
+                                host_tokens.append(("captured-session", sess_token))
+                    except Exception: pass
+                session_cache[host] = host_tokens
+
+            tokens = session_cache[host]
 
             baseline_resp = self._fetch(
                 context,
