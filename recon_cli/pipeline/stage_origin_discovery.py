@@ -5,7 +5,11 @@ import socket
 import asyncio
 import dns.resolver
 import httpx
+import hashlib
+import mmh3
+import base64
 from typing import List, Set, Dict, Any
+from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
@@ -14,199 +18,145 @@ from recon_cli.utils.enrich import classify_provider
 
 class OriginDiscoveryStage(Stage):
     """
-    Advanced Origin IP Discovery Stage
-    Attempts to bypass CDNs and find origin IPs by:
-    1. Extracting SPF/TXT records for IPv4 addresses.
-    2. Resolving MX records to check if email is hosted on origin.
-    3. Brute-forcing common origin subdomains (direct, origin, mail, ftp).
-    4. Verifying if discovered IPs serve the target domain via Host header.
-    5. Filtering out known CDN/Cloud IP ranges.
+    Advanced Origin IP Discovery Stage.
+    Attempts to bypass CDNs/WAFs using:
+    1. Censys SSL/TLS Certificate Search.
+    2. Favicon Hashing & Shodan Search.
+    3. DNS History (SPF, MX, TXT).
+    4. Direct IP verification via Host header.
     """
-
     name = "origin_discovery"
 
-    async def _probe_origin_via_host_header(
-        self, ip: str, domain: str, timeout: int = 5
-    ) -> bool:
-        """Verifies if the IP address responds to the domain's Host header."""
-        urls = [f"http://{ip}", f"https://{ip}"]
-        async with httpx.AsyncClient(
-            verify=False, timeout=timeout, follow_redirects=True
-        ) as client:  # nosec B501
-            for url in urls:
-                try:
-                    resp = await client.get(url, headers={"Host": domain})
-                    # If we get a 200/300/400 that isn't a generic CDN error, it's likely origin
-                    # We look for server headers or content that matches the domain
-                    if resp.status_code < 500:
-                        return True
-                except Exception:
-                    continue
-        return False
-
-    async def _resolve_async(
-        self, hostname: str, resolver: dns.resolver.Resolver
-    ) -> List[str]:
-        try:
-            loop = asyncio.get_running_loop()
-            answers = await loop.run_in_executor(
-                None, lambda: resolver.resolve(hostname, "A")
-            )
-            return [str(rdata) for rdata in answers]
-        except Exception:
-            return []
-
     async def run_async(self, context: PipelineContext) -> None:
-        hosts_path = context.record.paths.artifact("dedupe_hosts.txt")
-        if not hosts_path.exists():
-            context.logger.info("No hosts for origin discovery")
-            return
-
-        # Extract root domains
-        root_domains: Set[str] = set()
-        with hosts_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                host = line.strip()
-                if not host:
-                    continue
-                parts = host.split(".")
-                if len(parts) > 2:
-                    if parts[-2] in {"co", "com", "net", "org"} and len(parts[-1]) == 2:
-                        root_domains.add(".".join(parts[-3:]))
-                    else:
-                        root_domains.add(".".join(parts[-2:]))
-                else:
-                    root_domains.add(host)
-
+        root_domains = self._collect_root_domains(context)
         if not root_domains:
             return
 
-        context.logger.info(
-            "Starting advanced origin IP discovery on %d root domains",
-            len(root_domains),
-        )
-
-        origin_findings: List[Dict[str, Any]] = []
+        context.logger.info("Starting origin discovery for %d root domains", len(root_domains))
         resolver = dns.resolver.Resolver()
         resolver.timeout = 3
         resolver.lifetime = 3
 
-        origin_subdomains = [
-            "direct",
-            "origin",
-            "ftp",
-            "cpanel",
-            "mail",
-            "webmail",
-            "dev",
-            "test",
-            "staging",
-            "admin",
-        ]
-
         for domain in root_domains:
-            potential_ips: Dict[str, str] = {}  # ip -> method
+            potential_ips: Dict[str, str] = {} # ip -> method
 
-            # 0. Historical DNS (SecurityTrails)
-            st_key = getattr(context.runtime_config, "securitytrails_api_key", None)
-            if st_key:
+            # 1. Censys SSL Search (Pro technique)
+            await self._probe_censys(context, domain, potential_ips)
+
+            # 2. Favicon Hashing (Pro technique)
+            await self._probe_favicon_hash(context, domain, potential_ips)
+
+            # 3. DNS History / Records
+            self._probe_dns_records(domain, resolver, potential_ips)
+
+            # 4. Verify Origin IPs
+            await self._verify_origins(context, domain, potential_ips)
+
+    def _collect_root_domains(self, context: PipelineContext) -> Set[str]:
+        results = context.get_results()
+        domains = set()
+        for r in results:
+            host = r.get("hostname")
+            if host:
+                parts = host.split(".")
+                if len(parts) >= 2:
+                    domains.add(".".join(parts[-2:]))
+        return domains
+
+    async def _probe_censys(self, context: PipelineContext, domain: str, potential_ips: Dict[str, str]) -> None:
+        api_id = os.environ.get("CENSYS_API_ID")
+        api_secret = os.environ.get("CENSYS_API_SECRET")
+        if not (api_id and api_secret): return
+
+        try:
+            url = "https://search.censys.io/api/v2/hosts/search"
+            query = f"services.tls.certificates.leaf_data.names: {domain}"
+            async with httpx.AsyncClient(auth=(api_id, api_secret), timeout=15) as client:
+                resp = await client.get(url, params={"q": query})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for hit in data.get("result", {}).get("hits", []):
+                        ip = hit.get("ip")
+                        if ip:
+                            potential_ips[ip] = "Censys SSL Search"
+        except Exception as e:
+            context.logger.debug("Censys probe failed for %s: %s", domain, e)
+
+    async def _probe_favicon_hash(self, context: PipelineContext, domain: str, potential_ips: Dict[str, str]) -> None:
+        shodan_key = os.environ.get("SHODAN_API_KEY")
+        if not shodan_key: return
+
+        try:
+            # 1. Fetch favicon
+            target_url = f"https://{domain}/favicon.ico"
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                resp = await client.get(target_url)
+                if resp.status_code == 200:
+                    # 2. Calculate mmh3 hash (Shodan style)
+                    favicon_b64 = base64.encodebytes(resp.content).decode()
+                    f_hash = mmh3.hash(favicon_b64)
+                    
+                    # 3. Search Shodan
+                    search_url = f"https://api.shodan.io/shodan/host/search?key={shodan_key}&query=http.favicon.hash:{f_hash}"
+                    s_resp = await client.get(search_url)
+                    if s_resp.status_code == 200:
+                        s_data = s_resp.json()
+                        for match in s_data.get("matches", []):
+                            ip = match.get("ip_str")
+                            if ip:
+                                potential_ips[ip] = f"Favicon Hash ({f_hash})"
+        except Exception: pass
+
+    def _probe_dns_records(self, domain: str, resolver: dns.resolver.Resolver, potential_ips: Dict[str, str]) -> None:
+        # SPF Records
+        try:
+            for rdata in resolver.resolve(domain, "TXT"):
+                txt = rdata.to_text().lower()
+                if "v=spf1" in txt:
+                    for ip in re.findall(r"ip4:([0-9.]+)", txt):
+                        potential_ips[ip] = "SPF Record"
+        except Exception: pass
+
+        # MX Records
+        try:
+            for rdata in resolver.resolve(domain, "MX"):
+                mx_host = str(rdata.exchange).rstrip(".")
                 try:
-                    url = f"https://api.securitytrails.com/v1/history/{domain}/dns/a"
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        resp = await client.get(url, headers={"APIKEY": st_key})
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            for record in data.get("records", []):
-                                for val in record.get("values", []):
-                                    ip = val.get("ip")
-                                    if ip:
-                                        potential_ips[ip] = "SecurityTrails History"
-                except Exception as e:
-                    context.logger.debug(
-                        "SecurityTrails lookup failed for %s: %s", domain, e
-                    )
+                    ips = [str(i) for i in resolver.resolve(mx_host, "A")]
+                    for ip in ips:
+                        potential_ips[ip] = f"MX Record ({mx_host})"
+                except Exception: pass
+        except Exception: pass
 
-            # 1. TXT / SPF Records
-            try:
-                answers = resolver.resolve(domain, "TXT")
-                for rdata in answers:
-                    txt_record = rdata.to_text().lower()
-                    if "v=spf1" in txt_record:
-                        ips = re.findall(
-                            r"ip4:([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})",
-                            txt_record,
-                        )
-                        for ip in ips:
-                            potential_ips[ip] = "SPF Record"
-            except Exception:
-                pass
+    async def _verify_origins(self, context: PipelineContext, domain: str, potential_ips: Dict[str, str]) -> None:
+        for ip, method in potential_ips.items():
+            # Filter CDN IPs
+            _, is_cdn, _ = classify_provider(ip)
+            if is_cdn: continue
 
-            # 2. MX Records
-            try:
-                answers = resolver.resolve(domain, "MX")
-                for rdata in answers:
-                    mx_host = str(rdata.exchange).rstrip(".")
-                    if domain in mx_host:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            mx_ips = (
-                                await loop.run_in_executor(
-                                    None, lambda: socket.gethostbyname_ex(mx_host)
-                                )
-                            )[2]
-                            for ip in mx_ips:
-                                potential_ips[ip] = f"MX Record ({mx_host})"
-                        except socket.error:
-                            pass
-            except Exception:
-                pass
-
-            # 3. Common Subdomains (Parallel)
-            sub_tasks = [
-                self._resolve_async(f"{sub}.{domain}", resolver)
-                for sub in origin_subdomains
-            ]
-            sub_results = await asyncio.gather(*sub_tasks)
-            for i, ips in enumerate(sub_results):
-                for ip in ips:
-                    potential_ips[ip] = f"Subdomain ({origin_subdomains[i]}.{domain})"
-
-            # 4. Verify and Filter
-            for ip, method in potential_ips.items():
-                # Filter out known CDNs to avoid false positives
-                _, is_cdn, _ = classify_provider(ip)
-                if is_cdn:
-                    context.logger.debug("Skipping CDN IP %s found via %s", ip, method)
-                    continue
-
-                context.logger.debug(
-                    "Verifying potential origin IP %s found via %s", ip, method
-                )
-
-                if await self._probe_origin_via_host_header(ip, domain):
-                    # Flag it
-                    origin_findings.append(
-                        {
-                            "type": "finding",
-                            "finding_type": "origin_ip_leak",
-                            "source": "origin-discovery",
-                            "hostname": domain,
-                            "description": f"Verified origin IP bypass detected via {method}: {ip}",
-                            "severity": "high"
-                            if "MX" in method or "SPF" in method
-                            else "medium",
-                            "details": {"ip": ip, "method": method, "verified": True},
-                        }
-                    )
-
-        if origin_findings:
-            context.logger.info(
-                "Found %d VERIFIED origin IP leaks", len(origin_findings)
-            )
-            for finding in origin_findings:
+            if await self._probe_origin_via_host_header(ip, domain):
+                finding = {
+                    "type": "finding",
+                    "finding_type": "origin_ip_leak",
+                    "source": self.name,
+                    "hostname": domain,
+                    "description": f"Verified Origin IP found via {method}: {ip}",
+                    "severity": "high",
+                    "details": {"ip": ip, "method": method},
+                    "tags": ["origin", "bypass", "confirmed"]
+                }
                 context.results.append(finding)
-        else:
-            context.logger.info("No verified origin IP leaks found.")
+                context.emit_signal("origin_found", "host", domain, confidence=1.0, source=self.name, evidence={"ip": ip, "method": method})
 
-    def execute(self, context: PipelineContext) -> None:
-        asyncio.run(self.run_async(context))
+    async def _probe_origin_via_host_header(self, ip: str, domain: str) -> bool:
+        """Connect directly to IP with Host header and check if it matches target."""
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                # Try HTTPS first
+                resp = await client.get(f"https://{ip}/", headers={"Host": domain})
+                # If we get a valid response that isn't a 403 WAF block, it's likely origin
+                if resp.status_code < 400 or resp.status_code == 404:
+                    return True
+        except Exception: pass
+        return False
+import os # Ensure os is imported

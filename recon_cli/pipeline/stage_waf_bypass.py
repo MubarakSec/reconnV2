@@ -30,6 +30,15 @@ class WafBypassStage(Stage):
         signals = context.signal_index()
         waf_hosts = signals.get("by_host", {})
         
+        # Collect verified origin IPs from findings
+        origin_ips = {} # hostname -> ip
+        for res in context.get_results():
+            if res.get("finding_type") == "origin_ip_leak":
+                host = res.get("hostname")
+                ip = res.get("details", {}).get("ip")
+                if host and ip:
+                    origin_ips[host] = ip
+
         targets = []
         for host, host_signals in waf_hosts.items():
             if "waf_detected" in host_signals and "waf_bypass_possible" not in host_signals:
@@ -51,13 +60,20 @@ class WafBypassStage(Stage):
                     url = res["url"]
                     break
             
-            self._attempt_bypasses(context, session, url)
+            self._attempt_bypasses(context, session, url, origin_ips.get(host))
 
-    def _attempt_bypasses(self, context: PipelineContext, session: requests.Session, url: str) -> None:
+    def _attempt_bypasses(self, context: PipelineContext, session: requests.Session, url: str, origin_ip: str | None) -> None:
         # Attack payload that normally triggers the WAF
         payload = "<script>alert(1)</script>"
         parsed = urlparse(url)
         
+        # 0. Direct Origin IP Bypass (The "Pro" Standard)
+        if origin_ip:
+            origin_url = f"{parsed.scheme}://{origin_ip}{parsed.path}"
+            headers = {"Host": parsed.hostname, "User-Agent": "Mozilla/5.0"}
+            if self._check_bypass(context, session, origin_url, payload, headers, "origin:direct-ip"):
+                return
+
         # 1. Header Smuggling / Spoofing
         for header in self.BYPASS_HEADERS:
             headers = {header: "127.0.0.1", "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)"}
