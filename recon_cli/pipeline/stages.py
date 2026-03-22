@@ -24,6 +24,7 @@ from recon_cli.pipeline.stage_auth_discovery import AuthDiscoveryStage
 from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
 from recon_cli.pipeline.stage_waf import WafProbeStage
 from recon_cli.pipeline.stage_waf_bypass import WafBypassStage
+from recon_cli.pipeline.stage_race_condition import RaceConditionStage
 from recon_cli.pipeline.stage_idor import IDORStage
 from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage
 from recon_cli.pipeline.stage_fuzz import FuzzStage
@@ -31,6 +32,7 @@ from recon_cli.pipeline.stage_active_intel import ActiveIntelligenceStage
 from recon_cli.pipeline.stage_secrets import SecretsDetectionStage
 from recon_cli.pipeline.stage_runtime_crawl import RuntimeCrawlStage
 from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
+from recon_cli.pipeline.stage_headless_crawl import HeadlessCrawlStage
 from recon_cli.pipeline.stage_api_recon import APIReconStage
 from recon_cli.pipeline.stage_graphql import GraphQLReconStage
 from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
@@ -90,6 +92,7 @@ PIPELINE_STAGES: List[Stage] = [
     ActiveAuthStage(),
     WafProbeStage(),
     WafBypassStage(),
+    RaceConditionStage(),
     IDORStage(),
     AuthMatrixStage(),
     FuzzStage(),
@@ -97,6 +100,7 @@ PIPELINE_STAGES: List[Stage] = [
     SecretsDetectionStage(),
     RuntimeCrawlStage(),
     JSIntelligenceStage(),
+    HeadlessCrawlStage(),
     APIReconStage(),
     GraphQLReconStage(),
     GraphQLExploitStage(),

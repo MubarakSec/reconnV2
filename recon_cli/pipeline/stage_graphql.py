@@ -33,7 +33,16 @@ class GraphQLReconStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_graphql_recon", False))
 
+    COMMON_GQL_GUESSES = [
+        "query { me { id username email } }",
+        "query { users { id username } }",
+        "query { config { version debug } }",
+        "mutation { login(username: \"test\", password: \"test\") { token } }",
+        "mutation { register(email: \"test@test.com\") { id } }",
+    ]
+
     def execute(self, context: PipelineContext) -> None:
+        # ... (rest of imports and setup same) ...
         try:
             import requests
         except Exception:
@@ -59,6 +68,7 @@ class GraphQLReconStage(Stage):
         checked = 0
         graphql_found = 0
         introspection_enabled = 0
+        brute_forced_hits = 0
         artifacts: List[str] = []
 
         for url in candidates:
@@ -75,91 +85,62 @@ class GraphQLReconStage(Stage):
             )
             if limiter and not limiter.wait_for_slot(url, timeout=timeout):
                 continue
+            
+            # 1. Try Introspection
             try:
                 payload = {"query": self.INTROSPECTION_QUERY}
-                if session:
-                    resp = session.post(
-                        url,
-                        json=payload,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        headers=headers,
-                        verify=context.runtime_config.verify_tls,
-                    )
-                else:
-                    resp = requests.post(
-                        url,
-                        json=payload,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        headers=headers,
-                        verify=context.runtime_config.verify_tls,
-                    )
-            except requests.exceptions.RequestException:
-                if limiter:
-                    limiter.on_error(url)
+                resp = self._do_request(requests, session, url, payload, headers, timeout, context)
+            except Exception:
+                if limiter: limiter.on_error(url)
                 continue
-            if limiter:
-                limiter.on_response(url, resp.status_code)
+            
+            if limiter: limiter.on_response(url, resp.status_code)
 
-            content_type = (resp.headers.get("Content-Type") or "").lower()
-            text = resp.text or ""
-            data = self._safe_json(text)
-            is_graphql = self._is_graphql_response(resp.status_code, content_type, data)
-            if not is_graphql:
+            data = self._safe_json(resp.text or "")
+            if not self._is_graphql_response(resp.status_code, resp.headers.get("Content-Type", ""), data):
                 continue
 
             graphql_found += 1
             host = urlparse(url).hostname or ""
-            context.emit_signal(
-                "graphql_detected",
-                "url",
-                url,
-                confidence=0.6,
-                source="graphql-recon",
-                tags=["api:graphql"],
-                evidence={"status_code": resp.status_code},
-            )
-            api_payload = {
-                "type": "api",
-                "source": "graphql-recon",
-                "hostname": host,
-                "url": url,
-                "tags": ["api:graphql"],
-                "score": 45,
-            }
-            context.results.append(api_payload)
-
+            
             if self._has_introspection_schema(data):
                 introspection_enabled += 1
-                schema_path = context.record.paths.artifact(
-                    f"graphql_schema_{host or 'unknown'}.json"
-                )
-                schema_path.write_text(
-                    json.dumps(data, indent=2, sort_keys=True), encoding="utf-8"
-                )
-                artifacts.append(str(schema_path))
-                context.emit_signal(
-                    "graphql_introspection_enabled",
-                    "url",
-                    url,
-                    confidence=0.7,
-                    source="graphql-recon",
-                    tags=["api:graphql", "introspection"],
-                    evidence={"schema_artifact": str(schema_path)},
-                )
+                self._save_schema(context, host, data, url, artifacts)
+            else:
+                # 2. Brute Force / Guessing Phase
+                context.logger.info("Introspection disabled for %s, starting brute-force guessing...", url)
+                for guess in self.COMMON_GQL_GUESSES:
+                    try:
+                        g_resp = self._do_request(requests, session, url, {"query": guess}, headers, timeout, context)
+                        g_data = self._safe_json(g_resp.text or "")
+                        if "errors" not in g_data or ("errors" in g_data and "not found" not in str(g_data["errors"]).lower()):
+                            brute_forced_hits += 1
+                            context.emit_signal(
+                                "graphql_guess_hit", "url", url,
+                                confidence=0.5, source=self.name,
+                                tags=["api:graphql", "brute-force"],
+                                evidence={"query": guess, "status": g_resp.status_code}
+                            )
+                    except Exception: pass
 
         if checked:
             stats = context.record.metadata.stats.setdefault("graphql_recon", {})
-            stats.update(
-                {
-                    "checked": checked,
-                    "graphql_found": graphql_found,
-                    "introspection_enabled": introspection_enabled,
-                    "artifacts": artifacts,
-                }
-            )
-            context.manager.update_metadata(context.record)
+            stats.update({
+                "checked": checked, "graphql_found": graphql_found,
+                "introspection_enabled": introspection_enabled,
+                "brute_forced_hits": brute_forced_hits
+            })
+
+    def _do_request(self, requests, session, url, payload, headers, timeout, context) -> Any:
+        if session:
+            return session.post(url, json=payload, timeout=timeout, allow_redirects=True, headers=headers, verify=context.runtime_config.verify_tls)
+        return requests.post(url, json=payload, timeout=timeout, allow_redirects=True, headers=headers, verify=context.runtime_config.verify_tls)
+
+    def _save_schema(self, context, host, data, url, artifacts) -> None:
+        schema_path = context.record.paths.artifact(f"graphql_schema_{host or 'unknown'}.json")
+        schema_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        artifacts.append(str(schema_path))
+        context.emit_signal("graphql_introspection_enabled", "url", url, confidence=0.7, source=self.name, tags=["api:graphql", "introspection"], evidence={"schema_artifact": str(schema_path)})
 
     def _collect_candidates(self, context: PipelineContext) -> List[str]:
         candidates: List[str] = []

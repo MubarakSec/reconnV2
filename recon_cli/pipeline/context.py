@@ -52,13 +52,24 @@ class PipelineContext:
     event_bus: "PipelineEventBus" = field(init=False)
     finished_stages: Set[str] = field(init=False, default_factory=set)
     trace_recorder: Optional[object] = field(init=False, default=None)
+    stealth_manager: Optional[object] = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         from recon_cli.utils.pipeline_trace import current_trace_recorder
         from recon_cli.utils.event_bus import PipelineEventBus
+        from recon_cli.utils.stealth import StealthConfig, StealthManager
 
         self.trace_recorder = current_trace_recorder()
         self.event_bus = PipelineEventBus()
+        
+        # Initialize Stealth Manager
+        proxies = getattr(self.runtime_config, "proxies", []) or []
+        stealth_cfg = StealthConfig(
+            proxies=list(proxies) if isinstance(proxies, list) else [],
+            jitter_min=float(getattr(self.runtime_config, "stealth_jitter_min", 0.1)),
+            jitter_max=float(getattr(self.runtime_config, "stealth_jitter_max", 0.0)) # Default 0 (disabled)
+        )
+        self.stealth_manager = StealthManager(stealth_cfg)
 
         # Initialize Global Rate Limiter
         from recon_cli.utils.rate_limiter import RateLimitConfig, RateLimiter
@@ -356,20 +367,41 @@ class PipelineContext:
         return bool(self._auth_manager)
 
     def auth_headers(self, base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        headers = base or {}
         if self._auth_manager:
             try:
-                return self._auth_manager.prepare_headers(base)  # type: ignore[attr-defined]
+                headers = self._auth_manager.prepare_headers(headers)  # type: ignore[attr-defined]
             except Exception:
-                return base or {}
-        return base or {}
+                pass
+        
+        if self.stealth_manager:
+            return self.stealth_manager.wrap_headers(headers)
+        return headers
 
     def auth_session(self, url: Optional[str] = None):
+        if self.stealth_manager:
+            self.stealth_manager.apply_jitter()
+            proxy = self.stealth_manager.get_proxy()
+        else:
+            proxy = None
+
+        session = None
         if self._auth_manager:
             try:
-                return self._auth_manager.get_session(url)  # type: ignore[attr-defined]
+                session = self._auth_manager.get_session(url)  # type: ignore[attr-defined]
             except Exception:
-                return None
-        return None
+                session = None
+        
+        # If no auth session, provide a base requests session with stealth
+        if not session:
+            import requests
+            session = requests.Session()
+            session.verify = getattr(self.runtime_config, "verify_tls", True)
+
+        if proxy and hasattr(session, "proxies"):
+            session.proxies.update(proxy)
+            
+        return session
 
     def auth_cookies(
         self, default_domain: Optional[str] = None
