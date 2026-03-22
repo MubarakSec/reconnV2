@@ -870,7 +870,6 @@ def doctor(
     import subprocess
     import tempfile
 
-    source_root = Path(__file__).resolve().parent
     issues: list[str] = []
     warnings: list[str] = []
 
