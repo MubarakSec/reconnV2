@@ -16,6 +16,7 @@ class JsonlWriter:
         self._handle: IO[str] | None = None
 
     def __enter__(self) -> "JsonlWriter":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = self.path.open("a", encoding="utf-8")
         return self
 

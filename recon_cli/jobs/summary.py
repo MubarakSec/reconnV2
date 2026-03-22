@@ -342,7 +342,7 @@ def generate_summary(context) -> None:
         )
     if data["counts"].get("finding", 0) > 0:
         next_actions.append(
-            "Review all findings in the web dashboard for detailed evidence."
+            f"Review detailed findings with: recon report {job_id}"
         )
 
     if next_actions:
