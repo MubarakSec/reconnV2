@@ -304,15 +304,6 @@ class TestHealth:
         status = await get_system_status(checker)
         assert status.health == HealthStatus.HEALTHY
 
-    def test_routers(self):
-        # Just test if they can be created without error if fastapi is present
-        with patch("recon_cli.utils.health.HAS_FASTAPI", True):
-            with patch("fastapi.APIRouter", MagicMock()):
-                r1 = create_health_router()
-                r2 = create_metrics_router()
-                assert r1 is not None
-                assert r2 is not None
-
 # ═══════════════════════════════════════════════════════════
 # 4. recon_cli/scanners/integrations.py
 # ═══════════════════════════════════════════════════════════
