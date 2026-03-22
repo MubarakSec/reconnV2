@@ -50,6 +50,7 @@ from recon_cli.pipeline.stage_rescore import RescoreStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
 from recon_cli.pipeline.stage_learning import LearningStage
 from recon_cli.pipeline.stage_scanner import ScannerStage
+from recon_cli.pipeline.stage_nuclei import NucleiStage
 from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
 from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_idor_validator import IDORValidatorStage
@@ -62,6 +63,7 @@ from recon_cli.pipeline.stage_secret_exposure_validator import (
 )
 from recon_cli.pipeline.stage_screenshots import ScreenshotStage
 from recon_cli.pipeline.stage_finalize import FinalizeStage
+from recon_cli.pipeline.stage_poc_generator import POCGeneratorStage
 
 PipelineStage = Stage
 
@@ -113,6 +115,7 @@ PIPELINE_STAGES: List[Stage] = [
     CorrelationStage(),
     LearningStage(),
     ScannerStage(),
+    NucleiStage(),
     VerifyFindingsStage(),
     ExtendedValidationStage(),
     IDORValidatorStage(),
@@ -124,4 +127,5 @@ PIPELINE_STAGES: List[Stage] = [
     ExploitValidationStage(),
     ScreenshotStage(),
     FinalizeStage(),
+    POCGeneratorStage(),
 ]

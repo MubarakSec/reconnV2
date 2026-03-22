@@ -132,7 +132,8 @@ class DependencyResolver:
         "correlation": {"trim_results"},
         "learning": {"correlation"},
         "scanner": {"learning"},
-        "verify_findings": {"scanner"},
+        "nuclei": {"scanner"},
+        "verify_findings": {"nuclei"},
         "extended_validation": {"verify_findings"},
         "idor_validator": {"extended_validation"},
         "ssrf_validator": {"extended_validation"},
@@ -148,6 +149,7 @@ class DependencyResolver:
         },
         "screenshots": {"exploit_validation"},
         "finalize": {"screenshots"},
+        "poc_generator": {"finalize"},
     }
 
     def __init__(self, dependency_map: Optional[Dict[str, Set[str]]] = None) -> None:
