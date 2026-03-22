@@ -159,13 +159,21 @@ DEFAULT_PROFILES_CONTENT = """{
   },
   "ultra-deep": {
     "base_profile": "full",
+    "stages": [
+      "normalize", "passive", "permute", "ct_asn", "resolve", "enrichment", "cloud",
+      "nmap_scan", "http_probe", "vhost_discovery", "origin_discovery", "takeover",
+      "github_recon", "auth_discovery", "js_intel", "api_recon", "api_schema_probe",
+      "graphql", "graphql_exploit", "param_mining", "html_forms", "upload_probe",
+      "secrets", "vuln_scan", "cms_scan", "runtime_crawl", "idor", "auth_matrix",
+      "rescore", "verify_findings", "exploit_validation", "scoring", "summary", "finalize"
+    ],
     "active_modules": ["backup", "cors", "js-secrets", "diff"],
     "runtime": {
       "timeout_http": 30,
       "httpx_threads": 150,
-      "tool_timeout": 600,
-      "scanner_timeout": 1800,
-      "ffuf_maxtime": 600,
+      "tool_timeout": 1200,
+      "scanner_timeout": 2400,
+      "ffuf_maxtime": 900,
       "nuclei_batch_size": 10,
       "nuclei_batch_timeout_base": 600,
       "nuclei_batch_timeout_per_target": 120,
