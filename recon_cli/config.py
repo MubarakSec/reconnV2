@@ -212,6 +212,8 @@ DEFAULT_PROFILES_CONTENT = """{
       "enable_auth_matrix": true,
       "enable_vhost_discovery": true,
       "enable_origin_discovery": true,
+      "enable_verification": true,
+      "enable_exploit_validation": true,
       "auth_discovery_max_urls": 150,
       "auth_discovery_max_forms": 300,
       "js_intel_max_files": 200,
