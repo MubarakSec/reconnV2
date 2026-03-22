@@ -432,6 +432,16 @@ class CorrelationStage(Stage):
                 encoding="utf-8",
             )
 
+        # 3. Vulnerability Chaining
+        chains = self._chain_vulnerabilities(finding_sinks)
+        if chains:
+            for chain in chains:
+                context.results.append(chain)
+            (artifacts_dir / "vulnerability_chains.json").write_text(
+                json.dumps(chains, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            context.logger.info("Identified %d high-impact vulnerability chains", len(chains))
+
         baseline_count = len(passive_surface_urls)
         final_count = len(actionable_surface_urls)
         benchmark = {
@@ -512,6 +522,48 @@ class CorrelationStage(Stage):
             graph.node_count(),
             graph.edge_count(),
         )
+
+    def _chain_vulnerabilities(self, findings: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        """Identifies high-value vulnerability chains (e.g. Info Leak + SSRF)."""
+        chains = []
+        
+        # Categorize findings
+        leaks = [f for f in findings if "leak" in str(f.get("finding_type") or "")]
+        ssrf = [f for f in findings if "ssrf" in str(f.get("finding_type") or "")]
+        auth_bypass = [f for f in findings if "auth_bypass" in str(f.get("finding_type") or "")]
+        idor = [f for f in findings if "idor" in str(f.get("finding_type") or "")]
+
+        # 1. Info Leak + SSRF Chain
+        for leak in leaks:
+            for s in ssrf:
+                if leak.get("hostname") == s.get("hostname"):
+                    chains.append({
+                        "type": "vulnerability_chain",
+                        "source": "correlation",
+                        "hostname": s.get("hostname"),
+                        "description": f"High-Impact Chain: {leak.get('finding_type')} -> SSRF",
+                        "details": {"leak": leak.get("id"), "sink": s.get("id")},
+                        "severity": "critical",
+                        "score": 95,
+                        "tags": ["chain", "critical", "ssrf-pivot"]
+                    })
+
+        # 2. Auth Bypass + IDOR Chain
+        for bypass in auth_bypass:
+            for i in idor:
+                if bypass.get("hostname") == i.get("hostname"):
+                    chains.append({
+                        "type": "vulnerability_chain",
+                        "source": "correlation",
+                        "hostname": i.get("hostname"),
+                        "description": f"High-Impact Chain: Auth Bypass -> IDOR",
+                        "details": {"bypass": bypass.get("id"), "sink": i.get("id")},
+                        "severity": "critical",
+                        "score": 98,
+                        "tags": ["chain", "critical", "auth-destruction"]
+                    })
+        
+        return chains
 
     def _is_actionable_surface(self, url: str, tags: List[str]) -> bool:
         lowered = (url or "").lower()

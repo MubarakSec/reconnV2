@@ -35,6 +35,7 @@ from recon_cli.pipeline.stage_api_recon import APIReconStage
 from recon_cli.pipeline.stage_graphql import GraphQLReconStage
 from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
 from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
+from recon_cli.pipeline.stage_api_reconstructor import ApiSchemaReconstructorStage
 from recon_cli.pipeline.stage_oauth_discovery import OAuthDiscoveryStage
 from recon_cli.pipeline.stage_oauth_vuln import OAuthVulnerabilityStage
 from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
@@ -98,6 +99,7 @@ PIPELINE_STAGES: List[Stage] = [
     GraphQLReconStage(),
     GraphQLExploitStage(),
     ApiSchemaProbeStage(),
+    ApiSchemaReconstructorStage(),
     OAuthDiscoveryStage(),
     OAuthVulnerabilityStage(),
     WsGrpcDiscoveryStage(),
