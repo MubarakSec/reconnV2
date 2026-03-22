@@ -184,7 +184,7 @@ class ConnectionPool:
             yield session
         finally:
             # Kept open for reuse until close() is called.
-            return
+            pass
 
     async def close(self) -> None:
         if self._session is not None:
