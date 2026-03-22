@@ -424,6 +424,12 @@ run_scan_flow() {
     local profile="$1"
     shift
     local -a fixed_args=("$@")
+    
+    # Check if we should run in automated mode (no nagging)
+    local automated=0
+    if [[ "$profile" == "ultra-deep" ]] || [[ " ${fixed_args[*]} " == *" --automated "* ]]; then
+        automated=1
+    fi
 
     if ! prompt_targets; then
         pause_screen
@@ -442,44 +448,54 @@ run_scan_flow() {
     local -a selected_modules=()
     local -a selected_scanners=()
 
-    if ask_yes_no "Run inline now?" "Y"; then
+    if [ "$automated" = "1" ]; then
         inline_flag="1"
+        force_flag="1"
+        print_info "Automated mode: Enabling inline execution and force re-run."
+    else
+        if ask_yes_no "Run inline now?" "Y"; then
+            inline_flag="1"
+        fi
     fi
 
     echo -ne "${CYAN}Project (optional): ${NC}"
     read -r project
 
-    echo -ne "${CYAN}Incremental from job_id (optional): ${NC}"
-    read -r incremental_from
+    if [ "$automated" = "0" ]; then
+        echo -ne "${CYAN}Incremental from job_id (optional): ${NC}"
+        read -r incremental_from
 
-    echo -ne "${CYAN}Wordlist path (optional): ${NC}"
-    read -r wordlist
-    if [ -n "$wordlist" ] && [ ! -f "$wordlist" ]; then
-        print_warn "Wordlist file not found; ignoring."
-        wordlist=""
-    fi
+        echo -ne "${CYAN}Wordlist path (optional): ${NC}"
+        read -r wordlist
+        if [ -n "$wordlist" ] && [ ! -f "$wordlist" ]; then
+            print_warn "Wordlist file not found; ignoring."
+            wordlist=""
+        fi
 
-    echo -ne "${CYAN}Max screenshots (optional integer): ${NC}"
-    read -r max_screenshots
-    if [ -n "$max_screenshots" ] && ! [[ "$max_screenshots" =~ ^[0-9]+$ ]]; then
-        print_warn "Invalid number; ignoring max screenshots."
-        max_screenshots=""
-    fi
+        echo -ne "${CYAN}Max screenshots (optional integer): ${NC}"
+        read -r max_screenshots
+        if [ -n "$max_screenshots" ] && ! [[ "$max_screenshots" =~ ^[0-9]+$ ]]; then
+            print_warn "Invalid number; ignoring max screenshots."
+            max_screenshots=""
+        fi
 
-    if ask_yes_no "Force re-run all stages?" "N"; then
-        force_flag="1"
-    fi
+        if ask_yes_no "Force re-run all stages?" "N"; then
+            force_flag="1"
+        fi
 
-    if ask_yes_no "Disable TLS verification (--insecure)?" "N"; then
-        insecure_flag="1"
+        if ask_yes_no "Disable TLS verification (--insecure)?" "N"; then
+            insecure_flag="1"
+        fi
     fi
 
     if [ -n "$TARGETS_FILE" ]; then
         if file_has_ip "$TARGETS_FILE"; then
             allow_ip="1"
         fi
-        if ask_yes_no "Split targets file into one job per target?" "N"; then
-            split_targets="1"
+        if [ "$automated" = "0" ]; then
+            if ask_yes_no "Split targets file into one job per target?" "N"; then
+                split_targets="1"
+            fi
         fi
     else
         local host=""
@@ -489,10 +505,13 @@ run_scan_flow() {
         fi
     fi
 
-    collect_active_modules selected_modules
-    collect_scanners selected_scanners
-
-    prompt_auth
+    if [ "$automated" = "0" ]; then
+        collect_active_modules selected_modules
+        collect_scanners selected_scanners
+        prompt_auth
+    else
+        print_info "Using optimized defaults for $profile (Modules: All, Scanners: All)"
+    fi
 
     # Inject performance/hardening variables
     [ -n "${RECON_STAGE_TIMEOUT:-}" ] && AUTH_ENV+=("RECON_STAGE_TIMEOUT=$RECON_STAGE_TIMEOUT")
