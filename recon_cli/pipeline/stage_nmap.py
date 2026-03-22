@@ -75,15 +75,23 @@ class NmapStage(Stage):
             context.logger.warning("nmap not available; skipping nmap stage")
             note_missing_tool(context, "nmap")
             return
-        hosts_path = context.record.paths.artifact("dedupe_hosts.txt")
-        if not hosts_path.exists():
-            context.logger.info("No hosts for nmap scan")
+
+        # Hunter Optimization: Filter for ONLY resolved hosts to avoid DNS timeouts and noise
+        resolved_hosts = []
+        for host_record in context.get_results("host"):
+            hostname = host_record.get("hostname")
+            ip = host_record.get("ip")
+            if (hostname or ip) and host_record.get("resolved") is True:
+                # Prefer IP if available to bypass Nmap DNS resolution
+                target = ip if ip else hostname
+                if target:
+                    resolved_hosts.append(target)
+
+        if not resolved_hosts:
+            context.logger.info("No resolved hosts for nmap scan")
             return
-        with hosts_path.open("r", encoding="utf-8") as handle:
-            hosts = [line.strip() for line in handle if line.strip()]
-        if not hosts:
-            context.logger.info("No hosts for nmap scan")
-            return
+
+        hosts = list(dict.fromkeys(resolved_hosts))  # Unique targets
         runtime = context.runtime_config
         max_hosts = max(0, int(getattr(runtime, "nmap_max_hosts", 0)))
         if max_hosts:
