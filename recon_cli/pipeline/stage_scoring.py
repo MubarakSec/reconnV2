@@ -79,9 +79,30 @@ class ScoringStage(Stage):
             context.record.metadata.stats.get("soft_404", {}).get("hosts", [])
         )
         auth_cluster_sizes = self._build_auth_surface_clusters(items)
+        is_hunter = getattr(context.record.spec, "mode", "default") == "hunter"
         updated: List[dict] = []
         for entry in items:
             ptype = entry.get("type")
+            if ptype == "finding":
+                score = int(entry.get("score", 0))
+                severity = entry.get("severity", "info").lower()
+                tags = set(entry.get("tags", []))
+                
+                if is_hunter:
+                    # Hunter Mode: Massive boosts for critical bug bounty types
+                    if severity == "critical": score = max(score, 95)
+                    if severity == "high": score = max(score, 85)
+                    
+                    if "pii" in tags: score += 50
+                    if "vulnerability" in tags: score += 40
+                    if "exploit" in tags: score += 60
+                    if "verified" in entry.get("metadata", {}): score += 30
+                    
+                entry["score"] = min(score, 100)
+                entry["priority"] = enrich_utils.classify_priority(entry["score"])
+                updated.append(entry)
+                continue
+
             if ptype == "hostname":
                 hostname = entry.get("hostname")
                 if hostname:
@@ -377,6 +398,14 @@ class ScoringStage(Stage):
             rule_tags = rules_engine.apply_rules(entry, self.rules)
             if rule_tags:
                 tags.update(rule_tags)
+
+            if is_hunter:
+                # Hunter Mode: Prioritize surface area most likely to have bugs
+                if "surface:admin" in tags: score += 40
+                if "surface:login" in tags: score += 20
+                if "env-file" in tags: score += 30
+                if "service:api" in tags: score += 25
+                if "vuln-suspect" in tags: score += 45
 
             entry["tags"] = sorted(tags)
             entry["score"] = max(score, 0)
