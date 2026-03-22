@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from typing import Dict, List, Set, Any
 from urllib.parse import urlparse, urljoin
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.captcha import CaptchaDetector
 
 
 class HeadlessCrawlStage(Stage):
     """
-    Advanced Headless Browser Crawler.
-    Uses Playwright to render pages and capture dynamic endpoints/XHR traffic.
-    Fixes the 'SPA Gap' in static analysis.
+    Advanced Headless Browser Crawler with Anti-Bot Evasion.
+    Uses Playwright to render pages, bypass 'I'm not a robot' checks via stealth, 
+    and capture dynamic endpoints.
     """
     name = "headless_crawl"
 
@@ -31,14 +33,16 @@ class HeadlessCrawlStage(Stage):
         if not targets:
             return
 
-        context.logger.info("Starting headless crawl on %d dynamic targets", len(targets))
+        context.logger.info("Starting headless crawl with anti-bot stealth on %d targets", len(targets))
         
         async with async_playwright() as p:
-            # We use chromium as the default engine
-            browser = await p.chromium.launch(headless=True)
+            # Mask automation via args
+            browser = await p.chromium.launch(headless=True, args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox"
+            ])
             
-            # Process targets in small batches to avoid resource exhaustion
-            batch_size = 3
+            batch_size = 2
             for i in range(0, len(targets), batch_size):
                 batch = targets[i:i+batch_size]
                 tasks = [self._crawl_url(context, browser, url) for url in batch]
@@ -47,39 +51,76 @@ class HeadlessCrawlStage(Stage):
             await browser.close()
 
     async def _crawl_url(self, context: PipelineContext, browser: Any, url: str) -> None:
-        page = await browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) recon-cli/2.0 Headless",
-            viewport={"width": 1280, "height": 720}
-        )
+        # Use random User-Agent from StealthManager if available
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        if hasattr(context, "stealth_manager") and context.stealth_manager:
+            ua = context.stealth_manager.get_random_ua()
+
+        context_proxy = None
+        if hasattr(context, "stealth_manager") and context.stealth_manager:
+            proxy_dict = context.stealth_manager.get_proxy()
+            if proxy_dict:
+                context_proxy = {"server": proxy_dict["http"]}
+
+        page_context = await browser.new_context(user_agent=ua, proxy=context_proxy)
+        page = await page_context.new_page()
+        
+        # 1. Apply Stealth Scripts (Manual evasion)
+        await self._apply_stealth(page)
         
         captured_urls: Set[str] = set()
-        
-        # Listen for all network requests (XHR, Fetch, etc.)
         page.on("request", lambda request: self._handle_request(request, captured_urls, context))
 
         try:
-            context.logger.debug("Rendering %s", url)
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
-            # Extract links from the rendered DOM
-            hrefs = await page.evaluate("""() => {
-                return Array.from(document.querySelectorAll('a')).map(a => a.href);
-            }""")
+            # 2. CAPTCHA Detection
+            content = await page.content()
+            captcha_type = CaptchaDetector.detect(content)
+            if captcha_type:
+                context.logger.warning("🚨 CAPTCHA (%s) detected on %s", captcha_type, url)
+                context.results.append({
+                    "type": "finding", "finding_type": "captcha_detected",
+                    "url": url, "description": f"Page protected by {captcha_type} CAPTCHA",
+                    "severity": "info", "tags": ["anti-bot", "captcha"]
+                })
+                # Attempt small human-like movements to trigger passive bypass (like Cloudflare Turnstile)
+                await self._human_like_interaction(page)
+                await asyncio.sleep(5)
             
+            # Wait for network idle after stealth/interactions
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception: pass
+
+            hrefs = await page.evaluate("() => Array.from(document.querySelectorAll('a')).map(a => a.href)")
             for href in hrefs:
-                if href and href.startswith("http"):
-                    captured_urls.add(href)
+                if href and href.startswith("http"): captured_urls.add(href)
                     
-            # Basic DOM-based XSS check hint
-            # (We could add more complex logic here later)
-            
         except Exception as e:
-            context.logger.debug("Failed to headless crawl %s: %s", url, e)
+            context.logger.debug("Headless crawl error for %s: %s", url, e)
         finally:
             await page.close()
+            await page_context.close()
 
-        # Ingest results
         self._ingest_captured(context, url, captured_urls)
+
+    async def _apply_stealth(self, page: Any) -> None:
+        """Removes common automation fingerprints."""
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        """)
+
+    async def _human_like_interaction(self, page: Any) -> None:
+        """Simulates random human-like mouse movements."""
+        for _ in range(3):
+            x = random.randint(100, 700)
+            y = random.randint(100, 500)
+            await page.mouse.move(x, y, steps=10)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
 
     def _handle_request(self, request: Any, captured_urls: Set[str], context: PipelineContext) -> None:
         if request.resource_type in ["fetch", "xhr"]:
