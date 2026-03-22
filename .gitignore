@@ -15,17 +15,17 @@ recon_cli.egg-info/
 .idea/
 
 # App Specific Data (Ignored to avoid bloating git)
-jobs/
-cache/
-learning/
-engagements/
-results/
-artifacts/
-reports/
-seclists/
-archive/
-data/projects.json
-data/users.db
+/jobs/
+/cache/
+/learning/
+/engagements/
+/results/
+/artifacts/
+/reports/
+/seclists/
+/archive/
+/data/projects.json
+/data/users.db
 
 # Tools & Logs
 .coverage

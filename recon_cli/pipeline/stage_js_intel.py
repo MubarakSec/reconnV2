@@ -90,6 +90,11 @@ class JSIntelligenceStage(Stage):
         "auth",
         "oauth",
         "sso",
+        "callback",
+        "authorize",
+        "token",
+        "session",
+        "userinfo",
     )
     ADMIN_HINTS = (
         "admin",
@@ -680,12 +685,26 @@ class JSIntelligenceStage(Stage):
             (".json", ".yaml", ".yml")
         ):
             tags.add("api:spec")
-        if any(hint in path for hint in self.AUTH_HINTS):
+        
+        # Enhanced Auth Surface Classification
+        is_auth = False
+        if any(hint in path for hint in ["login", "signin", "auth/", "authenticate"]):
             tags.add("surface:login")
-        if "reset" in path or "forgot" in path:
-            tags.add("surface:password-reset")
-        if "register" in path or "signup" in path:
+            is_auth = True
+        if any(hint in path for hint in ["register", "signup"]):
             tags.add("surface:register")
+            is_auth = True
+        if "reset" in path or "forgot" in path or "password" in path:
+            tags.add("surface:password-reset")
+            is_auth = True
+        if any(hint in path for hint in ["callback", "oauth", "token", "session"]):
+            tags.add("surface:auth-flow")
+            is_auth = True
+            
+        if is_auth:
+            tags.add("surface:auth-candidate")
+            score += 15
+
         if any(hint in path for hint in self.ADMIN_HINTS):
             tags.add("surface:admin")
         if any(hint in path for hint in self.ACCOUNT_HINTS):

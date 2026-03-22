@@ -128,17 +128,19 @@ class AuthBypassValidatorStage(Stage):
                 # 2. Try artifacts if manual is missing
                 if not host_tokens:
                     try:
-                        art_path = context.record.paths.artifact(f"session_{host}.json")
+                        art_path = context.record.paths.artifact(f"sessions_{host}.json")
                         if art_path.exists():
                             from recon_cli.utils import fs
-                            data = fs.read_json(art_path)
-                            sess_token = ""
-                            if "access_token" in data.get("tokens", {}):
-                                sess_token = f"Bearer {data['tokens']['access_token']}"
-                            elif data.get("cookies"):
-                                sess_token = "; ".join([f"{k}={v}" for k, v in data["cookies"].items()])
-                            if sess_token:
-                                host_tokens.append(("captured-session", sess_token))
+                            sessions = fs.read_json(art_path)
+                            for sess in sessions[:2]:
+                                sess_token = ""
+                                if "access_token" in sess.get("tokens", {}):
+                                    sess_token = f"Bearer {sess['tokens']['access_token']}"
+                                elif sess.get("cookies"):
+                                    sess_token = "; ".join([f"{k}={v}" for k, v in sess["cookies"].items()])
+                                if sess_token:
+                                    label = "captured-session" if len(host_tokens) == 0 else "captured-session-2"
+                                    host_tokens.append((label, sess_token))
                     except Exception: pass
                 session_cache[host] = host_tokens
 

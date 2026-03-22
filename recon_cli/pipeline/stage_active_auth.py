@@ -262,10 +262,27 @@ class ActiveAuthStage(Stage):
             except Exception: continue
 
     def _save_session(self, context: PipelineContext, host: str, url: str, cookies: Dict[str, str], tokens: Dict[str, str], credentials: Dict[str, str]) -> None:
-        auth_data = {
-            "host": host, "url": url, "cookies": cookies, "tokens": tokens,
-            "credentials": credentials, "captured_at": time_utils.iso_now()
+        new_auth = {
+            "url": url, "cookies": cookies, "tokens": tokens,
+            "credentials": credentials, "captured_at": time_utils.iso_now(),
+            "session_id": uuid.uuid4().hex[:8]
         }
-        path = context.record.paths.artifact(f"session_{host}.json")
-        path.write_text(json.dumps(auth_data, indent=2))
-        context.emit_signal("auth_session", "host", host, confidence=1.0, source=self.name, evidence={"tokens": list(tokens.keys())})
+        
+        artifact_path = context.record.paths.artifact(f"sessions_{host}.json")
+        sessions = []
+        if artifact_path.exists():
+            try:
+                sessions = fs.read_json(artifact_path)
+                if not isinstance(sessions, list): sessions = []
+            except Exception: pass
+        
+        # Avoid duplicate sessions for the same user/email
+        email = credentials.get("email")
+        if email:
+            sessions = [s for s in sessions if s.get("credentials", {}).get("email") != email]
+            
+        sessions.append(new_auth)
+        fs.write_json(artifact_path, sessions)
+        
+        context.logger.info("Captured and added session for %s (Total: %d)", host, len(sessions))
+        context.emit_signal("auth_session", "host", host, confidence=1.0, source=self.name, evidence={"session_count": len(sessions)})

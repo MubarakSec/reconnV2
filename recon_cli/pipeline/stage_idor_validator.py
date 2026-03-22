@@ -451,7 +451,7 @@ class IDORValidatorStage(Stage):
         return ""
 
     def _resolve_token(self, context: PipelineContext, auth_label: str, host: str, runtime) -> Optional[str]:
-        # 1. Try manual override from runtime config
+        # 1. Try manual override
         if auth_label == "token-a":
             token = str(getattr(runtime, "idor_token_a", "") or "").strip()
             if token: return token
@@ -459,29 +459,27 @@ class IDORValidatorStage(Stage):
             token = str(getattr(runtime, "idor_token_b", "") or "").strip()
             if token: return token
 
-        # 2. Try to pull from captured sessions (ActiveAuthStage artifacts)
-        # We look for session_{host}.json or global accounts.json
+        # 2. Try captured sessions
         try:
-            artifact_name = f"session_{host}.json"
-            artifact_path = context.record.paths.artifact(artifact_name)
-            if artifact_path.exists():
+            art_path = context.record.paths.artifact(f"sessions_{host}.json")
+            if art_path.exists():
                 from recon_cli.utils import fs
-                data = fs.read_json(artifact_path)
-                # If we need two different tokens, we might need a way to distinguish them.
-                # For now, if we only have one captured session, we use it as token-a.
-                # In a real IDOR test, we'd need two DIFFERENT sessions.
-                if auth_label == "token-a":
-                    # Check for Bearer token first, then fallback to cookie header
-                    tokens = data.get("tokens", {})
+                sessions = fs.read_json(art_path)
+                if not isinstance(sessions, list) or not sessions:
+                    return None
+                
+                # Use first session as token-a, second as token-b
+                idx = 0 if auth_label == "token-a" else 1
+                if idx < len(sessions):
+                    sess = sessions[idx]
+                    tokens = sess.get("tokens", {})
                     if "access_token" in tokens:
                         return f"Bearer {tokens['access_token']}"
                     
-                    cookies = data.get("cookies", {})
+                    cookies = sess.get("cookies", {})
                     if cookies:
                         return "; ".join([f"{k}={v}" for k, v in cookies.items()])
-        except Exception as e:
-            context.logger.debug("Failed to resolve session for IDOR validation: %s", e)
-            
+        except Exception: pass
         return None
 
     @staticmethod

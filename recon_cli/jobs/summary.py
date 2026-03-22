@@ -259,15 +259,36 @@ def generate_summary(context) -> None:
     top_findings = data["top_findings"]
     confirmed_findings = [entry for entry in top_findings if _is_confirmed(entry)]
     if confirmed_findings:
+        from recon_cli.utils.reporting import POC_EXPECTED_BY_TYPE, resolve_finding_type
         lines.append("")
-        lines.append(f"== CONFIRMED FINDINGS ({len(confirmed_findings)}) ==")
+        lines.append(f"== 🛡️ CONFIRMED FINDINGS ({len(confirmed_findings)}) ==")
         for entry in confirmed_findings[:SUMMARY_TOP]:
             label = _format_finding_label(entry)
             score = entry.get("score", 0)
             priority = (entry.get("priority") or "high").upper()
+            f_type = resolve_finding_type(entry)
+            
             lines.append(f"[*] [{score:3}] ({priority:8}) {label}")
             if entry.get("url"):
-                lines.append(f"    URL: {entry.get('url')}")
+                lines.append(f"    URL     : {entry.get('url')}")
+            
+            # Add Action Proof hint
+            poc_hint = POC_EXPECTED_BY_TYPE.get(f_type)
+            if poc_hint:
+                lines.append(f"    PROOF   : {poc_hint}")
+            
+            # Show direct evidence if available
+            proof = entry.get("proof") or entry.get("evidence")
+            if proof:
+                if isinstance(proof, (dict, list)):
+                    proof_str = json.dumps(proof)
+                else:
+                    proof_str = str(proof)
+                # Truncate long proof
+                if len(proof_str) > 120:
+                    proof_str = proof_str[:117] + "..."
+                lines.append(f"    EVIDENCE: {proof_str}")
+            lines.append("")
 
     high_priority_candidates = [
         entry
