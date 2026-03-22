@@ -73,7 +73,7 @@ show_banner() {
     echo -e "${CYAN}"
     cat <<'BANNER'
   ============================================================
-             ReconnV2 Interactive - HONEST EDITION
+             ReconnV2 Interactive - BUG BOUNTY EDITION
   ============================================================
 BANNER
     echo -e "${NC}"
@@ -152,20 +152,17 @@ load_profiles() {
     local output=""
     if ! output="$($PYTHON_BIN - <<'PY'
 from recon_cli import config
-base = ["passive", "full", "fuzz-only"]
+base = ["passive", "full", "fuzz-only", "ultra-deep"]
 profiles = sorted(set(base) | set(config.available_profiles().keys()))
 print("\n".join(profiles))
 PY
 )"; then
         print_warn "Could not read profiles dynamically. Falling back to defaults."
-        PROFILES=("passive" "full" "fuzz-only")
+        PROFILES=("passive" "full", "fuzz-only", "ultra-deep")
         return
     fi
 
     mapfile -t PROFILES <<<"$output"
-    if [ "${#PROFILES[@]}" -eq 0 ]; then
-        PROFILES=("passive" "full" "fuzz-only")
-    fi
 }
 
 load_active_modules() {
@@ -627,6 +624,11 @@ scan_deep() {
     fi
 }
 
+scan_ultra_deep_hunter() {
+    print_info "Ultra-Deep Hunter: ultra-deep profile + hunter mode"
+    run_scan_flow "ultra-deep" --mode hunter
+}
+
 scan_api_only() {
     if profile_exists "api-only"; then
         run_scan_flow "api-only"
@@ -968,6 +970,9 @@ run_doctor() {
     if ask_yes_no "Run with --fix-deps?" "N"; then
         cmd+=(--fix-deps)
     fi
+    if ask_yes_no "Check/Download SecLists into project root?" "N"; then
+        cmd+=(--seclists)
+    fi
     run_scan_command "${cmd[@]}"
     pause_screen
 }
@@ -1007,12 +1012,6 @@ run_quickstart() {
     pause_screen
 }
 
-start_web_dashboard() {
-    print_info "Starting web dashboard (Ctrl+C to stop)."
-    run_recon serve
-    pause_screen
-}
-
 setup_completions() {
     echo ""
     echo -ne "${CYAN}Shell [bash|zsh|fish|powershell] [bash]: ${NC}"
@@ -1029,11 +1028,6 @@ setup_completions() {
     fi
 
     run_scan_command "${cmd[@]}"
-    pause_screen
-}
-
-show_schema() {
-    run_recon schema --format json
     pause_screen
 }
 
@@ -1085,7 +1079,7 @@ show_main_menu() {
     echo -e "${WHITE}[2]${NC} Passive scan"
     echo -e "${WHITE}[3]${NC} Full scan"
     echo -e "${WHITE}[4]${NC} Deep scan"
-    echo -e "${WHITE}[5]${NC} Ultra-deep scan"
+    echo -e "${WHITE}[5]${NC} Ultra-Deep Hunter (ultra-deep + hunter mode)"
     echo -e "${WHITE}[6]${NC} API-only scan"
     echo -e "${WHITE}[7]${NC} Secure scan"
     echo -e "${WHITE}[8]${NC} Fuzz-only scan"
@@ -1113,13 +1107,11 @@ show_main_menu() {
     echo -e "${WHITE}[26]${NC} Wizard"
     echo -e "${WHITE}[27]${NC} Interactive mode"
     echo -e "${WHITE}[28]${NC} Quickstart guide"
-    echo -e "${WHITE}[29]${NC} Web dashboard"
-    echo -e "${WHITE}[30]${NC} Shell completions"
-    echo -e "${WHITE}[31]${NC} Trace summary"
-    echo -e "${WHITE}[32]${NC} Show schema (JSON)"
-    echo -e "${WHITE}[33]${NC} Cache stats"
-    echo -e "${WHITE}[34]${NC} Cache clear"
-    echo -e "${WHITE}[35]${NC} Start Telegram Bot"
+    echo -e "${WHITE}[29]${NC} Shell completions"
+    echo -e "${WHITE}[30]${NC} Trace summary"
+    echo -e "${WHITE}[31]${NC} Cache stats"
+    echo -e "${WHITE}[32]${NC} Cache clear"
+    echo -e "${WHITE}[33]${NC} Start Telegram Bot"
     echo -e "${WHITE}[0]${NC} Exit"
     echo ""
     echo -ne "${MAGENTA}Choose: ${NC}"
@@ -1144,7 +1136,7 @@ main() {
             2) scan_passive ;;
             3) scan_full ;;
             4) scan_deep ;;
-            5) run_scan_flow "ultra-deep" ;;
+            5) scan_ultra_deep_hunter ;;
             6) scan_api_only ;;
             7) scan_secure ;;
             8) scan_fuzz_only ;;
@@ -1168,13 +1160,11 @@ main() {
             26) run_wizard ;;
             27) run_interactive ;;
             28) run_quickstart ;;
-            29) start_web_dashboard ;;
-            30) setup_completions ;;
-            31) show_trace ;;
-            32) show_schema ;;
-            33) cache_stats ;;
-            34) cache_clear ;;
-            35) run_recon telegram-bot ;;
+            29) setup_completions ;;
+            30) show_trace ;;
+            31) cache_stats ;;
+            32) cache_clear ;;
+            33) run_recon telegram-bot ;;
             0|q|Q)
                 echo ""
                 print_ok "Bye"
