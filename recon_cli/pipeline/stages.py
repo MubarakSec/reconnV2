@@ -35,9 +35,11 @@ from recon_cli.pipeline.stage_graphql import GraphQLReconStage
 from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
 from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
 from recon_cli.pipeline.stage_oauth_discovery import OAuthDiscoveryStage
+from recon_cli.pipeline.stage_oauth_vuln import OAuthVulnerabilityStage
 from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 from recon_cli.pipeline.stage_param_mining import ParamMiningStage
 from recon_cli.pipeline.stage_html_forms import HTMLFormMiningStage
+from recon_cli.pipeline.stage_auth_bypass_tech import AuthBypassTechniqueStage
 from recon_cli.pipeline.stage_upload_probe import UploadProbeStage
 from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
 from recon_cli.pipeline.stage_cms_scan import CMSScanStage
@@ -50,7 +52,6 @@ from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
 from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_idor_validator import IDORValidatorStage
 from recon_cli.pipeline.stage_ssrf_validator import SSRFValidatorStage
-from recon_cli.pipeline.stage_exploit_validation import ExploitValidationStage
 from recon_cli.pipeline.stage_open_redirect_validator import OpenRedirectValidatorStage
 from recon_cli.pipeline.stage_input_validator import InputValidatorStage
 from recon_cli.pipeline.stage_auth_bypass_validator import AuthBypassValidatorStage
@@ -81,6 +82,7 @@ PIPELINE_STAGES: List[Stage] = [
     SecurityHeadersStage(),
     TLSHygieneStage(),
     AuthDiscoveryStage(),
+    AuthBypassTechniqueStage(),
     ActiveAuthStage(),
     WafProbeStage(),
     IDORStage(),
@@ -95,6 +97,7 @@ PIPELINE_STAGES: List[Stage] = [
     GraphQLExploitStage(),
     ApiSchemaProbeStage(),
     OAuthDiscoveryStage(),
+    OAuthVulnerabilityStage(),
     WsGrpcDiscoveryStage(),
     ParamMiningStage(),
     HTMLFormMiningStage(),
