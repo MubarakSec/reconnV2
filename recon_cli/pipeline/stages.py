@@ -23,6 +23,7 @@ from recon_cli.pipeline.stage_tls_hygiene import TLSHygieneStage
 from recon_cli.pipeline.stage_auth_discovery import AuthDiscoveryStage
 from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
 from recon_cli.pipeline.stage_waf import WafProbeStage
+from recon_cli.pipeline.stage_waf_bypass import WafBypassStage
 from recon_cli.pipeline.stage_idor import IDORStage
 from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage
 from recon_cli.pipeline.stage_fuzz import FuzzStage
@@ -85,6 +86,7 @@ PIPELINE_STAGES: List[Stage] = [
     AuthBypassTechniqueStage(),
     ActiveAuthStage(),
     WafProbeStage(),
+    WafBypassStage(),
     IDORStage(),
     AuthMatrixStage(),
     FuzzStage(),

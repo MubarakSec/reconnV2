@@ -19,6 +19,8 @@ class _JSSurfaceExtraction:
     persisted_query_hints: set[str] = field(default_factory=set)
     ws_endpoints: set[str] = field(default_factory=set)
     high_value_strings: set[str] = field(default_factory=set)
+    secrets: List[Dict[str, str]] = field(default_factory=list)
+    comments: set[str] = field(default_factory=set)
 
     def merge(self, other: "_JSSurfaceExtraction") -> None:
         self.endpoints.update(other.endpoints)
@@ -27,6 +29,8 @@ class _JSSurfaceExtraction:
         self.persisted_query_hints.update(other.persisted_query_hints)
         self.ws_endpoints.update(other.ws_endpoints)
         self.high_value_strings.update(other.high_value_strings)
+        self.secrets.extend(other.secrets)
+        self.comments.update(other.comments)
 
 
 class JSIntelligenceStage(Stage):
@@ -77,6 +81,19 @@ class JSIntelligenceStage(Stage):
         r"sha256Hash\s*[:=]\s*[\"']([a-fA-F0-9]{16,64})[\"']"
     )
     SOURCEMAP_PATTERN = re.compile(r"sourceMappingURL=([^\s\"']+)")
+    
+    # New patterns for Deep Secret Analysis
+    COMMENT_PATTERN = re.compile(r"//\s*(?:TODO|FIXME|DEBUG|INTERNAL|REMOVE|TEMP|DEV).*$", re.IGNORECASE | re.MULTILINE)
+    ENV_LEAK_PATTERN = re.compile(r"process\.env\.([A-Z0-9_]+)", re.IGNORECASE)
+    
+    SECRET_PATTERNS = {
+        "aws_access_key": re.compile(r"AKIA[0-9A-Z]{16}"),
+        "aws_secret_key": re.compile(r"\"[0-9a-zA-Z/+]{40}\""),
+        "google_api_key": re.compile(r"AIza[0-9A-Za-z-_]{35}"),
+        "generic_secret": re.compile(r"(?:secret|token|auth|key|pass|pwd|api_key|apikey)\s*[:=]\s*[\"']([0-9a-zA-Z-_\.\+=]{8,})[\"']", re.IGNORECASE),
+        "firebase_url": re.compile(r"https://[a-z0-9.-]+\.firebaseio\.com"),
+        "jwt_token": re.compile(r"ey[A-Za-z0-9-_=]+\.ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]*")
+    }
     AUTH_HINTS = (
         "login",
         "signin",
@@ -312,9 +329,29 @@ class JSIntelligenceStage(Stage):
                     "persisted_query_hints": sorted(extraction.persisted_query_hints),
                     "ws_endpoints": sorted(ws_candidates),
                     "high_value_strings": sorted(extraction.high_value_strings),
+                    "secrets": extraction.secrets,
+                    "comments": sorted(extraction.comments),
                     "source_map": source_map,
                 }
             )
+
+            # Emit Signals for Secrets
+            for secret in extraction.secrets:
+                context.emit_signal(
+                    "js_secret", "url", js_url,
+                    confidence=0.7, source=self.name,
+                    tags=["secret", secret["type"]],
+                    evidence=secret
+                )
+            
+            # Emit Signals for Interesting Comments
+            for comment in extraction.comments:
+                context.emit_signal(
+                    "js_comment", "url", js_url,
+                    confidence=0.4, source=self.name,
+                    tags=["comment", "leak"],
+                    evidence={"comment": comment}
+                )
 
             self._emit_endpoint_results(
                 context, js_url, combined_candidates, discovered_urls, signaled_hosts
@@ -820,6 +857,18 @@ class JSIntelligenceStage(Stage):
         for hint in self.HIGH_VALUE_HINTS:
             if hint in lowered:
                 extraction.high_value_strings.add(hint)
+        
+        # 4. Deep Secret & Comment Analysis
+        for label, pattern in self.SECRET_PATTERNS.items():
+            for match in pattern.findall(content):
+                extraction.secrets.append({"type": label, "value": match})
+        
+        for match in self.COMMENT_PATTERN.findall(content):
+            extraction.comments.add(match.strip())
+            
+        for match in self.ENV_LEAK_PATTERN.findall(content):
+            extraction.secrets.append({"type": "env_leak", "value": match})
+
         return extraction
 
     def _extract_param_hints(self, content: str) -> set[str]:

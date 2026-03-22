@@ -149,6 +149,26 @@ class FuzzStage(Stage):
                     per_host_limit,
                     tag="fuzz",
                 )
+            
+            # 2.1 Leak Fuzzing (Sensitive Files)
+            await self._run_leaks_fuzz(context, host, base_root, semaphore, stage_seen, per_host_counts, per_host_limit)
+
+            # 2.2 Extension Fuzzing on discovered paths (if any)
+            if path_words:
+                ext_wordlist = self._write_wordlist(
+                    context, f"ffuf_{host}_extensions.txt",
+                    {f"{w}{ext}" for w in path_words for ext in [".bak", ".old", ".php", ".jsp", ".zip", ".tar.gz", ".swp"]},
+                    limit=500
+                )
+                if ext_wordlist:
+                    ext_artifact = context.record.paths.artifact(f"ffuf_ext_{host}.json")
+                    ext_cmd = [
+                        "ffuf", "-w", str(ext_wordlist), "-u", f"{base_root}/FUZZ",
+                        "-t", str(context.runtime_config.ffuf_threads),
+                        "-mc", "200,301,302,401,403", "-ac", "-of", "json", "-o", str(ext_artifact)
+                    ]
+                    if await self._run_ffuf(context, ext_cmd, tool_timeout, runtime, host=host):
+                        self._ingest_ffuf_results(context, ext_artifact, stage_seen, per_host_counts, per_host_limit, tag="ext-fuzz")
 
             if enable_param_fuzz:
                 if param_wordlist_words:
@@ -191,6 +211,23 @@ class FuzzStage(Stage):
                             per_host_limit,
                             tag="param-fuzz",
                         )
+
+    async def _run_leaks_fuzz(self, context: PipelineContext, host: str, base_root: str, semaphore: asyncio.Semaphore, stage_seen: Set[str], per_host_counts: Dict[str, int], per_host_limit: int) -> None:
+        """Focused fuzzing for highly sensitive leak files."""
+        leaks = {
+            ".env", ".git/config", "backup.zip", "database.sql", ".php.bak", ".jsp.bak", 
+            "config.php", "web.config", ".htpasswd", "docker-compose.yml", ".npmrc"
+        }
+        leak_wordlist = self._write_wordlist(context, f"ffuf_{host}_leaks.txt", leaks, limit=0)
+        if not leak_wordlist: return
+        
+        artifact = context.record.paths.artifact(f"ffuf_leaks_{host}.json")
+        cmd = [
+            "ffuf", "-w", str(leak_wordlist), "-u", f"{base_root}/FUZZ",
+            "-t", "5", "-mc", "200", "-ac", "-of", "json", "-o", str(artifact)
+        ]
+        if await self._run_ffuf(context, cmd, 30, context.runtime_config, host=host):
+            self._ingest_ffuf_results(context, artifact, stage_seen, per_host_counts, per_host_limit, tag="leak-fuzz")
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts: Dict[str, int] = defaultdict(int)
@@ -534,35 +571,50 @@ class FuzzStage(Stage):
                 host = entry.get("hostname")
             if not host:
                 continue
+            
             for tag in entry.get("tags", []):
                 tags_by_host[host].add(tag)
+            
             if entry_type == "url" and url_value:
                 path = urlparse(url_value).path.lower()
+                
+                # Tech Detection via Extensions/Paths
+                if ".jsp" in path or ".do" in path or "web-inf" in path:
+                    tags_by_host[host].add("tech:java")
+                if ".php" in path:
+                    tags_by_host[host].add("tech:php")
+                if "node_modules" in path or "package.json" in path:
+                    tags_by_host[host].add("tech:node")
+                if ".asp" in path or ".aspx" in path:
+                    tags_by_host[host].add("tech:asp")
+                
                 if "/api" in path:
                     tags_by_host[host].add("service:api")
-                if any(
-                    token in path
-                    for token in (
-                        "/wp-",
-                        "/wp-admin",
-                        "/wp-content",
-                        "/wp-json",
-                        "/xmlrpc.php",
-                    )
-                ):
+                if any(token in path for token in ("/wp-", "/wp-admin", "/wp-content", "/wp-json", "/xmlrpc.php")):
                     tags_by_host[host].add("cms:wordpress")
+        
         signals = context.signal_index()
-
         for host, host_signals in signals.get("by_host", {}).items():
-            if "cms_drupal" in host_signals:
-                tags_by_host[host].add("cms:drupal")
-            if "cms_joomla" in host_signals:
-                tags_by_host[host].add("cms:joomla")
+            if "cms_drupal" in host_signals: tags_by_host[host].add("cms:drupal")
+            if "cms_joomla" in host_signals: tags_by_host[host].add("cms:joomla")
+            if "api_surface" in host_signals: tags_by_host[host].add("service:api")
+            
         return tags_by_host
 
     def _select_wordlist_for_host(self, runtime, host: str, tags: set[str]) -> Path:
         base = runtime.seclists_root
         candidates: List[Path] = []
+        
+        # Technology-specific wordlists
+        if "tech:php" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "PHP.fuzz.txt")
+        if "tech:java" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "Java.fuzz.txt")
+        if "tech:node" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "NodeJS.fuzz.txt")
+        if "tech:asp" in tags:
+            candidates.append(base / "Discovery" / "Web-Content" / "IIS.fuzz.txt")
+            
         if "cms:wordpress" in tags or "tech:wordpress" in tags:
             candidates.append(
                 base / "Discovery" / "Web-Content" / "CMS" / "wordpress.fuzz.txt"
