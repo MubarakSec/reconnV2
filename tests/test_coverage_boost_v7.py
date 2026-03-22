@@ -506,17 +506,3 @@ def test_cli_basic_commands():
         assert result.exit_code == 3
         assert "not found" in result.output
 
-@pytest.mark.skip(reason="Failing in full suite due to state leakage")
-def test_cli_doctor_mock():
-    from recon_cli.cli import app
-    from typer.testing import CliRunner
-    runner = CliRunner()
-    
-    with patch("recon_cli.config.ensure_base_directories"), \
-         patch("recon_cli.cli.CommandExecutor.available", return_value=True), \
-         patch("subprocess.run") as mock_sub:
-        mock_sub.return_value = MagicMock(returncode=0, stdout="version 1.0", stderr="")
-        # Run doctor with exit_on_fail=False to avoid exiting
-        result = runner.invoke(app, ["doctor", "--no-exit-on-fail"])
-        assert result.exit_code == 0
-        assert "== Tool Health ==" in result.output

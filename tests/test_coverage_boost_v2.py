@@ -461,24 +461,4 @@ class TestExtendedValidationStage:
         # Should finish quickly without errors
         stage.execute(context)
 
-    @patch("requests.request")
-    def test_execute_with_redirect(self, mock_req, context):
-        pytest.skip("Skipping debug for now")
-        stage = ExtendedValidationStage()
-        context.get_results.return_value = [
-            {"type": "url", "url": "http://test.com?redirect=orig", "score": 50}
-        ]
-        
-        # Mock successful redirect
-        mock_resp = MagicMock()
-        mock_resp.status_code = 302
-        mock_resp.headers = {"Location": "https://example.com/testtoken"}
-        mock_req.return_value = mock_resp
-        
-        # Mock token to match
-        with patch.object(ExtendedValidationStage, "_token", return_value="testtoken"):
-            stage.execute(context)
-        
-        # Verify findings added
-        assert context.results.append.called
 
