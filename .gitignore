@@ -1,19 +1,42 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.venv/
+venv/
+env/
 .env
+*.egg-info/
+recon_cli.egg-info/
+
+# IDEs
 .vscode/
 .idea/
-m-arabi.com_20260204_055203_7663/
-recon_cli.egg-info/
-.venv/
-*.egg-info/
-jobs/queued/
-jobs/running/
-jobs/finished/
-jobs/failed/
+
+# App Specific Data (Ignored to avoid bloating git)
+jobs/
 cache/
 learning/
 engagements/
 results/
+artifacts/
+reports/
+seclists/
+archive/
+data/projects.json
+data/users.db
+
+# Tools & Logs
+.coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 baseline_pid*
+/tmp/
+
+# Aider files that shouldn't be committed
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/
+# .aiderignore is NOT ignored to allow sharing aider configuration
