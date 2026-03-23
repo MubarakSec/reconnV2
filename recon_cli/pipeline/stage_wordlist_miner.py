@@ -20,8 +20,8 @@ class WordlistMinerStage(Stage):
     """
     name = "wordlist_miner"
 
-    # Regex to find words (alphanumeric, 3-20 chars)
-    WORD_PATTERN = re.compile(r"\b[a-zA-Z0-9-]{3,20}\b")
+    # Regex to find words (alphanumeric + hyphen/underscore, 3-30 chars)
+    WORD_PATTERN = re.compile(r"\b[a-zA-Z0-9_-]{3,30}\b")
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_wordlist_miner", True))

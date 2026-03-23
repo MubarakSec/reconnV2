@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+import asyncio
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Any
 from urllib.parse import ParseResult, urlencode, urlparse, urlunparse, parse_qsl
@@ -295,8 +297,8 @@ class IDORStage(Stage):
             base_value = candidate.path_parts[idx]
             for variant_value in self._value_variants(base_value, other_id, harvested=harvested):
                 if variant_value == base_value: continue
-                new_parts = list(candidate.path_parts)
-                new_parts[idx] = variant_value
+                new_parts = [str(p) for p in candidate.path_parts]
+                new_parts[idx] = str(variant_value)
                 new_url = urlunparse(parsed._replace(path="/" + "/".join(new_parts)))
                 variants.append((new_url, {"path_index": idx, "original": base_value, "variant": variant_value}))
         

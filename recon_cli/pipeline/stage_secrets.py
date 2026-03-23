@@ -80,7 +80,7 @@ class SecretsDetectionStage(Stage):
                     "type": "finding", "finding_type": "exposed_secret", "source": "secrets-static",
                     "hostname": host, "url": url, "description": f"{match.pattern} ({match.confidence})",
                     "details": {
-                        "pattern": match.pattern, "value_hash": m.value_hash,
+                        "pattern": match.pattern, "value_hash": match.value_hash,
                         "length": match.length, "entropy": match.entropy,
                         "confidence": match.confidence
                     },
