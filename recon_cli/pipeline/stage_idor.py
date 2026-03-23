@@ -122,6 +122,14 @@ class IDORStage(Stage):
         if not candidates:
             context.logger.info("IDOR stage: no suitable endpoints found")
             return
+        
+        # Determine host-specific Soft-404 Fingerprint
+        # Take first candidate host
+        host = urlparse(candidates[0].url).hostname or ""
+        session = requests.Session()
+        verify_tls = bool(getattr(context.runtime_config, "verify_tls", True))
+        soft_404_fingerprint = self._get_soft_404_fingerprint(context, session, host, 10, verify_tls)
+
         runtime = context.runtime_config
         limiter = context.get_rate_limiter(
             "idor_probe",
@@ -170,6 +178,11 @@ class IDORStage(Stage):
                 )
                 if not data_a or data_a["status"] >= 400:  # type: ignore[operator]
                     continue
+                
+                # Soft-404 Destroyer: Check if baseline is just a custom 404 page
+                if soft_404_fingerprint:
+                    if data_a["status"] == soft_404_fingerprint["status"] and data_a["body_md5"] == soft_404_fingerprint["body_md5"]:
+                        continue
 
                 # 2. Test with Token B (attacker/other user)
                 token_b = tokens[2][1] if len(tokens) > 2 else None
@@ -233,6 +246,22 @@ class IDORStage(Stage):
                     if context.results.append(finding):
                         stats["suspects"] += 1
         context.manager.update_metadata(context.record)
+
+    def _get_soft_404_fingerprint(self, context: PipelineContext, session: "requests.Session", host: str, timeout: int, verify_tls: bool) -> Optional[Dict[str, Any]]:
+        import uuid
+        if not host: return None
+        random_path = f"/this-does-not-exist-{uuid.uuid4().hex[:10]}"
+        url = f"https://{host}{random_path}"
+        if not context.url_allowed(url):
+            url = f"http://{host}{random_path}"
+        try:
+            resp = session.get(url, timeout=timeout, verify=verify_tls, allow_redirects=True)
+            body = resp.content or b""
+            return {
+                "status": int(resp.status_code),
+                "body_md5": hashlib.md5(body, usedforsecurity=False).hexdigest()
+            }
+        except Exception: return None
 
     def _collect_candidates(
         self, context: PipelineContext, items: Iterable[Dict[str, object]]

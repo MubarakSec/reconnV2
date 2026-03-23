@@ -626,6 +626,16 @@ def run_pipeline(
     stages: Optional[Sequence[str]] = None,
 ) -> None:
     context = PipelineContext(record=record, manager=manager, force=force)
+    
+    # 1. Resolve Stages from Profile
+    if not stages and record.spec.execution_profile:
+        from recon_cli import config as recon_config
+        profiles = recon_config.available_profiles()
+        profile_cfg = profiles.get(record.spec.execution_profile)
+        if profile_cfg and "stages" in profile_cfg:
+            context.logger.info("Using explicit stages from execution profile: %s", record.spec.execution_profile)
+            stages = profile_cfg["stages"]
+
     plugin_stages = plugins_module.load_stage_plugins(logger=context.logger)
     runner = PipelineRunner(list(PIPELINE_STAGES) + plugin_stages)
 
