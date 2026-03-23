@@ -396,12 +396,17 @@ class FuzzStage(Stage):
         max_custom: int,
         max_combined: int,
     ) -> Path:
-        if not custom_words:
+        all_custom = set(custom_words)
+        mined_words = context.get_data("custom_target_words", [])
+        if mined_words and isinstance(mined_words, list):
+            all_custom.update(mined_words)
+
+        if not all_custom:
             return base_wordlist
         custom_path = self._write_wordlist(
             context,
             f"ffuf_{host}_custom.txt",
-            custom_words,
+            all_custom,
             limit=max_custom,
         )
         if custom_path is None or not custom_path.exists():
