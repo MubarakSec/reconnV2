@@ -6,6 +6,7 @@ import uuid
 import requests
 import re
 import os
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
@@ -27,7 +28,7 @@ class ActiveAuthStage(Stage):
     - Temp-mail verification (1secmail).
     """
     name = "active_auth"
-    ACCOUNTS_FILE = "data/accounts.json"
+    ACCOUNTS_FILE = Path("data/accounts.json")
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_active_auth", True))
