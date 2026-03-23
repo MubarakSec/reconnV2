@@ -1,4 +1,11 @@
 {
+  "email.syfe.com": {
+    "email": "user_34da4e75@1secmail.com",
+    "email_domain": "1secmail.com",
+    "email_prefix": "user_34da4e75",
+    "password": "***",
+    "username": "recon_7849313f"
+  },
   "example.com": {
     "email": "user_bffdd6f6@1secmail.com",
     "email_domain": "1secmail.com",
