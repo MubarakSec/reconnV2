@@ -9,6 +9,7 @@ import pytest
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
 from recon_cli.pipeline.stage_api_reconstructor import ApiSchemaReconstructorStage
+from recon_cli.pipeline.stage_api_logic_fuzzer import ApiLogicFuzzerStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
 from recon_cli.pipeline.stage_poc_generator import POCGeneratorStage
 from recon_cli.pipeline.stage_headless_crawl import HeadlessCrawlStage
@@ -28,6 +29,12 @@ def mock_context(temp_dir):
     mock.runtime_config = MagicMock()
     mock.runtime_config.verify_tls = False
     mock.get_results = MagicMock(return_value=[])
+    
+    # Mock filter_results to return what was set in get_results
+    def mock_filter(res_type):
+        return [r for r in mock.get_results() if r.get("type") == res_type]
+    mock.filter_results.side_effect = mock_filter
+    
     mock.results = MagicMock()
     mock.logger = MagicMock()
     return mock
@@ -145,3 +152,36 @@ class TestEliteFeatures:
         wrapped = manager.wrap_headers(headers)
         assert "User-Agent" in wrapped
         assert "Sec-Ch-Ua" in wrapped
+
+    @pytest.mark.asyncio
+    async def test_api_logic_fuzzer(self, mock_context, temp_dir):
+        stage = ApiLogicFuzzerStage()
+        
+        # 1. Mock schema artifact
+        host = "api.example.com"
+        schema_path = temp_dir / f"openapi_reconstructed_{host}.json"
+        schema = {"paths": {"/api/v1/user/123": {"get": {}}, "/api/v1/profile": {"post": {}}}}
+        schema_path.write_text(json.dumps(schema))
+        
+        # 2. Mock multiple sessions
+        sessions_path = temp_dir / f"sessions_{host}.json"
+        sessions = [
+            {"session_id": "user-a", "cookies": {"sid": "a"}},
+            {"session_id": "user-b", "cookies": {"sid": "b"}}
+        ]
+        sessions_path.write_text(json.dumps(sessions))
+        
+        mock_context.record.paths.artifacts_dir = temp_dir
+        
+        with patch("httpx.AsyncClient.request") as mock_req:
+            # Baseline (User A) succeeds, Test (User B) succeeds -> BOLA
+            mock_req.return_value = MagicMock(status_code=200, text="Reflected Admin", content=b"data")
+            
+            await stage.run_async(mock_context)
+            
+            assert mock_req.called
+            # Check if findings were added
+            assert mock_context.results.append.called
+            findings = [call[0][0] for call in mock_context.results.append.call_args_list]
+            assert any(f["finding_type"] == "bola" for f in findings)
+            assert any(f["finding_type"] == "mass_assignment" for f in findings)
