@@ -392,6 +392,51 @@ class PipelineRunner:
             except Exception as exc:
                 return StageExecutionOutcome(error=exc, span=span)
 
+    def _perform_preflight_checks(self, context: PipelineContext, stages: list[Stage]) -> bool:
+        """
+        Elite Pre-flight mandatory tool check.
+        Ensures all tools required by the selected stages are present.
+        """
+        from recon_cli.tools.executor import CommandExecutor
+        from rich.console import Console
+        from rich.table import Table
+        
+        required_tools = set()
+        for stage in stages:
+            if hasattr(stage, "get_required_tools"):
+                required_tools.update(stage.get_required_tools())
+            elif hasattr(stage, "tool"):
+                required_tools.add(getattr(stage, "tool"))
+
+        if not required_tools:
+            return True
+
+        console = Console()
+        table = Table(title="🛡️ ReconnV2 Pre-flight Tool Check")
+        table.add_column("Tool", style="cyan")
+        table.add_column("Status", justify="center")
+        table.add_column("Impact", style="dim")
+
+        missing_count = 0
+        for tool in sorted(list(required_tools)):
+            if not tool: continue
+            is_available = CommandExecutor.available(tool)
+            if is_available:
+                table.add_row(tool, "[green]OK[/green]", "None")
+            else:
+                missing_count += 1
+                table.add_row(tool, "[red]MISSING[/red]", "Stage will be skipped")
+
+        console.print(table)
+        
+        if missing_count > 0:
+            if getattr(context.runtime_config, "require_all_tools", False):
+                context.logger.error("Mandatory tools missing and 'require_all_tools' is enabled. Aborting.")
+                return False
+            context.logger.warning("%d tools missing. Impacted stages will be automatically skipped.", missing_count)
+        
+        return True
+
     async def run(
         self, context: PipelineContext, stages: Optional[Sequence[str]] = None
     ):
