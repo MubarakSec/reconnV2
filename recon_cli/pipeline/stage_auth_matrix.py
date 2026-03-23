@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+import asyncio
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import parse_qsl, urlparse
 
-try:
-    import requests
-except ImportError:  # pragma: no cover
-    requests = None  # type: ignore
-
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 SENSITIVE_KEYS = {
     "email",
@@ -108,14 +105,9 @@ class AuthMatrixStage(Stage):
     )
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        if requests is None:
-            context.logger.info(
-                "requests library not available; skipping AuthMatrix stage"
-            )
-            return False
         return True
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         urls = self._collect_urls(context)
         if not urls:
             context.logger.info("AuthMatrix stage: no URLs to evaluate")
@@ -139,65 +131,64 @@ class AuthMatrixStage(Stage):
             )
             return
 
-        session = requests.Session()
         verify_tls = bool(getattr(runtime, "verify_tls", True))
-        if not verify_tls:
-            try:
-                requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
-            except Exception:
-                context.logger.debug(
-                    "Failed to disable urllib3 warnings", exc_info=True
-                )
-
         timeout = int(getattr(runtime, "idor_timeout", 10))
+        
+        client_config = HTTPClientConfig(
+            max_concurrent=20,
+            total_timeout=float(timeout),
+            verify_ssl=verify_tls,
+            requests_per_second=float(getattr(runtime, "auth_matrix_rps", 20.0))
+        )
+
         stats = context.record.metadata.stats.setdefault(
             "auth_matrix", {"tests": 0, "issues": 0}
         )
         tsv_lines = ["url\tauth\tstatus\tbody_md5\tlength\tsensitive_keys\tsubject_ids"]
 
-        for url in urls:
-            records: List[AuthRecord] = []
-            for auth_label, token in tokens:
-                data = self._fetch(
-                    session,
-                    context,
-                    url,
-                    auth_label,
-                    token,
-                    timeout,
-                    verify_tls,
-                    limiter,
-                )
-                if not data:
-                    continue
-                stats["tests"] += 1
-                record = AuthRecord(
-                    url=url,
-                    auth=auth_label,
-                    status=int(data["status"]),  # type: ignore[call-overload]
-                    body_md5=str(data["body_md5"]),
-                    length=int(data["length"]),  # type: ignore[call-overload]
-                    sensitive=dict(data["sensitive"]),  # type: ignore[call-overload]
-                    subject_ids=set(data.get("subject_ids") or []),  # type: ignore[call-overload]
-                    auth_error=bool(data.get("auth_error")),
-                )
-                records.append(record)
-                sensitive_keys = (
-                    ",".join(sorted(record.sensitive.keys()))
-                    if record.sensitive
-                    else ""
-                )
-                subject_ids = (
-                    ",".join(sorted(record.subject_ids)) if record.subject_ids else ""
-                )
-                tsv_lines.append(
-                    f"{url}\t{auth_label}\t{record.status}\t{record.body_md5}\t{record.length}\t{sensitive_keys}\t{subject_ids}"
-                )
+        async with AsyncHTTPClient(client_config) as client:
+            for url in urls:
+                records: List[AuthRecord] = []
+                for auth_label, token in tokens:
+                    data = await self._fetch(
+                        client,
+                        context,
+                        url,
+                        auth_label,
+                        token,
+                        timeout,
+                        limiter,
+                    )
+                    if not data:
+                        continue
+                    stats["tests"] += 1
+                    record = AuthRecord(
+                        url=url,
+                        auth=auth_label,
+                        status=int(data["status"]),  # type: ignore[call-overload]
+                        body_md5=str(data["body_md5"]),
+                        length=int(data["length"]),  # type: ignore[call-overload]
+                        sensitive=dict(data["sensitive"]),  # type: ignore[call-overload]
+                        subject_ids=set(data.get("subject_ids") or []),  # type: ignore[call-overload]
+                        auth_error=bool(data.get("auth_error")),
+                    )
+                    records.append(record)
+                    sensitive_keys = (
+                        ",".join(sorted(record.sensitive.keys()))
+                        if record.sensitive
+                        else ""
+                    )
+                    subject_ids = (
+                        ",".join(sorted(record.subject_ids)) if record.subject_ids else ""
+                    )
+                    tsv_lines.append(
+                        f"{url}\t{auth_label}\t{record.status}\t{record.body_md5}\t{record.length}\t{sensitive_keys}\t{subject_ids}"
+                    )
 
-            issues = self._detect_issues(url, records)
-            for issue in issues:
-                if context.results.append(issue):
-                    stats["issues"] += 1
+                issues = self._detect_issues(url, records)
+                for issue in issues:
+                    if context.results.append(issue):
+                        stats["issues"] += 1
 
         artifacts_dir = context.record.paths.ensure_subdir("auth_matrix")
         (artifacts_dir / "auth_matrix.tsv").write_text(
@@ -295,31 +286,32 @@ class AuthMatrixStage(Stage):
             score += 8
         return score
 
-    def _fetch(
+    async def _fetch(
         self,
-        session: "requests.Session",
+        client: AsyncHTTPClient,
         context: PipelineContext,
         url: str,
         auth_label: str,
         token: Optional[str],
         timeout: int,
-        verify_tls: bool,
         limiter=None,
     ) -> Optional[Dict[str, object]]:
-        headers = {"User-Agent": "recon-cli auth-matrix"}
+        headers = context.auth_headers({"User-Agent": "recon-cli auth-matrix"})
+        cookie_header = context.auth_cookie_header()
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+            
         if token:
             headers["Authorization"] = token
         if limiter and not limiter.wait_for_slot(url, timeout=timeout):
             return None
         try:
-            resp = session.get(
+            resp = await client.get(
                 url,
                 headers=headers,
-                timeout=timeout,
-                verify=verify_tls,
-                allow_redirects=True,
+                follow_redirects=True,
             )
-        except requests.exceptions.RequestException as exc:
+        except Exception as exc:
             context.logger.debug(
                 "AuthMatrix request failed for %s (%s): %s", url, auth_label, exc
             )
@@ -327,30 +319,37 @@ class AuthMatrixStage(Stage):
                 limiter.on_error(url)
             return None
         if limiter:
-            limiter.on_response(url, resp.status_code)
+            limiter.on_response(url, resp.status)
 
-        body = resp.content or b""
-        body_md5 = hashlib.md5(body, usedforsecurity=False).hexdigest()
+        body_text = resp.body or ""
+        body_bytes = body_text.encode("utf-8")
+        body_md5 = hashlib.md5(body_bytes, usedforsecurity=False).hexdigest()
         headers_lower = {key.lower(): value for key, value in resp.headers.items()}
-        text = ""
-        try:
-            text = resp.text[:4000]
-        except Exception:
-            text = ""
-        data_json = self._safe_json_dict(resp)
-        sensitive = self._extract_sensitive(data_json, text)
-        subject_ids = self._extract_subject_ids(data_json, text)
-        auth_error = self._looks_like_auth_error(resp.status_code, text)
+        
+        data_json = self._parse_json(body_text)
+        sensitive = self._extract_sensitive(data_json, body_text[:4000])
+        subject_ids = self._extract_subject_ids(data_json, body_text[:4000])
+        auth_error = self._looks_like_auth_error(resp.status, body_text[:4000])
 
         return {
-            "status": int(resp.status_code or 0),
+            "status": int(resp.status or 0),
             "body_md5": body_md5,
-            "length": len(body),
+            "length": len(body_bytes),
             "headers": headers_lower,
             "sensitive": sensitive,
             "subject_ids": subject_ids,
             "auth_error": auth_error,
         }
+
+    @staticmethod
+    def _parse_json(text: str) -> Dict[str, object]:
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+        return {}
 
     def _extract_sensitive(
         self, data_json: Dict[str, object], text: str
@@ -498,15 +497,7 @@ class AuthMatrixStage(Stage):
                         )
         return findings
 
-    @staticmethod
-    def _safe_json_dict(response: "requests.Response") -> Dict[str, object]:
-        try:
-            data = response.json()
-        except Exception:
-            return {}
-        if isinstance(data, dict):
-            return data
-        return {}
+    import json
 
     def _collect_sensitive(
         self, node: object, out: Dict[str, object], *, prefix: str, depth: int
@@ -635,3 +626,4 @@ class AuthMatrixStage(Stage):
             "priority": priority,
             "severity": severity,
         }
+import json

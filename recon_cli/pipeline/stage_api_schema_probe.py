@@ -8,6 +8,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 class ApiSchemaProbeStage(Stage):
@@ -44,13 +45,7 @@ class ApiSchemaProbeStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_api_schema_probe", False))
 
-    def execute(self, context: PipelineContext) -> None:
-        try:
-            import requests
-        except Exception:
-            context.logger.warning("api schema probe requires requests; skipping")
-            return
-
+    async def run_async(self, context: PipelineContext) -> None:
         runtime = context.runtime_config
         max_specs = int(getattr(runtime, "api_schema_max_specs", 25))
         max_endpoints = int(getattr(runtime, "api_schema_max_endpoints", 200))
@@ -87,241 +82,234 @@ class ApiSchemaProbeStage(Stage):
         budget_exhausted = False
         host_counts: Dict[str, int] = {}
 
-        for spec_url in spec_urls:
-            if max_endpoints > 0 and budget_used >= max_endpoints:
-                budget_exhausted = True
-                break
-            if not context.url_allowed(spec_url):
-                continue
-            if limiter and not limiter.wait_for_slot(spec_url, timeout=timeout):
-                continue
-            session = context.auth_session(spec_url)
-            headers = context.auth_headers({"User-Agent": "recon-cli api-schema"})
-            try:
-                if session:
-                    resp = session.get(
-                        spec_url,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        headers=headers,
-                        verify=context.runtime_config.verify_tls,
-                    )
-                else:
-                    resp = requests.get(
-                        spec_url,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        headers=headers,
-                        verify=context.runtime_config.verify_tls,
-                    )
-            except requests.exceptions.RequestException:
-                if limiter:
-                    limiter.on_error(spec_url)
-                continue
-            if limiter:
-                limiter.on_response(spec_url, resp.status_code)
-            if resp.status_code >= 400:
-                continue
+        client_config = HTTPClientConfig(
+            max_concurrent=50,
+            total_timeout=float(timeout),
+            verify_ssl=runtime.verify_tls,
+            requests_per_second=float(getattr(runtime, "api_schema_rps", 20.0))
+        )
 
-            spec_data = self._parse_spec(
-                resp.text or "", resp.headers.get("Content-Type", "")
-            )
-            if not spec_data:
-                continue
-            base_url = self._resolve_base_url(spec_data, spec_url)
-            if not base_url:
-                continue
-            endpoints = self._extract_endpoints(spec_data)
-            if not endpoints:
-                continue
-            endpoints = self._prioritize_endpoints(endpoints)
-
-            for endpoint in endpoints:
+        async with AsyncHTTPClient(client_config) as client:
+            for spec_url in spec_urls:
                 if max_endpoints > 0 and budget_used >= max_endpoints:
                     budget_exhausted = True
                     break
-                url = self._build_url(base_url, endpoint)
-                if not url or not context.url_allowed(url):
+                if not context.url_allowed(spec_url):
                     continue
-                host = (urlparse(url).hostname or "").lower()
-                if (
-                    max_per_host > 0
-                    and host
-                    and host_counts.get(host, 0) >= max_per_host
-                ):
-                    host_cap_skipped += 1
+                if limiter and not limiter.wait_for_slot(spec_url, timeout=timeout):
                     continue
-                method = str(endpoint.get("method") or "get").lower()
-                endpoint_key = (method, url)
-                if endpoint_key in seen_endpoints:
-                    duplicate_skipped += 1
-                    continue
-                seen_endpoints.add(endpoint_key)
-                budget_used += 1
-                if host:
-                    host_counts[host] = host_counts.get(host, 0) + 1
+                
+                headers = context.auth_headers({"User-Agent": "recon-cli api-schema"})
+                cookie_header = context.auth_cookie_header()
+                if cookie_header:
+                    headers["Cookie"] = cookie_header
 
-                requires_auth = bool(endpoint.get("requires_auth"))
-                tags = ["api:schema", f"method:{method}"]
-                score = 35
-                if requires_auth:
-                    tags.append("api:auth-required")
-                    score += 10
-
-                payload = {
-                    "type": "url",
-                    "source": "api-schema",
-                    "url": url,
-                    "hostname": urlparse(url).hostname,
-                    "tags": tags,
-                    "score": score,
-                }
-                if context.results.append(payload):
-                    endpoints_added += 1
-
-                context.emit_signal(
-                    "api_schema_endpoint",
-                    "url",
-                    url,
-                    confidence=0.5,
-                    source="api-schema",
-                    tags=tags,
-                    evidence={"method": method, "spec": spec_url},
-                )
-
-                for param in endpoint.get("params") or []:  # type: ignore[attr-defined]
-                    if not isinstance(param, dict):
-                        continue
-                    name = param.get("name")
-                    if not name:
-                        continue
-                    param_name = str(name)
-                    param_counts[param_name] += 1
-                    if len(param_examples[param_name]) < 3:
-                        param_examples[param_name].append(url)
-                for field_name in endpoint.get("body_fields") or []:  # type: ignore[attr-defined]
-                    if not isinstance(field_name, str) or not field_name:
-                        continue
-                    param_counts[field_name] += 1
-                    if len(param_examples[field_name]) < 3:
-                        param_examples[field_name].append(url)
-
-                should_probe = method in self.READ_METHODS or (
-                    safe_writes and method in self.SAFE_WRITE_METHODS
-                )
-                if not should_probe:
-                    continue
-                if requires_auth and not context.auth_enabled():
-                    continue
-
-                request_json: Optional[Dict[str, object]] = None
-                request_data: Optional[Dict[str, object]] = None
-                probe_mode = "read"
-                if method in self.SAFE_WRITE_METHODS:
-                    request_json, request_data = self._build_safe_body(endpoint)
-                    probe_mode = "safe-write"
-                    mutating_probed += 1
-
-                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-                    continue
-                probed += 1
-                session = context.auth_session(url)
-                headers = context.auth_headers(
-                    {"User-Agent": "recon-cli api-schema-probe"}
-                )
-                if method in self.SAFE_WRITE_METHODS:
-                    headers["X-Recon-Safe-Probe"] = "1"
-                if request_json is not None:
-                    headers["Content-Type"] = "application/json"
                 try:
-                    if session:
-                        resp = session.request(
-                            method.upper(),
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                            json=request_json,
-                            data=request_data,
-                        )
-                    else:
-                        resp = requests.request(
-                            method.upper(),
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                            json=request_json,
-                            data=request_data,
-                        )
-                except requests.exceptions.RequestException:
+                    resp = await client.get(
+                        spec_url,
+                        headers=headers,
+                        follow_redirects=True,
+                    )
+                except Exception:
                     if limiter:
-                        limiter.on_error(url)
+                        limiter.on_error(spec_url)
                     continue
+                
                 if limiter:
-                    limiter.on_response(url, resp.status_code)
+                    limiter.on_response(spec_url, resp.status)
+                if resp.status >= 400:
+                    continue
 
-                status = int(resp.status_code or 0)
-                meta = self._response_meta(resp)
-                auth_hint = self._looks_like_login(resp.text or "", meta)
-                signal_type = None
-                if requires_auth and status in {401, 403, 302}:
-                    if status == 302 and auth_hint:
-                        signal_type = "api_auth_challenge"
-                        auth_challenge += 1
-                    else:
-                        signal_type = "api_auth_required"
-                        auth_required += 1
-                elif requires_auth and 200 <= status < 300:
-                    if auth_hint:
-                        signal_type = "api_auth_challenge"
-                        auth_challenge += 1
-                    else:
-                        signal_type = "api_auth_weak"
-                        auth_weak += 1
-                elif not requires_auth and 200 <= status < 300:
-                    signal_type = "api_public_endpoint"
-                    public_hits += 1
-                if signal_type:
+                spec_data = self._parse_spec(
+                    resp.body or "", resp.headers.get("Content-Type", "")
+                )
+                if not spec_data:
+                    continue
+                base_url = self._resolve_base_url(spec_data, spec_url)
+                if not base_url:
+                    continue
+                endpoints = self._extract_endpoints(spec_data)
+                if not endpoints:
+                    continue
+                endpoints = self._prioritize_endpoints(endpoints)
+
+                for endpoint in endpoints:
+                    if max_endpoints > 0 and budget_used >= max_endpoints:
+                        budget_exhausted = True
+                        break
+                    url = self._build_url(base_url, endpoint)
+                    if not url or not context.url_allowed(url):
+                        continue
+                    host = (urlparse(url).hostname or "").lower()
+                    if (
+                        max_per_host > 0
+                        and host
+                        and host_counts.get(host, 0) >= max_per_host
+                    ):
+                        host_cap_skipped += 1
+                        continue
+                    method = str(endpoint.get("method") or "get").lower()
+                    endpoint_key = (method, url)
+                    if endpoint_key in seen_endpoints:
+                        duplicate_skipped += 1
+                        continue
+                    seen_endpoints.add(endpoint_key)
+                    budget_used += 1
+                    if host:
+                        host_counts[host] = host_counts.get(host, 0) + 1
+
+                    requires_auth = bool(endpoint.get("requires_auth"))
+                    tags = ["api:schema", f"method:{method}"]
+                    score = 35
+                    if requires_auth:
+                        tags.append("api:auth-required")
+                        score += 10
+
+                    payload = {
+                        "type": "url",
+                        "source": "api-schema",
+                        "url": url,
+                        "hostname": urlparse(url).hostname,
+                        "tags": tags,
+                        "score": score,
+                    }
+                    if context.results.append(payload):
+                        endpoints_added += 1
+
                     context.emit_signal(
-                        signal_type,
+                        "api_schema_endpoint",
                         "url",
                         url,
-                        confidence=0.6,
+                        confidence=0.5,
                         source="api-schema",
                         tags=tags,
-                        evidence={
-                            "status_code": status,
-                            "method": method,
+                        evidence={"method": method, "spec": spec_url},
+                    )
+
+                    for param in endpoint.get("params") or []:  # type: ignore[attr-defined]
+                        if not isinstance(param, dict):
+                            continue
+                        name = param.get("name")
+                        if not name:
+                            continue
+                        param_name = str(name)
+                        param_counts[param_name] += 1
+                        if len(param_examples[param_name]) < 3:
+                            param_examples[param_name].append(url)
+                    for field_name in endpoint.get("body_fields") or []:  # type: ignore[attr-defined]
+                        if not isinstance(field_name, str) or not field_name:
+                            continue
+                        param_counts[field_name] += 1
+                        if len(param_examples[field_name]) < 3:
+                            param_examples[field_name].append(url)
+
+                    should_probe = method in self.READ_METHODS or (
+                        safe_writes and method in self.SAFE_WRITE_METHODS
+                    )
+                    if not should_probe:
+                        continue
+                    if requires_auth and not context.auth_enabled():
+                        continue
+
+                    request_json: Optional[Dict[str, object]] = None
+                    request_data: Optional[Dict[str, object]] = None
+                    probe_mode = "read"
+                    if method in self.SAFE_WRITE_METHODS:
+                        request_json, request_data = self._build_safe_body(endpoint)
+                        probe_mode = "safe-write"
+                        mutating_probed += 1
+
+                    if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+                        continue
+                    probed += 1
+                    
+                    headers = context.auth_headers(
+                        {"User-Agent": "recon-cli api-schema-probe"}
+                    )
+                    cookie_header = context.auth_cookie_header()
+                    if cookie_header:
+                        headers["Cookie"] = cookie_header
+
+                    if method in self.SAFE_WRITE_METHODS:
+                        headers["X-Recon-Safe-Probe"] = "1"
+                    if request_json is not None:
+                        headers["Content-Type"] = "application/json"
+                    try:
+                        resp = await client._request(
+                            method=method.upper(),
+                            url=url,
+                            headers=headers,
+                            follow_redirects=True,
+                            json=request_json,
+                            data=request_data,
+                        )
+                    except Exception:
+                        if limiter:
+                            limiter.on_error(url)
+                        continue
+                    
+                    if limiter:
+                        limiter.on_response(url, resp.status)
+
+                    status = int(resp.status or 0)
+                    meta = self._response_meta(resp)
+                    auth_hint = self._looks_like_login(resp.body or "", meta)
+                    signal_type = None
+                    if requires_auth and status in {401, 403, 302}:
+                        if status == 302 and auth_hint:
+                            signal_type = "api_auth_challenge"
+                            auth_challenge += 1
+                        else:
+                            signal_type = "api_auth_required"
+                            auth_required += 1
+                    elif requires_auth and 200 <= status < 300:
+                        if auth_hint:
+                            signal_type = "api_auth_challenge"
+                            auth_challenge += 1
+                        else:
+                            signal_type = "api_auth_weak"
+                            auth_weak += 1
+                    elif not requires_auth and 200 <= status < 300:
+                        signal_type = "api_public_endpoint"
+                        public_hits += 1
+                    if signal_type:
+                        context.emit_signal(
+                            signal_type,
+                            "url",
+                            url,
+                            confidence=0.6,
+                            source="api-schema",
+                            tags=tags,
+                            evidence={
+                                "status_code": status,
+                                "method": method,
+                                "spec": spec_url,
+                                "probe_mode": probe_mode,
+                                "content_type": meta.get("content_type"),
+                                "content_length": meta.get("content_length"),
+                                "title": meta.get("title"),
+                                "location": meta.get("location"),
+                            },
+                        )
+
+                    artifacts.append(
+                        {
                             "spec": spec_url,
+                            "url": url,
+                            "method": method,
+                            "status": status,
+                            "requires_auth": requires_auth,
                             "probe_mode": probe_mode,
                             "content_type": meta.get("content_type"),
                             "content_length": meta.get("content_length"),
                             "title": meta.get("title"),
                             "location": meta.get("location"),
-                        },
+                            "auth_hint": auth_hint,
+                        }
                     )
 
-                artifacts.append(
-                    {
-                        "spec": spec_url,
-                        "url": url,
-                        "method": method,
-                        "status": status,
-                        "requires_auth": requires_auth,
-                        "probe_mode": probe_mode,
-                        "content_type": meta.get("content_type"),
-                        "content_length": meta.get("content_length"),
-                        "title": meta.get("title"),
-                        "location": meta.get("location"),
-                        "auth_hint": auth_hint,
-                    }
-                )
-
-            if budget_exhausted:
-                break
+                if budget_exhausted:
+                    break
 
         max_params = int(getattr(runtime, "api_schema_param_max", 120))
         for name, count in param_counts.most_common(max_params):
@@ -694,7 +682,7 @@ class ApiSchemaProbeStage(Stage):
             pass
         body = ""
         try:
-            body = resp.text or ""
+            body = resp.body or ""
         except Exception:
             body = ""
         if body:

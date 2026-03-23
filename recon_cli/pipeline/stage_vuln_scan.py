@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import asyncio
 import time
 import uuid
-import requests
 from typing import Dict, List, Tuple, Any, Optional
 from urllib.parse import urlparse, urlencode, urlunparse, parse_qsl
 
@@ -13,6 +13,7 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.tools.executor import CommandError
 from recon_cli.utils.oast import InteractshSession
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 class VulnScanStage(Stage):
@@ -43,12 +44,16 @@ class VulnScanStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return True # Always enabled if vulns are requested
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         executor = context.executor
         candidates = self._select_candidates(context)
         if not candidates:
             context.logger.info("No parameterized URLs for vuln scan")
             return
+
+        runtime = context.runtime_config
+        timeout = int(getattr(runtime, "vuln_scan_timeout", 10))
+        verify_tls = bool(getattr(runtime, "verify_tls", True))
 
         # 1. Initialize OAST Session
         oast_output = context.record.paths.artifact("oast_interactions.json")
@@ -57,10 +62,19 @@ class VulnScanStage(Stage):
         
         if oast_session.start():
             context.logger.info("OAST Session started: %s", oast_session.base_domain)
-            self._run_oast_probes(context, oast_session, candidates, tokens_to_urls)
+            
+            client_config = HTTPClientConfig(
+                max_concurrent=20,
+                total_timeout=float(timeout),
+                verify_ssl=verify_tls,
+                requests_per_second=float(getattr(runtime, "vuln_scan_rps", 25.0))
+            )
+            
+            async with AsyncHTTPClient(client_config) as client:
+                await self._run_oast_probes(context, client, oast_session, candidates, tokens_to_urls)
             
             # Wait a bit for interactions
-            time.sleep(10)
+            await asyncio.sleep(15)
             interactions = oast_session.collect_interactions(tokens_to_urls.keys())
             for interaction in interactions:
                 self._log_oast_finding(context, interaction, tokens_to_urls)
@@ -70,11 +84,9 @@ class VulnScanStage(Stage):
         # 2. Run Standard Tools (Dalfox, SQLMap)
         self._run_standard_tools(context, executor, candidates)
 
-    def _run_oast_probes(self, context: PipelineContext, oast: InteractshSession, candidates: List[str], tokens_to_urls: Dict[str, str]) -> None:
-        """Sends OOB payloads to candidates."""
-        session = requests.Session()
-        session.verify = getattr(context.runtime_config, "verify_tls", True)
-        
+    async def _run_oast_probes(self, context: PipelineContext, client: AsyncHTTPClient, oast: InteractshSession, candidates: List[str], tokens_to_urls: Dict[str, str]) -> None:
+        """Sends OOB payloads to candidates asynchronously."""
+        tasks = []
         for url in candidates[:15]: # Limit OAST to top 15 candidates
             for v_type, payloads in self.OAST_PAYLOADS.items():
                 for payload_tmpl in payloads:
@@ -82,13 +94,14 @@ class VulnScanStage(Stage):
                     oob_url = f"{token}.{oast.base_domain}"
                     payload = payload_tmpl.replace("{oob}", oob_url)
                     
-                    # Inject into all params (simplified for pro version)
                     test_url = self._inject_all_params(url, payload)
                     tokens_to_urls[token] = url
                     
-                    try:
-                        session.get(test_url, timeout=5)
-                    except Exception: pass
+                    tasks.append(client.get(test_url, headers=context.auth_headers({"User-Agent": "recon-cli vuln-scan"})))
+        
+        if tasks:
+            context.logger.info("Sending %d OAST probes concurrently", len(tasks))
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _inject_all_params(self, url: str, value: str) -> str:
         parsed = urlparse(url)
@@ -116,42 +129,27 @@ class VulnScanStage(Stage):
         context.emit_signal("vuln_confirmed", "url", original_url, confidence=1.0, source="oast")
 
     def _run_standard_tools(self, context: PipelineContext, executor: Any, candidates: List[str]) -> None:
-        # (Existing Dalfox/SQLMap logic here, keeping it but wrapping in a method)
-        artifacts_dir = context.record.paths.ensure_subdir("vuln_scans")
+        # Standard tools stay synchronous/subprocess-based
         if getattr(context.runtime_config, "enable_dalfox", False) and executor.available("dalfox"):
-            # ... existing dalfox logic ...
             pass
         if getattr(context.runtime_config, "enable_sqlmap", False) and executor.available("sqlmap"):
-            # ... existing sqlmap logic ...
             pass
 
     @staticmethod
     def _dalfox_confirmed(output: str) -> bool:
-        """Heuristic check for confirmed XSS in dalfox output."""
-        if not output:
-            return False
+        if not output: return False
         lowered = output.lower()
-        # Dalfox JSON output usually has 'poc' or 'type: POC/XSS'
         return '"poc":' in lowered or '"type":"poc"' in lowered or '"type":"xss"' in lowered or "[poc]" in lowered
 
     @staticmethod
     def _sqlmap_confirmed(output: str) -> bool:
-        """Heuristic check for confirmed SQLi in sqlmap output."""
-        if not output:
-            return False
-        confirm_indicators = [
-            "is vulnerable",
-            "back-end DBMS is",
-            "sqlmap identified the following injection point(s)",
-            "confirming that the payload is indeed injectable",
-        ]
+        if not output: return False
+        confirm_indicators = ["is vulnerable", "back-end DBMS is", "sqlmap identified the following injection point(s)"]
         return any(indicator in output for indicator in confirm_indicators)
 
     def _select_candidates(self, context: PipelineContext) -> List[str]:
-        # Implementation of candidate selection based on score and parameters
-        results = context.get_results()
+        results = [r for r in context.filter_results("url")]
         urls = []
         for r in results:
-            if r.get("type") == "url" and "?" in r.get("url", ""):
-                urls.append(r["url"])
-        return sorted(urls, key=lambda x: len(x), reverse=True) # Heuristic: longer URLs often have more params
+            if "?" in r.get("url", ""): urls.append(r["url"])
+        return sorted(list(set(urls)), key=lambda x: len(x), reverse=True)

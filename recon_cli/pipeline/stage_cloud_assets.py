@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import re
+import asyncio
 import time
+import json
 from dataclasses import dataclass
-from typing import List, Sequence, Set, Tuple, Dict
+from typing import List, Sequence, Set, Tuple, Dict, Any, Optional
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig, HTTPResponse
 
 
 @dataclass
@@ -41,278 +44,142 @@ class CloudAssetDiscoveryStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_cloud_discovery", False))
 
-    def execute(self, context: PipelineContext) -> None:
-        try:
-            import requests
-        except Exception:
-            context.logger.warning("cloud discovery requires requests; skipping")
-            return
-
+    async def run_async(self, context: PipelineContext) -> None:
         runtime = context.runtime_config
         max_checks = int(getattr(runtime, "cloud_max_checks", 400))
         timeout = int(getattr(runtime, "cloud_timeout", 8))
         max_duration = max(0, int(getattr(runtime, "cloud_max_duration", 1200)))
-        progress_every = max(1, int(getattr(runtime, "cloud_progress_every", 50)))
-        limiter = context.get_rate_limiter(
-            "cloud_asset",
-            rps=float(getattr(runtime, "cloud_rps", 0)),
-            per_host=float(getattr(runtime, "cloud_per_host_rps", 0)),
-        )
-
+        
         buckets = self._generate_candidates(context)
         if not buckets:
             context.logger.info("No cloud asset candidates generated")
             return
         checks_plan = self._build_checks(buckets)
-        planned_checks = len(checks_plan)
         if max_checks > 0:
-            planned_checks = min(planned_checks, max_checks)
+            checks_plan = checks_plan[:max_checks]
 
-        checks: List[CloudCheck] = []
-        public_findings = 0
-        exists_only = 0
-        checked = 0
-        duration_cap_hit = False
+        context.logger.info("Starting async cloud discovery on %d targets", len(checks_plan))
+        
+        config = HTTPClientConfig(
+            max_concurrent=30,
+            total_timeout=float(timeout),
+            verify_ssl=bool(getattr(runtime, "verify_tls", True)),
+            requests_per_second=float(getattr(runtime, "cloud_rps", 50.0))
+        )
+
+        public_findings, exists_only, checked = 0, 0, 0
         stage_started = time.monotonic()
 
-        context.logger.info(
-            "Cloud asset discovery checks=%s duration_cap=%ss progress_every=%d",
-            planned_checks if max_checks > 0 else "unlimited",
-            max_duration if max_duration else "unlimited",
-            progress_every,
-        )
+        async with AsyncHTTPClient(config) as client:
+            # Group into smaller batches for gather to avoid hitting local limits
+            batch_size = 50
+            for i in range(0, len(checks_plan), batch_size):
+                if max_duration and (time.monotonic() - stage_started) >= max_duration:
+                    break
+                
+                batch = checks_plan[i:i+batch_size]
+                tasks = [client.get(url, headers={"User-Agent": "recon-cli cloud-discovery"}, follow_redirects=True) for _, url, _ in batch]
+                responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for provider, url, bucket in checks_plan:
-            if max_checks > 0 and checked >= max_checks:
-                break
-            elapsed = time.monotonic() - stage_started
-            if max_duration and elapsed >= max_duration:
-                duration_cap_hit = True
-                context.logger.warning(
-                    "Cloud discovery duration cap reached (%ss); stopping stage",
-                    max_duration,
-                )
-                break
-            checked += 1
-            if checked % progress_every == 0:
-                context.logger.info(
-                    "Cloud discovery progress: checked=%d public=%d exists_only=%d elapsed=%.1fs",
-                    checked,
-                    public_findings,
-                    exists_only,
-                    elapsed,
-                )
-            if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-                continue
-            try:
-                resp = requests.get(
-                    url,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    verify=context.runtime_config.verify_tls,
-                    headers={"User-Agent": "recon-cli cloud-discovery"},
-                )
-            except requests.exceptions.RequestException:
-                if limiter:
-                    limiter.on_error(url)
-                continue
-            if limiter:
-                limiter.on_response(url, resp.status_code)
-            status = int(resp.status_code or 0)
-            body = (resp.text or "")[:1200]
-            headers = dict(getattr(resp, "headers", {}))
+                for (provider, url, bucket), resp in zip(batch, responses):
+                    checked += 1
+                    if isinstance(resp, Exception): continue
+                    
+                    status = resp.status
+                    body = resp.body[:1200]
+                    headers = {k.lower(): str(v) for k, v in resp.headers.items()}
 
-            exists, public, reason = self._classify(provider, status, body, headers)
-            if not exists:
-                continue
-            checks.append(
-                CloudCheck(provider, url, bucket, exists, public, status, reason)
-            )
+                    exists, public, reason = self._classify(provider, status, body, headers)
+                    if not exists: continue
 
-            tags = [f"cloud:{provider}", "cloud-asset"]
-            if public:
-                tags.append("public")
-                tags.append("exposed")
-                signal_id = context.emit_signal(
-                    "cloud_asset_public",
-                    "url",
-                    url,
-                    confidence=0.7,
-                    source="cloud-discovery",
-                    tags=tags,
-                    evidence={"status": status, "reason": reason, "bucket": bucket},
-                )
-                finding = {
-                    "type": "finding",
-                    "source": "cloud-discovery",
-                    "finding_type": "cloud_asset_public",
-                    "description": f"Public cloud asset detected ({provider})",
-                    "url": url,
-                    "details": {
-                        "bucket": bucket,
-                        "provider": provider,
-                        "status": status,
-                        "reason": reason,
-                    },
-                    "tags": tags,
-                    "score": 80,
-                    "priority": "high",
-                    "evidence_id": signal_id or None,
-                }
-                if context.results.append(finding):
-                    public_findings += 1
-            else:
-                context.emit_signal(
-                    "cloud_asset_exists",
-                    "url",
-                    url,
-                    confidence=0.4,
-                    source="cloud-discovery",
-                    tags=tags,
-                    evidence={"status": status, "reason": reason, "bucket": bucket},
-                )
-                exists_only += 1
+                    tags = [f"cloud:{provider}", "cloud-asset"]
+                    if public:
+                        tags.extend(["public", "exposed"])
+                        signal_id = context.emit_signal("cloud_asset_public", "url", url, confidence=0.7, source=self.name, tags=tags, evidence={"status": status, "reason": reason, "bucket": bucket})
+                        finding = {
+                            "type": "finding", "source": self.name, "hostname": urlparse(url).hostname, "finding_type": "cloud_asset_public",
+                            "description": f"Public cloud asset detected ({provider})", "url": url,
+                            "details": {"bucket": bucket, "provider": provider, "status": status, "reason": reason},
+                            "tags": tags, "score": 80, "priority": "high", "evidence_id": signal_id or None,
+                        }
+                        if context.results.append(finding): public_findings += 1
+                    else:
+                        context.emit_signal("cloud_asset_exists", "url", url, confidence=0.4, source=self.name, tags=tags, evidence={"status": status, "reason": reason, "bucket": bucket})
+                        exists_only += 1
 
         stats = context.record.metadata.stats.setdefault("cloud_assets", {})
-        stats.update(
-            {
-                "checked": checked,
-                "public": public_findings,
-                "exists_only": exists_only,
-                "duration_cap_seconds": max_duration,
-                "duration_cap_hit": duration_cap_hit,
-            }
-        )
+        stats.update({"checked": checked, "public": public_findings, "exists_only": exists_only})
         context.manager.update_metadata(context.record)
 
     def _generate_candidates(self, context: PipelineContext) -> List[str]:
         hosts: Set[str] = set()
         org_tokens: Set[str] = set()
+        
+        # Collect from enrichment
         enrichment_artifact = context.record.paths.artifact("ip_enrichment.json")
         if enrichment_artifact.exists():
             try:
-                import json as _json
+                enrichment_map = json.loads(enrichment_artifact.read_text(encoding="utf-8"))
+                for entries in enrichment_map.values():
+                    for entry in entries:
+                        org = entry.get("org")
+                        if isinstance(org, str): org_tokens.update(self._extract_tokens(org))
+            except Exception: pass
 
-                enrichment_map = _json.loads(
-                    enrichment_artifact.read_text(encoding="utf-8")
-                )
-            except Exception:
-                context.logger.warning(
-                    "Failed to load enrichment map; continuing with empty map"
-                )
-                enrichment_map = {}
-            for entries in enrichment_map.values():
-                if not isinstance(entries, list):
-                    continue
-                for entry in entries:
-                    org = entry.get("org")
-                    if isinstance(org, str):
-                        org_tokens.update(self._extract_tokens(org))
         for entry in context.iter_results():
             etype = entry.get("type")
-            if etype == "hostname":
-                host = entry.get("hostname")
-            elif etype == "url":
-                url = entry.get("url")
-                host = urlparse(url).hostname if isinstance(url, str) else None
-            else:
-                host = None
-            if isinstance(host, str) and host:
-                hosts.add(host.lower())
+            host = entry.get("hostname") if etype == "hostname" else (urlparse(entry.get("url", "")).hostname if etype == "url" else None)
+            if host: hosts.add(host.lower())
 
         candidates: Set[str] = set()
         for host in hosts:
             root = self._root_domain(host)
             candidates.update(self._host_variants(host, root))
         for token in org_tokens:
-            candidates.add(token)
-            candidates.add(token.replace(" ", "-"))
-        return sorted(candidates)
+            candidates.add(token); candidates.add(token.replace(" ", "-"))
+        return sorted(list(candidates))
 
     def _build_checks(self, buckets: List[str]) -> List[Tuple[str, str, str]]:
         checks: List[Tuple[str, str, str]] = []
-        for bucket in buckets:
-            if not bucket or len(bucket) < 3:
-                continue
-            safe = bucket.lower()
+        for b in buckets:
+            if not b or len(b) < 3: continue
+            safe = b.lower()
             checks.append(("s3", f"https://{safe}.s3.amazonaws.com/", safe))
             checks.append(("gcs", f"https://storage.googleapis.com/{safe}", safe))
-            checks.append(("gcs", f"https://{safe}.storage.googleapis.com/", safe))
             checks.append(("azure", f"https://{safe}.blob.core.windows.net/", safe))
         return checks
 
-    def _classify(
-        self, provider: str, status: int, body: str, headers: Dict[str, str]
-    ) -> Tuple[bool, bool, str]:
-        if status in self.NOT_FOUND_STATUSES:
-            return False, False, "not_found"
-
-        # Honesty check: verify genuine cloud headers to avoid parked domains
-        server = str(headers.get("Server", ""))
-        is_genuine = False
-        if provider == "s3" and ("AmazonS3" in server or "x-amz-request-id" in headers):
-            is_genuine = True
-        elif provider == "gcs" and (
-            "UploadServer" in server or "x-guploader-uploadid" in headers
-        ):
-            is_genuine = True
-        elif provider == "azure" and (
-            "Windows-Azure-Blob" in server or "x-ms-request-id" in headers
-        ):
-            is_genuine = True
-
-        if not is_genuine:
-            return False, False, "not_genuine_cloud"
-
+    def _classify(self, provider: str, status: int, body: str, headers: Dict[str, str]) -> Tuple[bool, bool, str]:
+        if status in self.NOT_FOUND_STATUSES: return False, False, "not_found"
+        server = headers.get("server", "")
+        is_genuine = (provider == "s3" and ("amazons3" in server or "x-amz-request-id" in headers)) or \
+                     (provider == "gcs" and ("uploadserver" in server or "x-guploader-uploadid" in headers)) or \
+                     (provider == "azure" and ("windows-azure-blob" in server or "x-ms-request-id" in headers))
+        if not is_genuine: return False, False, "not_genuine_cloud"
+        
         keywords = self._keywords_for(provider)
         if status in self.PUBLIC_STATUSES:
-            if any(keyword.lower() in body.lower() for keyword in keywords):
-                return True, True, "public_listing"
-            return True, True, "public_response"
+            return True, True, "public_listing" if any(k.lower() in body.lower() for k in keywords) else "public_response"
         if status in self.EXISTS_STATUSES:
-            if any(keyword.lower() in body.lower() for keyword in keywords):
-                return True, False, "access_denied"
-            return True, False, "exists"
+            return True, False, "access_denied" if any(k.lower() in body.lower() for k in keywords) else "exists"
         return False, False, "unknown"
 
     @staticmethod
     def _keywords_for(provider: str) -> Sequence[str]:
-        if provider == "s3":
-            return CloudAssetDiscoveryStage.S3_KEYWORDS
-        if provider == "gcs":
-            return CloudAssetDiscoveryStage.GCS_KEYWORDS
-        if provider == "azure":
-            return CloudAssetDiscoveryStage.AZURE_KEYWORDS
+        if provider == "s3": return CloudAssetDiscoveryStage.S3_KEYWORDS
+        if provider == "gcs": return CloudAssetDiscoveryStage.GCS_KEYWORDS
+        if provider == "azure": return CloudAssetDiscoveryStage.AZURE_KEYWORDS
         return ()
 
     @staticmethod
     def _root_domain(host: str) -> str:
         parts = host.split(".")
-        if len(parts) >= 2:
-            return ".".join(parts[-2:])
-        return host
+        return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
     def _host_variants(self, host: str, root: str) -> Set[str]:
-        variants: Set[str] = set()
-        root_dash = root.replace(".", "-")
-        root_label = root.split(".")[0]
-        sub = host.split(".")[0]
-        for item in {
-            root,
-            root_dash,
-            root_label,
-            host.replace(".", "-"),
-            sub,
-            f"{sub}-{root_label}",
-        }:
-            if item:
-                variants.add(item)
-        return variants
+        variants = {root, root.replace(".", "-"), root.split(".")[0], host.replace(".", "-"), host.split(".")[0]}
+        if "-" in host: variants.add(host.split("-")[0])
+        return {v for v in variants if v}
 
     def _extract_tokens(self, org: str) -> Set[str]:
-        tokens = set()
-        lowered = org.lower()
-        for match in self.ORG_TOKEN_RE.findall(lowered):
-            if len(match) >= 3:
-                tokens.add(match)
-        return tokens
+        return {m.lower() for m in self.ORG_TOKEN_RE.findall(org) if len(m) >= 3}

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List
+import asyncio
+from typing import Dict, List, Any, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 class OAuthDiscoveryStage(Stage):
@@ -17,262 +19,121 @@ class OAuthDiscoveryStage(Stage):
         "/.well-known/jwks.json",
     ]
     COMMON_ENDPOINTS = [
-        "/oauth/authorize",
-        "/oauth2/authorize",
-        "/authorize",
-        "/oauth/token",
-        "/oauth2/token",
-        "/token",
-        "/oauth/device/code",
-        "/oauth/revoke",
-        "/oauth/introspect",
+        "/oauth/authorize", "/oauth2/authorize", "/authorize",
+        "/oauth/token", "/oauth2/token", "/token",
+        "/oauth/device/code", "/oauth/revoke", "/oauth/introspect",
     ]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_oauth_discovery", False))
 
-    def execute(self, context: PipelineContext) -> None:
-        try:
-            import requests
-        except Exception:
-            context.logger.warning("oauth discovery requires requests; skipping")
-            return
-
+    async def run_async(self, context: PipelineContext) -> None:
         runtime = context.runtime_config
         max_hosts = int(getattr(runtime, "oauth_max_hosts", 50))
         timeout = int(getattr(runtime, "oauth_timeout", 8))
-        limiter = context.get_rate_limiter(
-            "oauth_discovery",
-            rps=float(getattr(runtime, "oauth_rps", 0)),
-            per_host=float(getattr(runtime, "oauth_per_host_rps", 0)),
-        )
+        verify_tls = bool(getattr(runtime, "verify_tls", True))
 
         hosts = self._collect_hosts(context)
         if not hosts:
             context.logger.info("No hosts available for oauth discovery")
             return
-        if max_hosts > 0:
-            hosts = hosts[:max_hosts]
+        if max_hosts > 0: hosts = hosts[:max_hosts]
 
-        configs: List[Dict[str, object]] = []
-        endpoints_found = 0
-        configs_found = 0
+        configs: List[Dict[str, Any]] = []
+        endpoints_found, configs_found = 0, 0
 
-        for host in hosts:
-            base = f"https://{host}"
-            for path in self.WELL_KNOWN_PATHS:
-                url = urljoin(base, path)
-                if not context.url_allowed(url):
-                    continue
-                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-                    continue
-                session = context.auth_session(url)
-                headers = context.auth_headers({"User-Agent": "recon-cli oauth"})
-                try:
-                    if session:
-                        resp = session.get(
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                        )
-                    else:
-                        resp = requests.get(
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                        )
-                except requests.exceptions.RequestException:
-                    if limiter:
-                        limiter.on_error(url)
-                    continue
-                if limiter:
-                    limiter.on_response(url, resp.status_code)
-                if resp.status_code >= 400:
-                    continue
-                data = self._safe_json(resp.text or "")
-                if not data:
-                    continue
-                configs_found += 1
-                config_record = {
-                    "host": host,
-                    "url": url,
-                    "keys": list(data.keys())[:40],
-                }
-                configs.append(config_record)  # type: ignore[arg-type]
-                if "openid-configuration" in path:
-                    context.emit_signal(
-                        "oidc_config",
-                        "host",
-                        host,
-                        confidence=0.7,
-                        source="oauth-discovery",
-                        tags=["service:oidc"],
-                        evidence={"url": url},
-                    )
-                else:
-                    context.emit_signal(
-                        "oauth_config",
-                        "host",
-                        host,
-                        confidence=0.6,
-                        source="oauth-discovery",
-                        tags=["service:oauth"],
-                        evidence={"url": url},
-                    )
-                endpoints_found += self._emit_endpoints_from_config(context, data)
+        config = HTTPClientConfig(
+            max_concurrent=20,
+            total_timeout=float(timeout),
+            verify_ssl=verify_tls,
+            requests_per_second=float(getattr(runtime, "oauth_rps", 30.0))
+        )
 
-            for path in self.COMMON_ENDPOINTS:
-                url = urljoin(base, path)
-                if not context.url_allowed(url):
-                    continue
-                if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-                    continue
-                session = context.auth_session(url)
-                headers = context.auth_headers({"User-Agent": "recon-cli oauth"})
-                try:
-                    if session:
-                        resp = session.get(
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                        )
-                    else:
-                        resp = requests.get(
-                            url,
-                            timeout=timeout,
-                            allow_redirects=True,
-                            headers=headers,
-                            verify=context.runtime_config.verify_tls,
-                        )
-                except requests.exceptions.RequestException:
-                    if limiter:
-                        limiter.on_error(url)
-                    continue
-                if limiter:
-                    limiter.on_response(url, resp.status_code)
-                if resp.status_code in {200, 400, 401, 403, 405, 302}:
-                    endpoints_found += 1
-                    tags = ["service:oauth"]
-                    signal_type = "oauth_endpoint"
-                    if "authorize" in path:
-                        signal_type = "oauth_authorize_endpoint"
-                        tags.append("surface:authorize")
-                    elif "token" in path:
-                        signal_type = "oauth_token_endpoint"
-                        tags.append("surface:token")
-                    payload = {
-                        "type": "url",
-                        "source": "oauth-discovery",
-                        "url": url,
-                        "hostname": host,
-                        "tags": tags,
-                        "score": 40,
-                    }
-                    context.results.append(payload)
-                    context.emit_signal(
-                        signal_type,
-                        "url",
-                        url,
-                        confidence=0.5,
-                        source="oauth-discovery",
-                        tags=tags,
-                        evidence={"status_code": resp.status_code},
-                    )
+        async with AsyncHTTPClient(config) as client:
+            for host in hosts:
+                base = f"https://{host}"
+                
+                # 1. Probe Well-Known
+                for path in self.WELL_KNOWN_PATHS:
+                    url = urljoin(base, path)
+                    if not context.url_allowed(url): continue
+                    
+                    try:
+                        resp = await client.get(url, headers=context.auth_headers({"User-Agent": "recon-cli oauth"}), follow_redirects=True)
+                        if resp.status >= 400: continue
+                        
+                        data = self._safe_json(resp.body)
+                        if not data: continue
+                        
+                        configs_found += 1
+                        configs.append({"host": host, "url": url, "keys": list(data.keys())[:40]})
+                        
+                        stype = "oidc_config" if "openid-configuration" in path else "oauth_config"
+                        stag = "service:oidc" if "openid-configuration" in path else "service:oauth"
+                        context.emit_signal(stype, "host", host, confidence=0.7, source=self.name, tags=[stag], evidence={"url": url})
+                        endpoints_found += self._emit_endpoints_from_config(context, data)
+                    except Exception: continue
+
+                # 2. Probe Common Endpoints
+                for path in self.COMMON_ENDPOINTS:
+                    url = urljoin(base, path)
+                    if not context.url_allowed(url): continue
+                    
+                    try:
+                        resp = await client.get(url, headers=context.auth_headers({"User-Agent": "recon-cli oauth"}), follow_redirects=True)
+                        if resp.status in {200, 400, 401, 403, 405, 302}:
+                            endpoints_found += 1
+                            tags = ["service:oauth"]
+                            stype = "oauth_endpoint"
+                            if "authorize" in path:
+                                stype, tag = "oauth_authorize_endpoint", "surface:authorize"
+                            elif "token" in path:
+                                stype, tag = "oauth_token_endpoint", "surface:token"
+                            else: tag = None
+                            if tag: tags.append(tag)
+                            
+                            context.results.append({"type": "url", "source": self.name, "url": url, "hostname": host, "tags": tags, "score": 40})
+                            context.emit_signal(stype, "url", url, confidence=0.5, source=self.name, tags=tags, evidence={"status": resp.status})
+                    except Exception: continue
 
         if configs:
-            artifact_path = context.record.paths.artifact("oauth_discovery.json")
-            artifact_path.write_text(
-                json.dumps(configs, indent=2, sort_keys=True), encoding="utf-8"
-            )
+            context.record.paths.artifact("oauth_discovery.json").write_text(json.dumps(configs, indent=2, sort_keys=True), encoding="utf-8")
 
         stats = context.record.metadata.stats.setdefault("oauth_discovery", {})
-        stats.update(
-            {
-                "hosts": len(hosts),
-                "configs": configs_found,
-                "endpoints": endpoints_found,
-            }
-        )
+        stats.update({"hosts": len(hosts), "configs": configs_found, "endpoints": endpoints_found})
         context.manager.update_metadata(context.record)
 
-    @staticmethod
-    def _collect_hosts(context: PipelineContext) -> List[str]:
-        hosts: List[str] = []
-        for entry in context.get_results():
-            etype = entry.get("type")
-            if etype == "hostname":
-                host = entry.get("hostname")
-            elif etype == "url":
-                url_value = entry.get("url")
-                host = (
-                    urlparse(url_value).hostname if isinstance(url_value, str) else None
-                )
-            else:
-                host = None
-            if isinstance(host, str) and host:
-                hosts.append(host)
+    def _collect_hosts(self, context: PipelineContext) -> List[str]:
+        hosts = []
+        for entry in context.filter_results("hostname"):
+            h = entry.get("hostname") or (entry.get("url") and urlparse(entry["url"]).hostname)
+            if h: hosts.append(h)
         return list(dict.fromkeys(hosts))
 
-    def _emit_endpoints_from_config(
-        self, context: PipelineContext, data: Dict[str, object]
-    ) -> int:
+    def _emit_endpoints_from_config(self, context: PipelineContext, data: Dict[str, Any]) -> int:
         keys = [
             ("authorization_endpoint", "oauth_authorize_endpoint", "surface:authorize"),
             ("token_endpoint", "oauth_token_endpoint", "surface:token"),
             ("userinfo_endpoint", "oauth_userinfo_endpoint", "surface:userinfo"),
             ("jwks_uri", "oauth_jwks_uri", "surface:jwks"),
             ("revocation_endpoint", "oauth_revocation_endpoint", "surface:revoke"),
-            (
-                "introspection_endpoint",
-                "oauth_introspection_endpoint",
-                "surface:introspect",
-            ),
-            (
-                "device_authorization_endpoint",
-                "oauth_device_endpoint",
-                "surface:device",
-            ),
+            ("introspection_endpoint", "oauth_introspection_endpoint", "surface:introspect"),
+            ("device_authorization_endpoint", "oauth_device_endpoint", "surface:device"),
         ]
         found = 0
-        for key, signal_type, tag in keys:
-            url = data.get(key)
-            if not isinstance(url, str) or not url:
-                continue
+        for k, stype, tag in keys:
+            url = data.get(k)
+            if not isinstance(url, str) or not url: continue
             host = urlparse(url).hostname
             tags = ["service:oauth", tag]
-            payload = {
-                "type": "url",
-                "source": "oauth-discovery",
-                "url": url,
-                "hostname": host,
-                "tags": tags,
-                "score": 45,
-            }
-            context.results.append(payload)
-            context.emit_signal(
-                signal_type,
-                "url",
-                url,
-                confidence=0.6,
-                source="oauth-discovery",
-                tags=tags,
-                evidence={"key": key},
-            )
+            context.results.append({"type": "url", "source": self.name, "url": url, "hostname": host, "tags": tags, "score": 45})
+            context.emit_signal(stype, "url", url, confidence=0.6, source=self.name, tags=tags, evidence={"key": k})
             found += 1
         return found
 
     @staticmethod
-    def _safe_json(text: str) -> Dict[str, object]:
+    def _safe_json(text: str) -> Dict[str, Any]:
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-        if isinstance(data, dict):
-            return data
-        return {}
+            d = json.loads(text)
+            return d if isinstance(d, dict) else {}
+        except Exception: return {}

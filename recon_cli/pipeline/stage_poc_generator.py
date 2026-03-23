@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Dict, List, Any
+import asyncio
+from typing import Dict, List, Any, Optional
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -20,7 +21,7 @@ class POCGeneratorStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_poc_generator", True))
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         findings = [r for r in context.filter_results("finding")]
         confirmed = [f for f in findings if f.get("confidence_label") == "verified" or int(f.get("score", 0)) >= 85]
 
@@ -34,12 +35,12 @@ class POCGeneratorStage(Stage):
         for finding in confirmed:
             script_content = self._generate_python_poc(finding)
             if script_content:
-                f_type = finding.get("finding_type", "vuln")
+                f_type = str(finding.get("finding_type", "vuln"))
                 f_hash = hashlib.md5(str(finding.get("url", "")).encode()).hexdigest()[:6]
                 filename = f"poc_{f_type}_{f_hash}.py"
                 
                 poc_path = poc_dir / filename
-                poc_path.write_text(script_content)
+                poc_path.write_text(script_content, encoding="utf-8")
                 generated_count += 1
                 
                 # Update finding with POC path
@@ -60,11 +61,7 @@ class POCGeneratorStage(Stage):
         payload = finding.get("details", {}).get("payload") or finding.get("evidence", {}).get("payload")
         
         # Build headers
-        headers = {
-            "User-Agent": "Mozilla/5.0 (ReconnV2 POC Generator)",
-        }
-        
-        # Include session info if it was an authenticated finding
+        headers = {"User-Agent": "Mozilla/5.0 (ReconnV2 POC Generator)"}
         if "auth" in str(finding.get("tags", [])):
             headers["X-POC-Authenticated"] = "true"
 
