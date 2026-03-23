@@ -292,15 +292,55 @@ class IDORStage(Stage):
 
     def _value_variants(self, value: str, other_id: Optional[str]) -> List[str]:
         variants = []
+        # 1. Numeric Sweep (Elite: wider range)
         try:
             num = int(value)
-            variants.extend([str(num - 1), str(num + 1), "0", "1", "999999"])
+            for i in [-1, 1, -2, 2, 10, -10]:
+                variants.append(str(num + i))
+            variants.extend(["0", "1", "999999"])
         except ValueError: pass
-        variants.extend(["null", "true", "false"])
-        if value: variants.append("x" + value)
+
+        # 2. UUID Randomization
+        if UUID_RE.fullmatch(value):
+            import uuid
+            for _ in range(3):
+                variants.append(str(uuid.uuid4()))
+            variants.append(ZERO_UUID)
+
+        # 3. Base64 Manipulation
+        if self._looks_like_base64(value):
+            manipulated = self._manipulate_base64(value)
+            if manipulated: variants.extend(manipulated)
+
+        # 4. Standard Fuzz
+        variants.extend(["null", "true", "false", "undefined"])
+        if value and len(value) < 50: variants.append("x" + value)
+        
         if other_id: variants.append(other_id)
-        variants.append(ZERO_UUID)
-        return variants[:self.MAX_VARIANTS_PER_PARAM]
+        
+        # Dedupe and limit
+        return list(dict.fromkeys(variants))[:self.MAX_VARIANTS_PER_PARAM]
+
+    def _looks_like_base64(self, value: str) -> bool:
+        if len(value) < 8 or len(value) % 4 != 0: return False
+        return bool(re.match(r"^[A-Za-z0-9+/]+={0,2}$", value))
+
+    def _manipulate_base64(self, value: str) -> List[str]:
+        import base64
+        results = []
+        try:
+            decoded = base64.b64decode(value).decode("utf-8", errors="ignore")
+            # Try numeric sweep on decoded value
+            try:
+                num = int(decoded)
+                for i in [-1, 1]:
+                    results.append(base64.b64encode(str(num + i).encode()).decode())
+            except ValueError:
+                # Try simple string change
+                results.append(base64.b64encode(f"admin_{decoded}".encode()).decode())
+                results.append(base64.b64encode(b"1").decode())
+        except Exception: pass
+        return results
 
     def _semantic_reasons(self, baseline: Dict[str, object], variant: Dict[str, object]) -> List[str]:
         reasons = []
