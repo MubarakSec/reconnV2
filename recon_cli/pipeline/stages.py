@@ -26,6 +26,7 @@ from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
 from recon_cli.pipeline.stage_waf import WafProbeStage
 from recon_cli.pipeline.stage_waf_bypass import WafBypassStage
 from recon_cli.pipeline.stage_race_condition import RaceConditionStage
+from recon_cli.pipeline.stage_cache_vuln import WebCacheVulnStage
 from recon_cli.pipeline.stage_idor import IDORStage
 from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage
 from recon_cli.pipeline.stage_wordlist_miner import WordlistMinerStage
@@ -98,6 +99,7 @@ PIPELINE_STAGES: List[Stage] = [
     WafProbeStage(),
     WafBypassStage(),
     RaceConditionStage(),
+    WebCacheVulnStage(),
     IDORStage(),
     AuthMatrixStage(),
     WordlistMinerStage(),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import httpx
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
@@ -14,6 +15,7 @@ from recon_cli.pipeline.stage_correlation import CorrelationStage
 from recon_cli.pipeline.stage_poc_generator import POCGeneratorStage
 from recon_cli.pipeline.stage_headless_crawl import HeadlessCrawlStage
 from recon_cli.pipeline.stage_ssrf_pivot import SSRFPivotStage
+from recon_cli.pipeline.stage_cache_vuln import WebCacheVulnStage
 from recon_cli.pipeline.stage_cloud_looter import CloudBucketLooterStage
 from recon_cli.pipeline.stage_wordlist_miner import WordlistMinerStage
 from recon_cli.utils.stealth import StealthManager, StealthConfig
@@ -100,9 +102,16 @@ class TestEliteFeatures:
         mock_context.get_results.return_value = [
             {"type": "finding", "finding_type": "ssrf", "url": "https://example.com/proxy?url=FUZZ", "confidence_label": "verified"}
         ]
+        
         with patch("httpx.AsyncClient.get") as mock_get:
-            mock_get.return_value = MagicMock(status_code=200, text="ami-id: i-123456")
+            mock_resp = MagicMock(spec=httpx.Response)
+            mock_resp.status_code = 200
+            mock_resp.text = "ami-id: i-123456"
+            mock_get.return_value = mock_resp
+            
             await stage.run_async(mock_context)
+            
+            # The stage should have appended findings for responsive internal assets
             assert mock_get.called
             assert mock_context.results.append.called
 
@@ -185,3 +194,19 @@ class TestEliteFeatures:
             findings = [call[0][0] for call in mock_context.results.append.call_args_list]
             assert any(f["finding_type"] == "bola" for f in findings)
             assert any(f["finding_type"] == "mass_assignment" for f in findings)
+
+    @pytest.mark.asyncio
+    async def test_web_cache_vuln(self, mock_context):
+        stage = WebCacheVulnStage()
+        url = "https://example.com/api/me"
+        mock_context.get_results.return_value = [{"type": "url", "url": url, "tags": ["auth"]}]
+        
+        with patch("httpx.AsyncClient.get") as mock_get:
+            # 1. Mock Deception Success
+            mock_get.return_value = MagicMock(status_code=200, text='{"email": "test@test.com"}', headers={"CF-Cache-Status": "HIT"})
+            
+            await stage.run_async(mock_context)
+            assert mock_context.results.append.called
+            
+            findings = [call[0][0] for call in mock_context.results.append.call_args_list]
+            assert any(f["finding_type"] == "cache_deception" for f in findings)
