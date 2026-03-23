@@ -27,6 +27,10 @@ class OriginDiscoveryStage(Stage):
     """
     name = "origin_discovery"
 
+    def execute(self, context: PipelineContext) -> None:
+        import asyncio
+        asyncio.run(self.run_async(context))
+
     async def run_async(self, context: PipelineContext) -> None:
         root_domains = self._collect_root_domains(context)
         if not root_domains:

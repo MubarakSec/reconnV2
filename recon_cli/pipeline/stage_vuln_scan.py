@@ -125,6 +125,28 @@ class VulnScanStage(Stage):
             # ... existing sqlmap logic ...
             pass
 
+    @staticmethod
+    def _dalfox_confirmed(output: str) -> bool:
+        """Heuristic check for confirmed XSS in dalfox output."""
+        if not output:
+            return False
+        lowered = output.lower()
+        # Dalfox JSON output usually has 'poc' or 'type: POC/XSS'
+        return '"poc":' in lowered or '"type":"poc"' in lowered or '"type":"xss"' in lowered or "[poc]" in lowered
+
+    @staticmethod
+    def _sqlmap_confirmed(output: str) -> bool:
+        """Heuristic check for confirmed SQLi in sqlmap output."""
+        if not output:
+            return False
+        confirm_indicators = [
+            "is vulnerable",
+            "back-end DBMS is",
+            "sqlmap identified the following injection point(s)",
+            "confirming that the payload is indeed injectable",
+        ]
+        return any(indicator in output for indicator in confirm_indicators)
+
     def _select_candidates(self, context: PipelineContext) -> List[str]:
         # Implementation of candidate selection based on score and parameters
         results = context.get_results()

@@ -37,8 +37,7 @@ class ActiveIntelligenceStage(Stage):
             context.logger.info("No valid active modules requested")
             return
 
-        items = context.get_results()
-        url_entries = [entry for entry in items if entry.get("type") == "url"]
+        url_entries = [r for r in context.filter_results("url")]
         host_scores: Dict[str, int] = {}
         for entry in url_entries:
             host = entry.get("hostname")

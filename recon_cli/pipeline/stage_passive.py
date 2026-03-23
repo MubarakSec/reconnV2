@@ -59,7 +59,12 @@ class PassiveEnumerationStage(Stage):
         amass_hosts: set[str] = set()
 
         if hostname_targets:
-            # 2. Subfinder
+            subfinder_hosts: set[str] = set()
+            amass_hosts: set[str] = set()
+            wayback_hosts: set[str] = set()
+
+            # 1. Subfinder
+
             subfinder_hosts = self._run_subfinder(context, targets_file, tool_timeout)
 
             # 3. Amass

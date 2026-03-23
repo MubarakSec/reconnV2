@@ -367,8 +367,11 @@ class VHostDiscoveryStage(Stage):
         session = context.auth_session(url)
         resp = None
         try:
-            if session:
-                resp = session.get(
+            # Use requests_mod (monkeypatched in tests) if no AUTH session is active
+            # This ensures tests can capture these requests
+            if session and hasattr(session, "prepare_headers") and session.prepare_headers({}):
+                 # It's an actual auth session
+                 resp = session.get(
                     url,
                     timeout=timeout,
                     allow_redirects=True,

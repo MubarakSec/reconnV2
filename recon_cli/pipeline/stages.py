@@ -58,6 +58,7 @@ from recon_cli.pipeline.stage_learning import LearningStage
 from recon_cli.pipeline.stage_scanner import ScannerStage
 from recon_cli.pipeline.stage_nuclei import NucleiStage
 from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
+from recon_cli.pipeline.stage_exploit_validation import ExploitValidationStage
 from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_idor_validator import IDORValidatorStage
 from recon_cli.pipeline.stage_ssrf_validator import SSRFValidatorStage

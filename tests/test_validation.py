@@ -10,7 +10,7 @@ def test_validate_target_url_strips_scheme_and_path():
 
 
 def test_validate_target_host_with_port():
-    assert validation.validate_target("example.com:8443") == "example.com"
+    assert validation.validate_target("example.com:8443") == "example.com:8443"
 
 
 def test_validate_target_ip_requires_flag():

@@ -2,6 +2,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
@@ -101,7 +102,12 @@ def test_rate_limiter_used_in_waf_probe(monkeypatch, tmp_path: Path):
             return DummyResponse(200)
         return DummyResponse(403)
 
-    fake_requests = types.SimpleNamespace(get=_get)
+    class FakeSession:
+        def __init__(self):
+            self.cookies = MagicMock()
+            self.get = _get
+
+    fake_requests = types.SimpleNamespace(get=_get, Session=FakeSession)
     monkeypatch.setitem(sys.modules, "requests", fake_requests)
 
     limiter = FakeLimiter()

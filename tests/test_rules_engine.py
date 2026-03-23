@@ -51,6 +51,7 @@ def test_scoring_stage_applies_rules(monkeypatch, tmp_path: Path):
         def __init__(self, root):
             self.paths = DummyPaths(root)
             self.metadata = type("M", (), {"stats": {}})()
+            self.spec = type("S", (), {"mode": "default"})()
 
     root = tmp_path / "job"
     root.mkdir()

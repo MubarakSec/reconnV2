@@ -15,6 +15,12 @@ class DummyManager:
     def update_spec(self, record) -> None:
         return None
 
+    def prepare_headers(self, headers):
+        return headers
+
+    def get_session(self, url=None):
+        return None
+
 
 def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
     root = tmp_path / "job-vhost"

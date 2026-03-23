@@ -78,10 +78,10 @@ class NmapStage(Stage):
 
         # Hunter Optimization: Filter for ONLY resolved hosts to avoid DNS timeouts and noise
         resolved_hosts = []
-        for host_record in context.get_results("host"):
+        for host_record in context.get_results("asset"):
             hostname = host_record.get("hostname")
             ip = host_record.get("ip")
-            if (hostname or ip) and host_record.get("resolved") is True:
+            if (hostname or ip):
                 # Prefer IP if available to bypass Nmap DNS resolution
                 target = ip if ip else hostname
                 if target:

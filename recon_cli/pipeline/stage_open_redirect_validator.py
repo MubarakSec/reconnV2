@@ -249,7 +249,7 @@ class OpenRedirectValidatorStage(Stage):
             f"https://{host}/cb",
             f"//{host}/cb",
             "https://google.com/",
-            "/\/\google.com/",
+            "/\\/\\google.com/",
             "//google.com/%2f..",
         ]
 

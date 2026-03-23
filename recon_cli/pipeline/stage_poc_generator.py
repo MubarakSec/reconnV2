@@ -21,7 +21,7 @@ class POCGeneratorStage(Stage):
         return bool(getattr(context.runtime_config, "enable_poc_generator", True))
 
     def execute(self, context: PipelineContext) -> None:
-        findings = [r for r in context.get_results() if r.get("type") == "finding"]
+        findings = [r for r in context.filter_results("finding")]
         confirmed = [f for f in findings if f.get("confidence_label") == "verified" or int(f.get("score", 0)) >= 85]
 
         if not confirmed:

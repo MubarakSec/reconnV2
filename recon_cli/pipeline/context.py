@@ -191,11 +191,13 @@ class PipelineContext:
     def get_data(self, key: str, default: object = None) -> object:
         return self._data_store.get(key, default)
 
-    def get_results(self) -> List[Dict[str, Any]]:
+    def get_results(self, result_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        [DEPRECATED] Read full results into memory.
-        Use filter_results() or iter_results() for better performance.
+        Memory-efficient retrieval of results.
+        If result_type is provided, only returns records of that type.
         """
+        if result_type:
+            return list(self.filter_results(result_type))
         return list(self.results.iter_results())
 
     def iter_results(self) -> Iterable[Dict[str, Any]]:
