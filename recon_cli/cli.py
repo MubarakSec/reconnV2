@@ -343,6 +343,12 @@ def scan(
         help="Scan mode (e.g., hunter, default). Hunter mode prioritizes bounty-relevant findings.",
         show_default=True,
     ),
+    bearer_token: Optional[str] = typer.Option(
+        None, "--bearer-token", help="Override Authorization: Bearer token for all requests"
+    ),
+    cookie: Optional[str] = typer.Option(
+        None, "--cookie", help="Override Cookie header for all requests"
+    ),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
@@ -370,6 +376,11 @@ def scan(
         runtime_values = profile_config.get("runtime", {})
         if isinstance(runtime_values, dict):
             runtime_overrides = dict(runtime_values)
+    
+    if bearer_token:
+        runtime_overrides["auth_bearer_token"] = bearer_token
+    if cookie:
+        runtime_overrides["auth_cookies"] = cookie
     if base_profile not in BASE_PROFILES:
         typer.echo(
             f"Profile preset maps to unknown base profile: {base_profile}", err=True
