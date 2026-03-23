@@ -90,11 +90,29 @@ class IDORStage(Stage):
             if getattr(runtime, "idor_token_b", None):
                 tokens.append(("token-b", runtime.idor_token_b))
 
-            stats = context.record.metadata.stats.setdefault("idor", {"tests": 0, "suspects": 0})
+            stats = context.record.metadata.stats.setdefault("idor", {"tests": 0, "suspects": 0, "harvested_ids": 0})
             other_id = getattr(runtime, "idor_other_identifier", None)
 
+            # ELITE: Pass 1 - Harvest real IDs using Token-A
+            token_a = tokens[1][1] if len(tokens) > 1 else None
+            identity_map: Dict[str, Set[str]] = defaultdict(set)
+            if token_a:
+                context.logger.info("Starting ID harvesting pass with Token-A...")
+                harvest_tasks = [self._fetch(client, context, c.url, "token-a", token_a) for c in candidates[:20]]
+                harvest_results = await asyncio.gather(*harvest_tasks)
+                for res in harvest_results:
+                    if res and res.get("subject_ids"):
+                        for sid in res["subject_ids"]:
+                            identity_map[urlparse(res["url"]).hostname or ""].add(sid)
+                stats["harvested_ids"] = sum(len(ids) for ids in identity_map.values())
+                context.logger.info("Harvested %d unique IDs for logic-aware testing", stats["harvested_ids"])
+
             for candidate in candidates:
-                variants = self._generate_variants(candidate, other_id)
+                # Add harvested IDs to variants for this host
+                host = candidate.parsed.hostname or ""
+                host_harvested = list(identity_map.get(host, set()))
+                
+                variants = self._generate_variants(candidate, other_id, harvested=host_harvested)
                 if not variants:
                     continue
 
@@ -256,13 +274,13 @@ class IDORStage(Stage):
         if "logout" in candidate.url.lower(): score -= 40
         return score
 
-    def _generate_variants(self, candidate: Candidate, other_id: Optional[str]) -> List[Tuple[str, Dict[str, object]]]:
+    def _generate_variants(self, candidate: Candidate, other_id: Optional[str], harvested: Optional[List[str]] = None) -> List[Tuple[str, Dict[str, object]]]:
         variants = []
         parsed = candidate.parsed
         for key in candidate.matched_params:
             originals = [value for k, value in candidate.params if k == key]
             if not originals: continue
-            for variant_value in self._value_variants(originals[0], other_id):
+            for variant_value in self._value_variants(originals[0], other_id, harvested=harvested):
                 if variant_value == originals[0]: continue
                 new_params = []
                 replaced = False
@@ -275,7 +293,7 @@ class IDORStage(Stage):
         
         for idx in candidate.matched_path_indexes:
             base_value = candidate.path_parts[idx]
-            for variant_value in self._value_variants(base_value, other_id):
+            for variant_value in self._value_variants(base_value, other_id, harvested=harvested):
                 if variant_value == base_value: continue
                 new_parts = list(candidate.path_parts)
                 new_parts[idx] = variant_value
@@ -290,7 +308,7 @@ class IDORStage(Stage):
                 if len(unique) >= 50: break
         return unique
 
-    def _value_variants(self, value: str, other_id: Optional[str]) -> List[str]:
+    def _value_variants(self, value: str, other_id: Optional[str], harvested: Optional[List[str]] = None) -> List[str]:
         variants = []
         # 1. Numeric Sweep (Elite: wider range)
         try:
@@ -307,7 +325,11 @@ class IDORStage(Stage):
                 variants.append(str(uuid.uuid4()))
             variants.append(ZERO_UUID)
 
-        # 3. Base64 Manipulation
+        # 3. ELITE: Harvested ID Replay
+        if harvested:
+            variants.extend(harvested[:5])
+
+        # 4. Base64 Manipulation
         if self._looks_like_base64(value):
             manipulated = self._manipulate_base64(value)
             if manipulated: variants.extend(manipulated)
