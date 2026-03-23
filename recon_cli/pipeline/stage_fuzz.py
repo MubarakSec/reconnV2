@@ -231,13 +231,10 @@ class FuzzStage(Stage):
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts: Dict[str, int] = defaultdict(int)
-        results = context.get_results()
-        if not results:
-            return []
         soft_404_hosts = set(
             context.record.metadata.stats.get("soft_404", {}).get("hosts", [])
         )
-        for entry in results:
+        for entry in context.iter_results():
             if entry.get("type") == "url" and entry.get("status_code") in {200, 204}:
                 url_value = entry.get("url")
                 if url_value and not context.url_allowed(url_value):
@@ -275,10 +272,7 @@ class FuzzStage(Stage):
                 "base_score": -1,
             }
         )
-        results = context.get_results()
-        if not results:
-            return metadata
-        for entry in results:
+        for entry in context.iter_results():
             etype = entry.get("type")
             if etype == "url":
                 url_value = entry.get("url")
@@ -561,10 +555,8 @@ class FuzzStage(Stage):
 
     def _tags_for_hosts(self, context: PipelineContext) -> Dict[str, set[str]]:
         tags_by_host: Dict[str, set[str]] = defaultdict(set)
-        results = context.get_results()
-        if not results:
-            return tags_by_host
-        for entry in results:
+        
+        for entry in context.iter_results():
             entry_type = entry.get("type")
             url_value = entry.get("url")
             host = None

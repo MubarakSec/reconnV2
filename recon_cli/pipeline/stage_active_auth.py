@@ -34,10 +34,14 @@ class ActiveAuthStage(Stage):
         return bool(getattr(context.runtime_config, "enable_active_auth", True))
 
     def execute(self, context: PipelineContext) -> None:
-        results = context.get_results()
+        # 1. Collect potential auth forms efficiently
+        forms = [r for r in context.filter_results("auth_form")]
         
-        # 1. Collect forms
-        forms = [r for r in results if r.get("type") == "auth_form" or "auth" in str(r.get("tags", []))]
+        # Also check urls with auth tags
+        for url_entry in context.filter_results("url"):
+            if "auth" in str(url_entry.get("tags", [])):
+                forms.append(url_entry)
+
         if not forms:
             context.logger.info("No auth forms discovered for active auth")
             return

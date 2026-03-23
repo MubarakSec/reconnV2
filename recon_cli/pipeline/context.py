@@ -190,12 +190,21 @@ class PipelineContext:
         return self._data_store.get(key, default)
 
     def get_results(self) -> List[Dict[str, Any]]:
-        """Read the full results file for the current job."""
-        return self.results.read_all()
+        """
+        [DEPRECATED] Read full results into memory.
+        Use filter_results() or iter_results() for better performance.
+        """
+        return list(self.results.iter_results())
 
     def iter_results(self) -> Iterable[Dict[str, Any]]:
-        """Iterate over results."""
+        """Stream results line-by-line from disk."""
         return self.results.iter_results()
+
+    def filter_results(self, result_type: str) -> Iterable[Dict[str, Any]]:
+        """Efficiently filter results by type without loading everything into memory."""
+        for entry in self.results.iter_results():
+            if entry.get("type") == result_type:
+                yield entry
 
     def clear_results_cache(self) -> None:
         """Clear the results cache (no-op now)."""
