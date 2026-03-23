@@ -52,10 +52,8 @@ class ActiveIntelligenceStage(Stage):
             )
         ]
 
-        apply_auth = (
-            bool(getattr(context.runtime_config, "auth_apply_active_modules", False))
-            and context.auth_enabled()
-        )
+        # ELITE: Always apply auth if headers are present
+        apply_auth = context.auth_enabled()
         headers = (
             context.auth_headers({"User-Agent": active_modules.USER_AGENT})
             if apply_auth

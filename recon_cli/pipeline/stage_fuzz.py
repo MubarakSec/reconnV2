@@ -442,6 +442,12 @@ class FuzzStage(Stage):
             if ffuf_maxtime:
                 cmd.extend(["-maxtime", str(ffuf_maxtime)])
 
+            # ELITE: Inject Auth Headers from Context
+            auth_headers = context.auth_headers()
+            if auth_headers:
+                for name, value in auth_headers.items():
+                    cmd.extend(["-H", f"{name}: {value}"])
+
             # Apply soft 404 filters if detected for this host
             if host:
                 soft_404_data = (
