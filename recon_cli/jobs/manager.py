@@ -348,7 +348,20 @@ class JobManager:
         job_id = record.metadata.job_id or record.spec.job_id
         lock = self._lock_for(job_id)
         with lock:
-            fs.write_json(record.paths.metadata_path, record.metadata.to_dict())
+            metadata_dict = record.metadata.to_dict()
+            fs.write_json(record.paths.metadata_path, metadata_dict)
+            
+            # Sync state to SQLite backend for True Fault Tolerance
+            try:
+                from recon_cli.db.storage import sync_job_to_db
+                job_data = {
+                    "target": getattr(record.spec, "target", ""),
+                    "profile": getattr(record.spec, "profile", "passive"),
+                    **metadata_dict
+                }
+                sync_job_to_db(job_id, job_data)
+            except Exception as e:
+                self.logger.debug("Failed to sync job state to SQLite DB: %s", e)
 
     def _apply_permissions(self, paths: JobPaths) -> None:
         try:

@@ -46,6 +46,8 @@ class PipelineContext:
         init=False, default_factory=lambda: defaultdict(lambda: defaultdict(int))
     )
     _host_blocks: Dict[str, str] = field(init=False, default_factory=dict)
+    _host_adaptive_jitter: Dict[str, float] = field(init=False, default_factory=dict)
+    _host_force_proxy: Set[str] = field(init=False, default_factory=set)
     _auth_manager: object = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
     _global_limiter: Optional[object] = field(init=False, default=None)
@@ -215,7 +217,19 @@ class PipelineContext:
             return
         self._host_errors[host][code] += 1
 
-        # Check for block triggers (WAF detection)
+        # Adaptive Rate Limiting (Dynamic Backoff)
+        if code == 429:
+            current_jitter = self._host_adaptive_jitter.get(host, 0.5)
+            self._host_adaptive_jitter[host] = current_jitter * 1.5
+            self.logger.debug("Adaptive Rate Limiting: increased jitter for %s to %.2fs", host, self._host_adaptive_jitter[host])
+
+        # WAF Profiling
+        if code == 403 and self._host_errors[host][code] >= 5:
+            if host not in self._host_force_proxy:
+                self.logger.info("WAF Profiling: Forcing proxy rotation for %s due to multiple 403s", host)
+                self._host_force_proxy.add(host)
+
+        # Check for block triggers (WAF detection / hard rate limits)
         threshold = int(
             getattr(self.runtime_config, "host_circuit_breaker_threshold", 10)
         )
@@ -389,11 +403,23 @@ class PipelineContext:
         return headers
 
     def auth_session(self, url: Optional[str] = None):
+        host = urlparse(url).hostname if url else None
+        
+        # Adaptive Jitter
         if self.stealth_manager:
-            self.stealth_manager.apply_jitter()
-            proxy = self.stealth_manager.get_proxy()
-        else:
-            proxy = None
+            if host and host in self._host_adaptive_jitter:
+                import time
+                time.sleep(self._host_adaptive_jitter[host])
+            else:
+                self.stealth_manager.apply_jitter()
+        
+        # WAF Profiling / Proxy Force
+        proxy = None
+        if self.stealth_manager:
+            if host and host in self._host_force_proxy:
+                proxy = self.stealth_manager.get_proxy()
+            elif getattr(self.runtime_config, "always_use_proxy", False):
+                proxy = self.stealth_manager.get_proxy()
 
         session = None
         if self._auth_manager:

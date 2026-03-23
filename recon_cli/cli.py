@@ -2162,6 +2162,40 @@ def _save_to_env(key: str, value: str) -> None:
     env_path.write_text(new_content, encoding="utf-8")
 
 
+@app.command("diff")
+def diff_jobs(
+    job_id_1: str = typer.Argument(..., help="The older job ID to compare from"),
+    job_id_2: str = typer.Argument(..., help="The newer job ID to compare to"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Save text report to file"),
+) -> None:
+    """Compare two jobs and show the new attack surface (Git-Ops Continuous Monitoring)."""
+    manager = JobManager()
+    record1 = _load_job_or_exit(manager, job_id_1)
+    record2 = _load_job_or_exit(manager, job_id_2)
+
+    from recon_cli.utils.diff import ScanDiff
+    
+    # Load results
+    results1 = [r for r in read_jsonl(record1.paths.results_jsonl)]
+    results2 = [r for r in read_jsonl(record2.paths.results_jsonl)]
+    
+    diff_engine = ScanDiff()
+    changes = diff_engine.compare(results1, results2)
+    
+    if not changes:
+        typer.secho("✅ No changes detected between the two scans.", fg=typer.colors.GREEN)
+        return
+        
+    summary = diff_engine.summarize(changes)
+    report_text = diff_engine.format_report(changes, summary)
+    
+    if output:
+        output.write_text(report_text, encoding="utf-8")
+        typer.secho(f"✅ Diff report saved to {output}", fg=typer.colors.GREEN)
+    else:
+        print(report_text)
+
+
 @app.command("quickstart")
 def quickstart_guide() -> None:
     """Show quick start guide for new users."""
