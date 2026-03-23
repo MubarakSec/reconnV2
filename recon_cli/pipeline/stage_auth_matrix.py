@@ -146,7 +146,7 @@ class AuthMatrixStage(Stage):
         )
         tsv_lines = ["url\tauth\tstatus\tbody_md5\tlength\tsensitive_keys\tsubject_ids"]
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             for url in urls:
                 records: List[AuthRecord] = []
                 for auth_label, token in tokens:

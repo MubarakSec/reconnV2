@@ -66,7 +66,7 @@ class HTMLFormMiningStage(Stage):
         forms_saved = 0
         artifacts: List[Dict[str, object]] = []
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             context.logger.info("Starting async HTML form mining on %d targets", len(candidates))
             
             tasks = [client.get(url, headers=context.auth_headers({"User-Agent": "recon-cli form-mining"}), follow_redirects=True) for url in candidates]

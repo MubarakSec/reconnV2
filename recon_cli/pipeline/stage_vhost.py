@@ -74,7 +74,7 @@ class VHostDiscoveryStage(Stage):
         probe_cap_hit, duration_cap_hit = False, False
         stage_started = time.monotonic()
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for host_index, (host, base_url, score) in enumerate(selected_hosts, 1):
                 if (max_duration and (time.monotonic() - stage_started) >= max_duration) or (max_probes and tested_probes >= max_probes):
                     break

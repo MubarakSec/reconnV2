@@ -36,7 +36,7 @@ class CTPivotStage(Stage):
             requests_per_second=5.0
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = []
             if ct_enabled: tasks.append(self._run_ct_pivot(context, client))
             if asn_enabled: tasks.append(self._run_asn_pivot(context, client))

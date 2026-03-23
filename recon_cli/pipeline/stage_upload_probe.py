@@ -92,7 +92,7 @@ class UploadProbeStage(Stage):
 
         headers = context.auth_headers({"User-Agent": "recon-cli upload-probe"})
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = [
                 client.get(url, headers=headers, follow_redirects=True)
                 for url in all_urls_to_check

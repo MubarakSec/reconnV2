@@ -138,7 +138,7 @@ class APIReconStage(Stage):
         urls_added = 0
         graphql_candidates: List[Tuple[str, str]] = []
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = [
                 client.get(url, headers=headers, follow_redirects=True)
                 for _, url, _ in urls_to_check

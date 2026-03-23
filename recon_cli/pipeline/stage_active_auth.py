@@ -53,7 +53,7 @@ class ActiveAuthStage(Stage):
             requests_per_second=5.0
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             # 2. Group by host
             forms_by_host: Dict[str, List[Dict[str, Any]]] = {}
             for f in forms:

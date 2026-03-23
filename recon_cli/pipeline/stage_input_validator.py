@@ -62,7 +62,7 @@ class InputValidatorStage(Stage):
             requests_per_second=float(getattr(runtime, "input_validator_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for candidate in candidates:
                 url = str(candidate.get("url") or "")
                 param = str(candidate.get("param") or "")

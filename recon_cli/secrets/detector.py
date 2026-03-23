@@ -71,7 +71,7 @@ class SecretsDetector:
         self.verify_tls = verify_tls
         self.max_concurrent = max_concurrent
 
-    async def scan_urls(self, urls: Iterable[str], limit: int) -> Dict[str, List[SecretMatch]]:
+    async def scan_urls(self, urls: Iterable[str], limit: int, context: Optional[Any] = None) -> Dict[str, List[SecretMatch]]:
         results: Dict[str, List[SecretMatch]] = {}
         client_config = HTTPClientConfig(
             max_concurrent=self.max_concurrent,
@@ -79,7 +79,7 @@ class SecretsDetector:
             verify_ssl=self.verify_tls
         )
         
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             selected = list(urls)[:limit]
             tasks = [client.get(url) for url in selected]
             responses = await asyncio.gather(*tasks, return_exceptions=True)

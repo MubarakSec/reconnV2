@@ -52,7 +52,7 @@ class SSRFPivotStage(Stage):
             requests_per_second=20.0
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for ssrf in verified_ssrf:
                 url = ssrf.get("url")
                 if not url: continue

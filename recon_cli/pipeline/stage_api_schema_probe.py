@@ -89,7 +89,7 @@ class ApiSchemaProbeStage(Stage):
             requests_per_second=float(getattr(runtime, "api_schema_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             for spec_url in spec_urls:
                 if max_endpoints > 0 and budget_used >= max_endpoints:
                     budget_exhausted = True

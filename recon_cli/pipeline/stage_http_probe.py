@@ -228,7 +228,7 @@ class HttpProbeStage(Stage):
         )
         tracker = context.results
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = []
             for _, url, _ in urls_to_check:
                 headers = context.auth_headers({"User-Agent": "recon-cli"})
@@ -349,7 +349,7 @@ class HttpProbeStage(Stage):
         tracker = context.results
         total_added = 0
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = []
             for _, url, _, _ in urls_to_check:
                 headers = context.auth_headers({"User-Agent": "recon-cli probe++"})
@@ -489,7 +489,7 @@ class HttpProbeStage(Stage):
         headers = {"User-Agent": "recon-cli soft-404"}
         soft_hosts: Dict[str, dict] = {}
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = [
                 client.get(url, headers=headers, follow_redirects=True)
                 for _, url in urls_to_check

@@ -67,7 +67,7 @@ class OpenRedirectValidatorStage(Stage):
             requests_per_second=float(getattr(runtime, "open_redirect_validator_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for candidate in candidates:
                 url = str(candidate["url"])
                 param = str(candidate["param"])

@@ -39,7 +39,7 @@ class WsGrpcDiscoveryStage(Stage):
             requests_per_second=float(getattr(runtime, "ws_grpc_rps", 30.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for url in ws_candidates:
                 if not context.url_allowed(url): continue
                 ws_found += 1

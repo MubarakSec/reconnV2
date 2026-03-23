@@ -7,12 +7,7 @@ Async HTTP Client - عميل HTTP غير متزامن
 - Retry مع exponential backoff
 - Timeout قابل للتخصيص
 - دعم للـ concurrent requests
-
-Example:
-    >>> async with AsyncHTTPClient() as client:
-    ...     results = await client.get_many(["https://example.com", "https://test.com"])
-    ...     for result in results:
-    ...         print(f"{result['url']}: {result['status']}")
+- ELITE: 401 Auto Re-auth logic
 """
 
 from __future__ import annotations
@@ -22,9 +17,12 @@ import inspect
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
 import logging
+
+if TYPE_CHECKING:
+    from recon_cli.pipeline.context import PipelineContext
 
 try:
     import aiohttp
@@ -157,66 +155,17 @@ class RateLimiter:
             self._host_updated[host] = time.monotonic()
 
 
-class ConnectionPool:
-    """Simple reusable aiohttp session pool used by compatibility tests."""
-
-    def __init__(self, max_connections: int = 10, timeout: float = 30.0):
-        if not AIOHTTP_AVAILABLE:
-            raise ImportError("aiohttp not installed. Run: pip install aiohttp")
-        self.max_connections = int(max_connections)
-        self.timeout = float(timeout)
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._lock = asyncio.Lock()
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        async with self._lock:
-            if self._session is None or getattr(self._session, "closed", False):
-                self._session = aiohttp.ClientSession(
-                    connector=TCPConnector(limit=self.max_connections),
-                    timeout=ClientTimeout(total=self.timeout),
-                )
-            return self._session
-
-    @asynccontextmanager
-    async def get_session(self) -> AsyncIterator[aiohttp.ClientSession]:
-        session = await self._ensure_session()
-        try:
-            yield session
-        finally:
-            # Kept open for reuse until close() is called.
-            pass
-
-    async def close(self) -> None:
-        if self._session is not None:
-            await self._session.close()
-            self._session = None
-
-
 class AsyncHTTPClient:
     """
-    عميل HTTP غير متزامن عالي الأداء.
-
-    الميزات:
-    - Connection pooling مع حد لكل مضيف
-    - Rate limiting تلقائي
-    - Retry مع exponential backoff
-    - دعم طلبات متعددة متزامنة
-
-    Example:
-        >>> config = HTTPClientConfig(max_concurrent=100)
-        >>> async with AsyncHTTPClient(config) as client:
-        ...     # طلب واحد
-        ...     response = await client.get("https://example.com")
-        ...
-        ...     # طلبات متعددة
-        ...     urls = ["https://a.com", "https://b.com", "https://c.com"]
-        ...     responses = await client.get_many(urls)
+    Async HTTP Client with Connection Pooling and Rate Limiting.
+    Elite: Added 401 Re-auth support.
     """
 
     def __init__(
         self,
         config: Optional[HTTPClientConfig] = None,
         *,
+        context: Optional["PipelineContext"] = None,
         timeout: Optional[float] = None,
         max_connections: Optional[int] = None,
         rate_limit: Optional[float] = None,
@@ -241,6 +190,7 @@ class AsyncHTTPClient:
             base_config.retry_multiplier = float(retry_config.exponential_base)
 
         self.config = base_config
+        self.context = context
         self._session: Optional[aiohttp.ClientSession] = None
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._host_semaphores: Dict[str, asyncio.Semaphore] = {}
@@ -250,6 +200,8 @@ class AsyncHTTPClient:
             "successes": 0,
             "failures": 0,
             "retries": 0,
+            "auth_401_count": 0,
+            "reauth_success": 0,
             "total_time": 0.0,
         }
 
@@ -261,18 +213,15 @@ class AsyncHTTPClient:
         await self.close()
 
     async def start(self) -> None:
-        """بدء العميل وإنشاء الـ session"""
         if self._session is not None:
             return
 
-        # Timeout configuration
         timeout = ClientTimeout(
             connect=self.config.connect_timeout,
             sock_read=self.config.read_timeout,
             total=self.config.total_timeout,
         )
 
-        # Connection pool
         connector = TCPConnector(
             limit=self.config.max_concurrent,
             limit_per_host=self.config.max_per_host,
@@ -280,7 +229,6 @@ class AsyncHTTPClient:
             ssl=self.config.verify_ssl,
         )
 
-        # Default headers
         headers = {
             "User-Agent": self.config.user_agent,
             "Accept": "*/*",
@@ -295,27 +243,12 @@ class AsyncHTTPClient:
 
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
 
-        logger.debug(
-            "AsyncHTTPClient started: max_concurrent=%d, max_per_host=%d",
-            self.config.max_concurrent,
-            self.config.max_per_host,
-        )
-
     async def close(self) -> None:
-        """إغلاق العميل"""
         if self._session:
             await self._session.close()
             self._session = None
 
-        logger.debug(
-            "AsyncHTTPClient closed: %d requests, %d successes, %d failures",
-            self._stats["requests"],
-            self._stats["successes"],
-            self._stats["failures"],
-        )
-
     def _get_host(self, url: str) -> str:
-        """استخراج الـ host من URL"""
         try:
             parsed = urlparse(url)
             return parsed.netloc or parsed.path.split("/")[0]
@@ -323,59 +256,17 @@ class AsyncHTTPClient:
             return ""
 
     def _get_host_semaphore(self, host: str) -> asyncio.Semaphore:
-        """الحصول على semaphore لمضيف محدد"""
         if host not in self._host_semaphores:
             self._host_semaphores[host] = asyncio.Semaphore(self.config.max_per_host)
         return self._host_semaphores[host]
 
-    async def get(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        follow_redirects: bool = True,
-    ) -> HTTPResponse:
-        """
-        تنفيذ طلب GET.
+    async def get(self, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True) -> HTTPResponse:
+        return await self._request("GET", url, headers=headers, follow_redirects=follow_redirects)
 
-        Args:
-            url: الـ URL المطلوب
-            headers: headers إضافية
-            follow_redirects: متابعة التحويلات
+    async def post(self, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, **kwargs: Any) -> HTTPResponse:
+        return await self._request("POST", url, headers=headers, follow_redirects=follow_redirects, **kwargs)
 
-        Returns:
-            HTTPResponse مع النتيجة
-        """
-        return await self._request(
-            method="GET",
-            url=url,
-            headers=headers,
-            follow_redirects=follow_redirects,
-        )
-
-    async def post(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        follow_redirects: bool = True,
-        **request_kwargs: Any,
-    ) -> HTTPResponse:
-        """تنفيذ طلب POST."""
-        return await self._request(
-            method="POST",
-            url=url,
-            headers=headers,
-            follow_redirects=follow_redirects,
-            **request_kwargs,
-        )
-
-    async def _request(
-        self,
-        method: str,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        follow_redirects: bool = True,
-        **request_kwargs: Any,
-    ) -> HTTPResponse:
+    async def _request(self, method: str, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, **kwargs: Any) -> HTTPResponse:
         if not self._session:
             await self.start()
 
@@ -385,271 +276,72 @@ class AsyncHTTPClient:
         async with self._semaphore:
             async with host_sem:
                 await self._rate_limiter.acquire(host)
-                return await self._request_with_retry(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    follow_redirects=follow_redirects,
-                    **request_kwargs,
-                )
+                resp = await self._request_with_retry(method=method, url=url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+                
+                # ELITE: Handle Session Expiry (401)
+                if resp.status == 401 and self.context and self.context.auth_enabled():
+                    self._stats["auth_401_count"] += 1
+                    logger.warning("Session expired (401) for %s. Attempting auto re-auth...", url)
+                    
+                    # Run re-auth logic
+                    reauth_success = await asyncio.to_thread(self.context._auth_manager.ensure_login, url)
+                    if reauth_success:
+                        self._stats["reauth_success"] += 1
+                        logger.info("Auto re-auth SUCCESS. Retrying original request...")
+                        # Refresh headers with new token
+                        new_headers = self.context.auth_headers(headers)
+                        return await self._request_with_retry(method=method, url=url, headers=new_headers, follow_redirects=follow_redirects, **kwargs)
+                    else:
+                        logger.error("Auto re-auth FAILED for %s", url)
+                
+                return resp
 
-    async def _request_with_retry(
-        self,
-        method: str,
-        url: str,
-        headers: Optional[Dict[str, str]],
-        follow_redirects: bool,
-        **request_kwargs: Any,
-    ) -> HTTPResponse:
-        """تنفيذ طلب مع retry"""
+    async def _request_with_retry(self, method: str, url: str, headers: Optional[Dict[str, str]], follow_redirects: bool, **kwargs: Any) -> HTTPResponse:
         last_error: Optional[Exception] = None
-
         for attempt in range(self.config.max_retries + 1):
             try:
-                return await self._do_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    follow_redirects=follow_redirects,
-                    **request_kwargs,
-                )
+                return await self._do_request(method=method, url=url, headers=headers, follow_redirects=follow_redirects, **kwargs)
             except Exception as e:
                 last_error = e
                 self._stats["retries"] += 1
-
                 if attempt < self.config.max_retries:
-                    delay = self.config.retry_delay * (
-                        self.config.retry_multiplier**attempt
-                    )
-                    logger.debug(
-                        "Retry %d for %s after %.1fs: %s", attempt + 1, url, delay, e
-                    )
+                    delay = self.config.retry_delay * (self.config.retry_multiplier**attempt)
                     await asyncio.sleep(delay)
 
         self._stats["failures"] += 1
-        if last_error is None:
-            raise RuntimeError("Request failed with unknown error")
+        if last_error is None: raise RuntimeError("Request failed")
         raise last_error
 
-    async def _do_request(
-        self,
-        method: str,
-        url: str,
-        headers: Optional[Dict[str, str]],
-        follow_redirects: bool,
-        **request_kwargs: Any,
-    ) -> HTTPResponse:
-        """تنفيذ طلب واحد"""
+    async def _do_request(self, method: str, url: str, headers: Optional[Dict[str, str]], follow_redirects: bool, **kwargs: Any) -> HTTPResponse:
         start_time = time.monotonic()
         self._stats["requests"] += 1
-
         try:
-            request_method = getattr(self._session, method.lower(), None)
-            if request_method is None:
-                request_method = self._session.request
-
-            request_result = request_method(
-                url,
-                headers=headers,
-                allow_redirects=follow_redirects,
-                **request_kwargs,
-            )
-
-            response_cm = request_result
-            if not hasattr(response_cm, "__aenter__") and inspect.isawaitable(
-                request_result
-            ):
-                response_cm = await request_result
-
-            if hasattr(response_cm, "__aenter__"):
-                async with response_cm as response:
-                    return await self._build_response(url, response, start_time)
-
-            return await self._build_response(url, response_cm, start_time)
-        except asyncio.TimeoutError:
-            raise Exception(f"Timeout after {self.config.total_timeout}s")
+            request_method = getattr(self._session, method.lower(), self._session.request)
+            async with request_method(url, headers=headers, allow_redirects=follow_redirects, **kwargs) as response:
+                body = await response.text()
+                elapsed = time.monotonic() - start_time
+                self._stats["total_time"] += elapsed
+                self._stats["successes"] += 1
+                return HTTPResponse(url=str(response.url), status=response.status, headers=dict(response.headers), body=body, elapsed=elapsed)
+        except asyncio.TimeoutError: raise Exception(f"Timeout after {self.config.total_timeout}s")
         except Exception as e:
-            if AIOHTTP_AVAILABLE and isinstance(e, aiohttp.ClientError):
-                raise Exception(f"Client error: {e}")
+            if AIOHTTP_AVAILABLE and isinstance(e, aiohttp.ClientError): raise Exception(f"Client error: {e}")
             raise
 
-    async def _build_response(
-        self, url: str, response: Any, start_time: float
-    ) -> HTTPResponse:
-        body = ""
-        if hasattr(response, "text"):
-            text_result = response.text()
-            if inspect.isawaitable(text_result):
-                body = await text_result
-            else:
-                body = str(text_result)
-
-        elapsed = time.monotonic() - start_time
-        self._stats["total_time"] += elapsed
-        self._stats["successes"] += 1
-
-        return HTTPResponse(
-            url=str(getattr(response, "url", url)),
-            status=int(getattr(response, "status", 0)),
-            headers=dict(getattr(response, "headers", {}) or {}),
-            body=body,
-            elapsed=elapsed,
-        )
-
     async def head(self, url: str) -> HTTPResponse:
-        """تنفيذ طلب HEAD"""
-        try:
-            return await self._request(
-                method="HEAD",
-                url=url,
-                follow_redirects=True,
-            )
-        except Exception as e:
-            raise Exception(f"Client error: {e}")
+        return await self._request("HEAD", url, follow_redirects=True)
 
-    async def get_many(
-        self,
-        urls: List[str],
-        headers: Optional[Dict[str, str]] = None,
-        follow_redirects: bool = True,
-        return_exceptions: bool = True,
-    ) -> List[HTTPResponse]:
-        """
-        تنفيذ طلبات متعددة بشكل متزامن.
-
-        Args:
-            urls: قائمة الـ URLs
-            headers: headers مشتركة
-            follow_redirects: متابعة التحويلات
-            return_exceptions: إرجاع الأخطاء بدلاً من رفعها
-
-        Returns:
-            قائمة HTTPResponse بنفس ترتيب الـ URLs
-
-        Example:
-            >>> urls = ["https://a.com", "https://b.com"]
-            >>> responses = await client.get_many(urls)
-            >>> for resp in responses:
-            ...     if resp.error:
-            ...         print(f"Error: {resp.error}")
-            ...     else:
-            ...         print(f"{resp.url}: {resp.status}")
-        """
-        if not self._session:
-            await self.start()
-
+    async def get_many(self, urls: List[str], headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, return_exceptions: bool = True) -> List[HTTPResponse]:
+        if not self._session: await self.start()
         tasks = [self.get(url, headers, follow_redirects) for url in urls]
-
         results = await asyncio.gather(*tasks, return_exceptions=return_exceptions)
-
-        # تحويل الاستثناءات إلى HTTPResponse
         processed = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                processed.append(
-                    HTTPResponse(
-                        url=urls[i],
-                        status=0,
-                        headers={},
-                        body="",
-                        elapsed=0,
-                        error=str(result),
-                    )
-                )
-            else:
-                processed.append(result)  # type: ignore[arg-type]
-
+                processed.append(HTTPResponse(url=urls[i], status=0, headers={}, body="", elapsed=0, error=str(result)))
+            else: processed.append(result)
         return processed
 
     def get_stats(self) -> Dict[str, Any]:
-        """إحصائيات العميل"""
-        avg_time = 0.0
-        if self._stats["requests"] > 0:
-            avg_time = self._stats["total_time"] / self._stats["requests"]
-
-        return {
-            **self._stats,
-            "avg_response_time": round(avg_time, 3),
-            "success_rate": round(
-                self._stats["successes"] / max(1, self._stats["requests"]) * 100, 1
-            ),
-        }
-
-
-# ═══════════════════════════════════════════════════════════
-#                     Convenience Functions
-# ═══════════════════════════════════════════════════════════
-
-
-async def fetch_urls(
-    urls: List[str],
-    max_concurrent: int = 50,
-    timeout: float = 30.0,
-) -> List[HTTPResponse]:
-    """
-    جلب URLs متعددة بسهولة.
-
-    Args:
-        urls: قائمة الـ URLs
-        max_concurrent: الحد الأقصى للطلبات المتزامنة
-        timeout: timeout لكل طلب
-
-    Returns:
-        قائمة HTTPResponse
-
-    Example:
-        >>> responses = await fetch_urls([
-        ...     "https://example.com",
-        ...     "https://test.com",
-        ... ])
-    """
-    config = HTTPClientConfig(
-        max_concurrent=max_concurrent,
-        total_timeout=timeout,
-    )
-
-    async with AsyncHTTPClient(config) as client:
-        return await client.get_many(urls)
-
-
-async def check_urls_alive(
-    urls: List[str],
-    max_concurrent: int = 100,
-) -> Dict[str, bool]:
-    """
-    فحص URLs حية أم لا.
-
-    Args:
-        urls: قائمة الـ URLs
-        max_concurrent: الحد الأقصى
-
-    Returns:
-        Dict من URL -> bool (حي أم لا)
-    """
-    config = HTTPClientConfig(
-        max_concurrent=max_concurrent,
-        total_timeout=10.0,
-    )
-
-    async with AsyncHTTPClient(config) as client:
-        tasks = [client.head(url) for url in urls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        alive = {}
-        for url, result in zip(urls, results):
-            if isinstance(result, Exception):
-                alive[url] = False
-            else:
-                alive[url] = result.ok  # type: ignore[union-attr]
-
-        return alive
-
-
-def run_fetch(urls: List[str], **kwargs) -> List[HTTPResponse]:
-    """
-    Synchronous wrapper لـ fetch_urls.
-
-    Example:
-        >>> responses = run_fetch(["https://example.com"])
-    """
-    return asyncio.run(fetch_urls(urls, **kwargs))
+        avg_time = self._stats["total_time"] / max(1, self._stats["requests"])
+        return {**self._stats, "avg_response_time": round(avg_time, 3), "success_rate": round(self._stats["successes"] / max(1, self._stats["requests"]) * 100, 1)}

@@ -39,7 +39,7 @@ class OAuthVulnerabilityStage(Stage):
             requests_per_second=10.0
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for endpoint in authorize_endpoints:
                 url = endpoint.get("url")
                 if not url: continue

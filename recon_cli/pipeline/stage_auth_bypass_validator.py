@@ -62,7 +62,7 @@ class AuthBypassValidatorStage(Stage):
             requests_per_second=float(getattr(runtime, "auth_bypass_validator_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             for candidate in candidates:
                 url = str(candidate.get("url") or "")
                 if not url or not context.url_allowed(url):

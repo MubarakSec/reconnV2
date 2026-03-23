@@ -46,7 +46,7 @@ class WordlistMinerStage(Stage):
         word_counts = Counter()
         context.logger.info("Mining target-aware words from %d pages concurrently", len(targets))
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = [client.get(url, headers=context.auth_headers({"User-Agent": "recon-cli wordlist-miner"}), follow_redirects=True) for url in targets]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 

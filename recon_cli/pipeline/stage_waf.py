@@ -92,7 +92,7 @@ class WafProbeStage(Stage):
             requests_per_second=float(getattr(runtime, "waf_probe_rps", 15.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             findings, checked = 0, 0
             for url in selected:
                 checked += 1

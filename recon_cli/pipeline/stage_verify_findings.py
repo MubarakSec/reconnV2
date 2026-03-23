@@ -67,7 +67,7 @@ class VerifyFindingsStage(Stage):
             requests_per_second=float(getattr(runtime, "verify_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             context.logger.info("Verifying %d findings concurrently", len(selected))
             
             tasks = [client.get(url, headers=context.auth_headers({"User-Agent": "recon-cli verify"}), follow_redirects=True) for _, url, _ in selected]

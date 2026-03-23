@@ -149,7 +149,7 @@ class JSIntelligenceStage(Stage):
         discovered_urls: set[str] = set()
         artifacts = []
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             selected_urls = list(js_urls)[:max_files]
             context.logger.info("Analyzing %d JavaScript files", len(selected_urls))
             

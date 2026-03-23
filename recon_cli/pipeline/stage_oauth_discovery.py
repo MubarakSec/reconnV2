@@ -49,7 +49,7 @@ class OAuthDiscoveryStage(Stage):
             requests_per_second=float(getattr(runtime, "oauth_rps", 30.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for host in hosts:
                 base = f"https://{host}"
                 

@@ -74,7 +74,7 @@ class SSRFValidatorStage(Stage):
             requests_per_second=float(getattr(runtime, "ssrf_validator_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             if enable_oast and oast_backend == "interactsh":
                 output_path = artifacts_dir / "interactsh.json"
                 session = InteractshSession(output_path, logger=context.logger, domain_override=getattr(runtime, "oast_domain", None))

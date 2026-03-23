@@ -66,7 +66,7 @@ class GraphQLReconStage(Stage):
             requests_per_second=float(getattr(runtime, "graphql_rps", 15.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for url in candidates:
                 if not context.url_allowed(url): continue
                 checked += 1

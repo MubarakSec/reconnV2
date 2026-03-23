@@ -36,7 +36,7 @@ class AuthBypassTechniqueStage(Stage):
             user_agent="Mozilla/5.0 recon-cli/2.0 Bypass-Pro"
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             for form in auth_forms:
                 url = form.get("url")
                 action = form.get("action") or url

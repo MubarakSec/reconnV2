@@ -73,7 +73,7 @@ class AuthDiscoveryStage(Stage):
             requests_per_second=float(getattr(runtime, "auth_discovery_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             forms_found = 0
             artifacts = []
             for candidate in candidates[:max_urls]:

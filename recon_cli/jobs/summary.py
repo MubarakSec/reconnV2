@@ -324,6 +324,13 @@ def generate_summary(context) -> None:
         lines.append("== HTTP Status Codes ==")
         for code, count in sorted(status_counter.items()):
             lines.append(f"{code}: {count}")
+        
+        # ELITE: Session Expiry Warning
+        if "401" in status_counter:
+            lines.append("")
+            lines.append("⚠️  WARNING: 401 Unauthorized responses detected!")
+            lines.append("    Session may have expired mid-scan. ReconnV2 attempted auto-reauth")
+            lines.append("    if configured, but some results may be incomplete.")
 
     # Quality metrics
     total_urls = counts.get("url", 0)

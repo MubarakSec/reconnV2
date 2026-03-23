@@ -70,7 +70,7 @@ class VulnScanStage(Stage):
                 requests_per_second=float(getattr(runtime, "vuln_scan_rps", 25.0))
             )
             
-            async with AsyncHTTPClient(client_config) as client:
+            async with AsyncHTTPClient(client_config, context=context) as client:
                 await self._run_oast_probes(context, client, oast_session, candidates, tokens_to_urls)
             
             # Wait a bit for interactions

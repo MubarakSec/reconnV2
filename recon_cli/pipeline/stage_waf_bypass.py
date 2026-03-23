@@ -56,7 +56,7 @@ class WafBypassStage(Stage):
             requests_per_second=10.0
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for host in targets:
                 url = f"https://{host}/"
                 for res in context.filter_results("url"):

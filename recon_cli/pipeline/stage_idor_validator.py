@@ -45,7 +45,7 @@ class IDORValidatorStage(Stage):
             requests_per_second=float(getattr(runtime, "idor_validator_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             # Determine host-specific Soft-404 Fingerprint
             host = urlparse(str(candidates[0].get("baseline_url") or "")).hostname or ""
             soft_404_fingerprint = await self._get_soft_404_fingerprint(context, client, host, timeout)

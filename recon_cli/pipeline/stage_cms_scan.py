@@ -71,7 +71,7 @@ class CMSScanStage(Stage):
 
         config = HTTPClientConfig(max_concurrent=10, total_timeout=float(timeout), verify_ssl=bool(getattr(runtime, "verify_tls", True)))
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             for host in list(cms_targets.keys())[:max_hosts]:
                 info = host_info.get(host, {})
                 urls = info.get("urls", [])

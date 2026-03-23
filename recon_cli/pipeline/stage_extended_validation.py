@@ -71,7 +71,7 @@ class ExtendedValidationStage(Stage):
             requests_per_second=float(getattr(runtime, "oast_rps", 25.0))
         )
 
-        async with AsyncHTTPClient(client_config) as client:
+        async with AsyncHTTPClient(client_config, context=context) as client:
             # 1. Redirect Validation
             if enable_redirect:
                 for entry in candidates["redirect"][:redirect_max_urls]:

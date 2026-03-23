@@ -81,7 +81,7 @@ class IDORStage(Stage):
             requests_per_second=float(getattr(runtime, "idor_rps", 20.0))
         )
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             # Determine host-specific Soft-404 Fingerprint
             host = urlparse(candidates[0].url).hostname or ""
             soft_404_fingerprint = await self._get_soft_404_fingerprint(context, client, host, timeout)

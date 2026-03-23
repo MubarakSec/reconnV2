@@ -55,7 +55,7 @@ class SecurityHeadersStage(Stage):
         )
 
         findings = 0
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             tasks = [client.get(url, headers={"User-Agent": "recon-cli security-headers"}, follow_redirects=True) for _, url, _ in candidates]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 

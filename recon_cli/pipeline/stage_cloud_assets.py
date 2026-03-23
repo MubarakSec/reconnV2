@@ -70,7 +70,7 @@ class CloudAssetDiscoveryStage(Stage):
         public_findings, exists_only, checked = 0, 0, 0
         stage_started = time.monotonic()
 
-        async with AsyncHTTPClient(config) as client:
+        async with AsyncHTTPClient(config, context=context) as client:
             # Group into smaller batches for gather to avoid hitting local limits
             batch_size = 50
             for i in range(0, len(checks_plan), batch_size):
