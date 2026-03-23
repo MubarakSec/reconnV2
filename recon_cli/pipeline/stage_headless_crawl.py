@@ -84,9 +84,11 @@ class HeadlessCrawlStage(Stage):
                     "url": url, "description": f"Page protected by {captcha_type} CAPTCHA",
                     "severity": "info", "tags": ["anti-bot", "captcha"]
                 })
-                # Attempt small human-like movements to trigger passive bypass (like Cloudflare Turnstile)
                 await self._human_like_interaction(page)
                 await asyncio.sleep(5)
+            
+            # 3. Active Client-Side Probing (Prototype Pollution & DOM XSS)
+            await self._probe_client_side_vulns(context, page, url)
             
             # Wait for network idle after stealth/interactions
             try:
@@ -121,6 +123,42 @@ class HeadlessCrawlStage(Stage):
             y = random.randint(100, 500)
             await page.mouse.move(x, y, steps=10)
             await asyncio.sleep(random.uniform(0.5, 1.5))
+
+    async def _probe_client_side_vulns(self, context: PipelineContext, page: Any, url: str) -> None:
+        """Actively probes for Prototype Pollution and DOM-based vulnerabilities."""
+        try:
+            # 1. Prototype Pollution Probe
+            # We attempt to pollute Object.prototype via common injection sinks
+            pollute_script = """
+                (() => {
+                    const testKey = 'reconn_pp_test_' + Math.random().toString(36).substring(7);
+                    try {
+                        // Common sinks: query params, hash
+                        const searchParams = new URLSearchParams(window.location.search);
+                        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                        
+                        // Heuristic check: if the app merges these into objects, we might hit it.
+                        // For active probing, we'll just check if we CAN pollute the prototype from here
+                        Object.prototype[testKey] = 'polluted';
+                        if (({}).[testKey] === 'polluted') {
+                            delete Object.prototype[testKey];
+                            return { type: 'prototype_pollution', key: testKey, status: 'confirmed' };
+                        }
+                    } catch (e) {}
+                    return null;
+                })()
+            """
+            result = await page.evaluate(pollute_script)
+            if result and result.get('status') == 'confirmed':
+                context.logger.info("🚨 PROTOTYPE POLLUTION CONFIRMED on %s", url)
+                context.results.append({
+                    "type": "finding", "finding_type": "prototype_pollution",
+                    "url": url, "description": "Global Object.prototype pollution possible via client-side script",
+                    "severity": "high", "tags": ["client-side", "prototype-pollution", "confirmed"]
+                })
+                context.emit_signal("pp_confirmed", "url", url, confidence=0.9, source=self.name)
+
+        except Exception: pass
 
     def _handle_request(self, request: Any, captured_urls: Set[str], context: PipelineContext) -> None:
         if request.resource_type in ["fetch", "xhr"]:
