@@ -101,6 +101,12 @@ def validate_target(value: str, allow_ip: bool = False) -> str:
     return normalized
 
 
+def is_tool_available(name: str) -> bool:
+    """Check if a command-line tool is available in PATH."""
+    import shutil
+    return shutil.which(name) is not None
+
+
 def load_targets_from_file(path: str, allow_ip: bool = False) -> List[str]:
     targets: List[str] = []
     with open(path, "r", encoding="utf-8") as handle:

@@ -415,6 +415,11 @@ class PipelineRunner:
             return results
 
         selected_stages = self._resolve_stages(stages)
+        
+        # Elite Pre-flight Tool Check
+        if not self._perform_preflight_checks(context, selected_stages):
+            raise RuntimeError("Pre-flight tool check failed")
+
         context.mark_started()
         error: Exception | None = None
         error_recorded = False

@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Set, Tuple
-from urllib.parse import ParseResult, parse_qsl, urlencode, urlparse, urlunparse
-
-try:
-    import requests
-except ImportError:  # pragma: no cover
-    requests = None  # type: ignore
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Any
+from urllib.parse import ParseResult, urlencode, urlparse, urlunparse, parse_qsl
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 UUID_RE = re.compile(
@@ -37,676 +34,350 @@ class IDORStage(Stage):
     optional = True
 
     PARAM_KEYWORDS = {
-        "id",
-        "user",
-        "uid",
-        "account",
-        "acct",
-        "org",
-        "tenant",
-        "project",
+        "id", "user", "uid", "account", "acct", "org", "tenant", "project",
     }
     SENSITIVE_KEYS = {
-        "email",
-        "role",
-        "roles",
-        "balance",
-        "owner_id",
-        "user_id",
-        "account_id",
+        "email", "role", "roles", "balance", "owner_id", "user_id", "account_id",
     }
     SUBJECT_KEYS = {
-        "id",
-        "user_id",
-        "owner_id",
-        "account_id",
-        "uid",
-        "tenant_id",
-        "org_id",
-        "project_id",
+        "id", "user_id", "owner_id", "account_id", "uid", "tenant_id", "org_id", "project_id",
     }
     AUTH_ERROR_HINTS = (
-        "unauthorized",
-        "forbidden",
-        "access denied",
-        "permission",
-        "login required",
+        "unauthorized", "forbidden", "access denied", "permission", "login required",
     )
     MAX_TARGETS = 40
     MAX_PER_HOST = 6
     MAX_VARIANTS_PER_PARAM = 7
     PATH_HINTS = (
-        "user",
-        "users",
-        "account",
-        "accounts",
-        "profile",
-        "tenant",
-        "org",
-        "project",
-        "order",
-        "invoice",
-        "payment",
-        "admin",
+        "user", "users", "account", "accounts", "profile", "tenant", "org", "project",
+        "order", "invoice", "payment", "admin",
     )
     STATIC_EXTENSIONS = (
-        ".js",
-        ".css",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".svg",
-        ".ico",
-        ".woff",
-        ".woff2",
-        ".ttf",
-        ".map",
-        ".pdf",
-        ".zip",
-        ".gz",
-        ".mp4",
-        ".mp3",
-        ".webp",
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2",
+        ".ttf", ".map", ".pdf", ".zip", ".gz", ".mp4", ".mp3", ".webp",
     )
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        if requests is None:
-            context.logger.info("requests library not available; skipping IDOR stage")
-            return False
         return True
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         items = context.get_results()
         candidates = self._collect_candidates(context, items)
         if not candidates:
             context.logger.info("IDOR stage: no suitable endpoints found")
             return
-        
-        # Determine host-specific Soft-404 Fingerprint
-        # Take first candidate host
-        host = urlparse(candidates[0].url).hostname or ""
-        session = requests.Session()
-        verify_tls = bool(getattr(context.runtime_config, "verify_tls", True))
-        soft_404_fingerprint = self._get_soft_404_fingerprint(context, session, host, 10, verify_tls)
 
         runtime = context.runtime_config
-        limiter = context.get_rate_limiter(
-            "idor_probe",
-            rps=float(getattr(runtime, "idor_rps", 0)),
-            per_host=float(getattr(runtime, "idor_per_host_rps", 0)),
-        )
-        tokens: List[Tuple[str, Optional[str]]] = [("anon", None)]
-        if getattr(runtime, "idor_token_a", None):
-            tokens.append(("token-a", runtime.idor_token_a))
-        if getattr(runtime, "idor_token_b", None):
-            tokens.append(("token-b", runtime.idor_token_b))
-        session = requests.Session()
-        verify_tls = bool(getattr(runtime, "verify_tls", True))
-        if not verify_tls:
-            try:
-                requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        stats = context.record.metadata.stats.setdefault(
-            "idor", {"tests": 0, "suspects": 0}
-        )
-        other_id = getattr(runtime, "idor_other_identifier", None)
         timeout = getattr(runtime, "idor_timeout", 10)
-        for candidate in candidates:
-            variants = self._generate_variants(candidate, other_id)
-            if not variants:
-                continue
+        verify_tls = bool(getattr(runtime, "verify_tls", True))
+        
+        # Configure Async Client
+        config = HTTPClientConfig(
+            max_concurrent=20,
+            total_timeout=float(timeout),
+            verify_ssl=verify_tls,
+            requests_per_second=float(getattr(runtime, "idor_rps", 20.0))
+        )
 
-            # Triple check logic:
-            # 1. Baseline (Token A) - Success
-            # 2. Variant (Token A) - Success (Different ID)
-            # 3. Variant (Token B) - Failure (Different User)
-            # 4. Variant (Anon) - Failure
+        async with AsyncHTTPClient(config) as client:
+            # Determine host-specific Soft-404 Fingerprint
+            host = urlparse(candidates[0].url).hostname or ""
+            soft_404_fingerprint = await self._get_soft_404_fingerprint(context, client, host, timeout)
 
-            for variant_url, variant_meta in variants:
-                # 1. Test with Token A (legitimate user)
-                data_a = self._fetch(
-                    session,
-                    context,
-                    variant_url,
-                    "token-a",
-                    tokens[1][1] if len(tokens) > 1 else None,
-                    timeout,
-                    verify_tls,
-                    limiter,
-                )
-                if not data_a or data_a["status"] >= 400:  # type: ignore[operator]
+            tokens: List[Tuple[str, Optional[str]]] = [("anon", None)]
+            if getattr(runtime, "idor_token_a", None):
+                tokens.append(("token-a", runtime.idor_token_a))
+            if getattr(runtime, "idor_token_b", None):
+                tokens.append(("token-b", runtime.idor_token_b))
+
+            stats = context.record.metadata.stats.setdefault("idor", {"tests": 0, "suspects": 0})
+            other_id = getattr(runtime, "idor_other_identifier", None)
+
+            for candidate in candidates:
+                variants = self._generate_variants(candidate, other_id)
+                if not variants:
                     continue
-                
-                # Soft-404 Destroyer: Check if baseline is just a custom 404 page
-                if soft_404_fingerprint:
-                    if data_a["status"] == soft_404_fingerprint["status"] and data_a["body_md5"] == soft_404_fingerprint["body_md5"]:
+
+                for variant_url, variant_meta in variants:
+                    # 1. Test with Token A (legitimate user)
+                    data_a = await self._fetch(
+                        client, context, variant_url, "token-a",
+                        tokens[1][1] if len(tokens) > 1 else None,
+                    )
+                    if not data_a or data_a["status"] >= 400:
+                        continue
+                    
+                    # Soft-404 Destroyer
+                    if soft_404_fingerprint:
+                        if data_a["status"] == soft_404_fingerprint["status"] and data_a["body_md5"] == soft_404_fingerprint["body_md5"]:
+                            continue
+
+                    # 2. Test with Token B or Anon
+                    token_b = tokens[2][1] if len(tokens) > 2 else None
+                    auth_label = "token-b" if token_b else "anon"
+                    
+                    data_b = await self._fetch(client, context, variant_url, auth_label, token_b)
+                    if not data_b:
                         continue
 
-                # 2. Test with Token B (attacker/other user)
-                token_b = tokens[2][1] if len(tokens) > 2 else None
-                if not token_b:
-                    # If no Token B, we can't fully "confirm" IDOR honesty-style,
-                    # but we can check vs Anon.
-                    data_b = self._fetch(
-                        session,
-                        context,
-                        variant_url,
-                        "anon",
-                        None,
-                        timeout,
-                        verify_tls,
-                        limiter,
-                    )
-                else:
-                    data_b = self._fetch(
-                        session,
-                        context,
-                        variant_url,
-                        "token-b",
-                        token_b,
-                        timeout,
-                        verify_tls,
-                        limiter,
+                    reasons = self._semantic_reasons(data_a, data_b)
+                    is_confirmed = (
+                        data_b["status"] == data_a["status"]
+                        and data_b["body_md5"] == data_a["body_md5"]
                     )
 
-                if not data_b:
-                    continue
+                    if is_confirmed or reasons:
+                        stats["tests"] += 1
+                        finding = self._assemble_finding(
+                            candidate, variant_url, variant_meta, auth_label, token_b, data_a, data_b,
+                            reasons if reasons else ["unauthorized_access_confirmed"],
+                        )
+                        if is_confirmed:
+                            finding["type"] = "finding"
+                            finding["finding_type"] = "idor"
+                            finding["confidence"] = "high"
+                            finding.setdefault("tags", []).append("confirmed")
 
-                reasons = self._semantic_reasons(data_a, data_b)
-                # If Token B gets same data as Token A, it's a potential IDOR
-                is_confirmed = False
-                if (
-                    data_b["status"] == data_a["status"]
-                    and data_b["body_md5"] == data_a["body_md5"]
-                ):
-                    is_confirmed = True
+                        if context.results.append(finding):
+                            stats["suspects"] += 1
+            
+            context.manager.update_metadata(context.record)
 
-                if is_confirmed or reasons:
-                    stats["tests"] += 1
-                    finding = self._assemble_finding(
-                        candidate,
-                        variant_url,
-                        variant_meta,
-                        "token-b" if token_b else "anon",
-                        token_b,
-                        data_a,
-                        data_b,
-                        reasons if reasons else ["unauthorized_access_confirmed"],
-                    )
-                    if is_confirmed:
-                        finding["type"] = "finding"
-                        finding["finding_type"] = "idor"
-                        finding["confidence"] = "high"
-                        if "tags" not in finding:
-                            finding["tags"] = []
-                        finding["tags"].append("confirmed")  # type: ignore[union-attr]
-
-                    if context.results.append(finding):
-                        stats["suspects"] += 1
-        context.manager.update_metadata(context.record)
-
-    def _get_soft_404_fingerprint(self, context: PipelineContext, session: "requests.Session", host: str, timeout: int, verify_tls: bool) -> Optional[Dict[str, Any]]:
-        import uuid
+    async def _get_soft_404_fingerprint(self, context: PipelineContext, client: AsyncHTTPClient, host: str, timeout: int) -> Optional[Dict[str, Any]]:
         if not host: return None
         random_path = f"/this-does-not-exist-{uuid.uuid4().hex[:10]}"
         url = f"https://{host}{random_path}"
         if not context.url_allowed(url):
             url = f"http://{host}{random_path}"
         try:
-            resp = session.get(url, timeout=timeout, verify=verify_tls, allow_redirects=True)
-            body = resp.content or b""
+            resp = await client.get(url)
             return {
-                "status": int(resp.status_code),
-                "body_md5": hashlib.md5(body, usedforsecurity=False).hexdigest()
+                "status": resp.status,
+                "body_md5": hashlib.md5(resp.body.encode(), usedforsecurity=False).hexdigest()
             }
         except Exception: return None
+
+    async def _fetch(
+        self,
+        client: AsyncHTTPClient,
+        context: PipelineContext,
+        url: str,
+        auth_label: str,
+        token: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if not context.url_allowed(url):
+            return None
+        headers = {"User-Agent": "recon-cli idor"}
+        if token:
+            headers["Authorization"] = token
+        
+        try:
+            resp = await client.get(url, headers=headers)
+        except Exception as exc:
+            context.logger.debug("IDOR request failed for %s (%s): %s", url, auth_label, exc)
+            return None
+
+        body = resp.body
+        body_md5 = hashlib.md5(body.encode(), usedforsecurity=False).hexdigest()
+        
+        # Simple JSON helper
+        data_json = {}
+        try:
+            data_json = json.loads(body)
+        except Exception: pass
+
+        return {
+            "status": resp.status,
+            "body_md5": body_md5,
+            "headers": {k.lower(): v for k, v in resp.headers.items()},
+            "sensitive": self._extract_sensitive(data_json, body[:4000]),
+            "subject_ids": self._extract_subject_ids(data_json, body[:4000]),
+            "text_sample": body[:4000],
+            "url": url,
+            "auth": auth_label,
+        }
 
     def _collect_candidates(
         self, context: PipelineContext, items: Iterable[Dict[str, object]]
     ) -> List[Candidate]:
-        max_targets = max(
-            1,
-            int(getattr(context.runtime_config, "idor_max_targets", self.MAX_TARGETS)),
-        )
-        max_per_host = max(
-            1,
-            int(
-                getattr(context.runtime_config, "idor_max_per_host", self.MAX_PER_HOST)
-            ),
-        )
+        max_targets = max(1, int(getattr(context.runtime_config, "idor_max_targets", self.MAX_TARGETS)))
+        max_per_host = max(1, int(getattr(context.runtime_config, "idor_max_per_host", self.MAX_PER_HOST)))
         scored: List[Tuple[int, Candidate]] = []
         for entry in items:
-            if entry.get("type") != "url":
-                continue
+            if entry.get("type") != "url": continue
             url = entry.get("url")
-            if not isinstance(url, str) or not url:
-                continue
-            if not context.url_allowed(url):
-                continue
+            if not isinstance(url, str) or not url or not context.url_allowed(url): continue
             parsed = urlparse(url)
-            if self._is_static_asset(parsed.path):
-                continue
+            if self._is_static_asset(parsed.path): continue
+            
             params = parse_qsl(parsed.query, keep_blank_values=True)
             matched_params: List[str] = []
             for key, value in params:
-                key_lower = key.lower()
-                if any(keyword in key_lower for keyword in self.PARAM_KEYWORDS):
+                if any(keyword in key.lower() for keyword in self.PARAM_KEYWORDS) or self._looks_like_identifier(value):
                     matched_params.append(key)
-                    continue
-                if self._looks_like_identifier(value):
-                    matched_params.append(key)
+            
             path_parts = [part for part in parsed.path.split("/") if part]
-            matched_path_indexes: List[int] = []
-            for idx, part in enumerate(path_parts):
-                if self._looks_like_identifier(part) or any(
-                    keyword in part.lower() for keyword in self.PARAM_KEYWORDS
-                ):
-                    matched_path_indexes.append(idx)
-            if not matched_params and not matched_path_indexes:
-                continue
-            candidate = Candidate(
-                entry=entry,
-                url=url,
-                parsed=parsed,
-                params=params,
-                path_parts=path_parts,
-                matched_params=matched_params,
-                matched_path_indexes=matched_path_indexes,
-            )
-            score = self._candidate_priority(candidate)
-            scored.append((score, candidate))
+            matched_path_indexes = [idx for idx, part in enumerate(path_parts) if self._looks_like_identifier(part) or any(keyword in part.lower() for keyword in self.PARAM_KEYWORDS)]
+            
+            if not matched_params and not matched_path_indexes: continue
+            
+            candidate = Candidate(entry=entry, url=url, parsed=parsed, params=params, path_parts=path_parts, matched_params=matched_params, matched_path_indexes=matched_path_indexes)
+            scored.append((self._candidate_priority(candidate), candidate))
 
-        if not scored:
-            return []
+        if not scored: return []
         scored.sort(key=lambda item: item[0], reverse=True)
         selected: List[Candidate] = []
         host_counts: Dict[str, int] = {}
         for _, candidate in scored:
             host = (candidate.parsed.hostname or "").lower()
-            if host and host_counts.get(host, 0) >= max_per_host:
-                continue
+            if host and host_counts.get(host, 0) >= max_per_host: continue
             selected.append(candidate)
-            if host:
-                host_counts[host] = host_counts.get(host, 0) + 1
-            if len(selected) >= max_targets:
-                break
+            if host: host_counts[host] = host_counts.get(host, 0) + 1
+            if len(selected) >= max_targets: break
         return selected
 
     @staticmethod
     def _looks_like_identifier(value: str) -> bool:
-        if not value:
-            return False
-        if value.isdigit():
-            return True
-        if UUID_RE.fullmatch(value):
-            return True
-        if any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value):
-            return True
-        return False
+        if not value: return False
+        if value.isdigit() or UUID_RE.fullmatch(value): return True
+        return any(ch.isdigit() for ch in value) and any(ch.isalpha() for ch in value)
 
     def _is_static_asset(self, path: str) -> bool:
         lower = (path or "").lower()
         return any(lower.endswith(ext) for ext in self.STATIC_EXTENSIONS)
 
     def _candidate_priority(self, candidate: Candidate) -> int:
-        score = int(candidate.entry.get("score") or 0)  # type: ignore[call-overload]
+        score = int(candidate.entry.get("score") or 0)
         path = (candidate.parsed.path or "").lower()
-        url = candidate.url.lower()
-        if path.startswith("/api") or "/api/" in path:
-            score += 30
-        if any(hint in path for hint in self.PATH_HINTS):
-            score += 20
-        if candidate.matched_params:
-            score += 20 + min(10, len(candidate.matched_params) * 3)
-        if candidate.matched_path_indexes:
-            score += 15 + min(10, len(candidate.matched_path_indexes) * 3)
-        if "graphql" in path:
-            score -= 20
-        tags = candidate.entry.get("tags")
-        if isinstance(tags, list):
-            lowered_tags = {str(tag).lower() for tag in tags}
-            if any(tag.startswith("api") for tag in lowered_tags):
-                score += 12
-        status = int(candidate.entry.get("status_code") or 0)  # type: ignore[call-overload]
-        if status in {200, 401, 403}:
-            score += 8
-        if "logout" in url:
-            score -= 40
+        if path.startswith("/api") or "/api/" in path: score += 30
+        if any(hint in path for hint in self.PATH_HINTS): score += 20
+        if candidate.matched_params: score += 20 + min(10, len(candidate.matched_params) * 3)
+        if candidate.matched_path_indexes: score += 15 + min(10, len(candidate.matched_path_indexes) * 3)
+        if "logout" in candidate.url.lower(): score -= 40
         return score
 
-    def _generate_variants(
-        self, candidate: Candidate, other_id: Optional[str]
-    ) -> List[Tuple[str, Dict[str, object]]]:
-        variants: List[Tuple[str, Dict[str, object]]] = []
+    def _generate_variants(self, candidate: Candidate, other_id: Optional[str]) -> List[Tuple[str, Dict[str, object]]]:
+        variants = []
         parsed = candidate.parsed
-        if candidate.matched_params:
-            for key in candidate.matched_params:
-                originals = [value for k, value in candidate.params if k == key]
-                if not originals:
-                    continue
-                base_value = originals[0]
-                for variant_value in self._value_variants(base_value, other_id):
-                    if variant_value == base_value:
-                        continue
-                    new_params = []
-                    replaced = False
-                    for name, value in candidate.params:
-                        if name == key and not replaced:
-                            new_params.append((name, variant_value))
-                            replaced = True
-                        else:
-                            new_params.append((name, value))
-                    new_query = urlencode(new_params, doseq=True)
-                    new_url = urlunparse(parsed._replace(query=new_query))
-                    variants.append(
-                        (
-                            new_url,
-                            {
-                                "parameter": key,
-                                "original": base_value,
-                                "variant": variant_value,
-                            },
-                        )
-                    )
-        if candidate.matched_path_indexes:
-            for idx in candidate.matched_path_indexes:
-                base_value = candidate.path_parts[idx]
-                for variant_value in self._value_variants(base_value, other_id):
-                    if variant_value == base_value:
-                        continue
-                    new_parts = list(candidate.path_parts)
-                    new_parts[idx] = variant_value
-                    new_path = "/" + "/".join(new_parts)
-                    new_url = urlunparse(parsed._replace(path=new_path))
-                    variants.append(
-                        (
-                            new_url,
-                            {
-                                "path_index": idx,
-                                "original": base_value,
-                                "variant": variant_value,
-                            },
-                        )
-                    )
+        for key in candidate.matched_params:
+            originals = [value for k, value in candidate.params if k == key]
+            if not originals: continue
+            for variant_value in self._value_variants(originals[0], other_id):
+                if variant_value == originals[0]: continue
+                new_params = []
+                replaced = False
+                for name, value in candidate.params:
+                    if name == key and not replaced:
+                        new_params.append((name, variant_value)); replaced = True
+                    else: new_params.append((name, value))
+                new_url = urlunparse(parsed._replace(query=urlencode(new_params, doseq=True)))
+                variants.append((new_url, {"parameter": key, "original": originals[0], "variant": variant_value}))
+        
+        for idx in candidate.matched_path_indexes:
+            base_value = candidate.path_parts[idx]
+            for variant_value in self._value_variants(base_value, other_id):
+                if variant_value == base_value: continue
+                new_parts = list(candidate.path_parts)
+                new_parts[idx] = variant_value
+                new_url = urlunparse(parsed._replace(path="/" + "/".join(new_parts)))
+                variants.append((new_url, {"path_index": idx, "original": base_value, "variant": variant_value}))
+        
         seen = set()
-        unique_variants: List[Tuple[str, Dict[str, object]]] = []
-        for url, meta in variants:
-            if url in seen:
-                continue
-            seen.add(url)
-            unique_variants.append((url, meta))
-            if len(unique_variants) >= 50:
-                break
-        return unique_variants
+        unique = []
+        for u, m in variants:
+            if u not in seen:
+                seen.add(u); unique.append((u, m))
+                if len(unique) >= 50: break
+        return unique
 
     def _value_variants(self, value: str, other_id: Optional[str]) -> List[str]:
-        variants: List[str] = []
-        numeric_variants: List[int] = []
+        variants = []
         try:
             num = int(value)
-            numeric_variants = [num - 1, num, num + 1, 0, 1, 999999]
-        except ValueError:
-            pass
-        for num in numeric_variants:
-            variants.append(str(num))
+            variants.extend([str(num - 1), str(num + 1), "0", "1", "999999"])
+        except ValueError: pass
         variants.extend(["null", "true", "false"])
-        if value:
-            variants.append("x" + value)
-        if other_id:
-            variants.append(other_id)
+        if value: variants.append("x" + value)
+        if other_id: variants.append(other_id)
         variants.append(ZERO_UUID)
-        variants.append("")
-        return variants[: self.MAX_VARIANTS_PER_PARAM]
+        return variants[:self.MAX_VARIANTS_PER_PARAM]
 
-    def _fetch(
-        self,
-        session: "requests.Session",
-        context: PipelineContext,
-        url: str,
-        auth_label: str,
-        token: Optional[str],
-        timeout: int,
-        verify_tls: bool,
-        limiter=None,
-    ) -> Optional[Dict[str, object]]:
-        if not context.url_allowed(url):
-            return None
-        headers = {"User-Agent": "recon-cli idor"}
-        if token:
-            headers["Authorization"] = token
-        if limiter and not limiter.wait_for_slot(url, timeout=timeout):
-            return None
-        try:
-            resp = session.get(
-                url,
-                headers=headers,
-                timeout=timeout,
-                verify=verify_tls,
-                allow_redirects=True,
-            )
-        except requests.exceptions.RequestException as exc:
-            context.logger.debug(
-                "IDOR request failed for %s (%s): %s", url, auth_label, exc
-            )
-            if limiter:
-                limiter.on_error(url)
-            return None
-        if limiter:
-            limiter.on_response(url, resp.status_code)
-        body = resp.content or b""
-        body_md5 = hashlib.md5(body, usedforsecurity=False).hexdigest()
-        headers_lower = {key.lower(): value for key, value in resp.headers.items()}
-        text = ""
-        try:
-            text = resp.text[:4000]
-        except Exception:
-            text = ""
-        data_json = self._safe_json_dict(resp)
-        data = {
-            "status": resp.status_code,
-            "body_md5": body_md5,
-            "headers": headers_lower,
-            "sensitive": self._extract_sensitive(data_json, text),
-            "subject_ids": self._extract_subject_ids(data_json, text),
-            "text_sample": text,
-            "url": url,
-            "auth": auth_label,
-        }
-        return data
-
-    def _extract_sensitive(
-        self, data_json: Dict[str, object], text: str
-    ) -> Dict[str, object]:
-        payload: Dict[str, object] = {}
-        if data_json:
-            self._collect_sensitive(data_json, payload, prefix="", depth=0)
-        if not payload and text:
-            lowered = text.lower()
-            for key in self.SENSITIVE_KEYS:
-                if key in lowered:
-                    payload[key] = True
-        return payload
-
-    def _extract_subject_ids(self, data_json: Dict[str, object], text: str) -> Set[str]:
-        subjects: Set[str] = set()
-        if data_json:
-            self._collect_subject_ids(data_json, subjects, depth=0)
-        if not subjects and text:
-            for match in UUID_RE.findall(text):
-                subjects.add(match.lower())
-            for match in re.findall(r"\\b\\d{2,12}\\b", text):
-                subjects.add(match)
-                if len(subjects) >= 10:
-                    break
-        return subjects
-
-    def _semantic_reasons(
-        self, baseline: Dict[str, object], variant: Dict[str, object]
-    ) -> List[str]:
-        reasons: List[str] = []
-        base_status = int(baseline.get("status") or 0)  # type: ignore[call-overload]
-        var_status = int(variant.get("status") or 0)  # type: ignore[call-overload]
-        if var_status >= 500:
-            return reasons
-        if var_status in {400, 404, 422}:
-            return reasons
-        if self._looks_like_auth_error(variant):
-            return reasons
-        if var_status in {200, 201, 202, 204, 206} and base_status in {401, 403, 404}:
+    def _semantic_reasons(self, baseline: Dict[str, object], variant: Dict[str, object]) -> List[str]:
+        reasons = []
+        b_status, v_status = int(baseline.get("status", 0)), int(variant.get("status", 0))
+        if v_status >= 500 or v_status in {400, 404, 422} or self._looks_like_auth_error(variant):
+            return []
+        if v_status in {200, 201, 202, 204, 206} and b_status in {401, 403, 404}:
             reasons.append("auth_bypass_status_change")
         if variant.get("sensitive") and not baseline.get("sensitive"):
             reasons.append("new_sensitive_fields")
-        base_subjects = set(baseline.get("subject_ids") or [])  # type: ignore[call-overload]
-        var_subjects = set(variant.get("subject_ids") or [])  # type: ignore[call-overload]
-        if base_subjects and var_subjects and base_subjects != var_subjects:
-            reasons.append("subject_identifier_changed")
-        if (
-            var_status in {200, 201, 202, 204, 206}
-            and var_status == base_status
-            and variant.get("body_md5") != baseline.get("body_md5")
-            and not self._looks_like_validation_error(variant)
-        ):
+        if (v_status in {200, 201, 202, 204, 206} and v_status == b_status and 
+            variant.get("body_md5") != baseline.get("body_md5") and not self._looks_like_validation_error(variant)):
             reasons.append("successful_response_changed")
-        if not reasons:
-            return reasons
-        if (
-            variant.get("body_md5") == baseline.get("body_md5")
-            and var_status == base_status
-            and not variant.get("sensitive")
-            and base_subjects == var_subjects
-        ):
-            return []
         return list(dict.fromkeys(reasons))
 
-    def _assemble_finding(
-        self,
-        candidate: Candidate,
-        url: str,
-        meta: Dict[str, object],
-        auth_label: str,
-        token: Optional[str],
-        baseline: Dict[str, object],
-        variant: Dict[str, object],
-        reasons: List[str],
-    ) -> Dict[str, object]:
-        poc_header = ""
-        if token:
-            label = "Token-A" if auth_label == "token-a" else "Token-B"
-            poc_header = f" -H 'Authorization: {label}'"
-        poc_command = f"curl -k{poc_header} '{url}'"
-        base_score = 70
-        if "auth_bypass_status_change" in reasons:
-            base_score += 15
-        if "new_sensitive_fields" in reasons:
-            base_score += 10
-        if "subject_identifier_changed" in reasons:
-            base_score += 10
-        score = min(base_score, 95)
+    def _assemble_finding(self, candidate: Candidate, url: str, meta: Dict[str, object], auth_label: str, token: Optional[str], baseline: Dict[str, object], variant: Dict[str, object], reasons: List[str]) -> Dict[str, object]:
+        poc_header = f" -H 'Authorization: {token}'" if token else ""
         return {
-            "type": "idor_suspect",
-            "source": "idor-stage",
-            "url": url,
-            "auth": auth_label,
-            "baseline_status": baseline["status"],
-            "variant_status": variant["status"],
-            "baseline_md5": baseline["body_md5"],
-            "variant_md5": variant["body_md5"],
-            "baseline_sensitive": baseline["sensitive"],
-            "variant_sensitive": variant["sensitive"],
-            "details": {
-                **meta,
-                "reasons": reasons,
-                "baseline_subject_ids": sorted(set(baseline.get("subject_ids") or []))[  # type: ignore[call-overload]
-                    :20
-                ],
-                "variant_subject_ids": sorted(set(variant.get("subject_ids") or []))[  # type: ignore[call-overload]
-                    :20
-                ],
-            },
-            "poc": poc_command,
-            "score": score,
-            "priority": "high",
-            "tags": ["idor"],
+            "type": "idor_suspect", "source": "idor-stage", "url": url, "auth": auth_label,
+            "baseline_status": baseline["status"], "variant_status": variant["status"],
+            "baseline_md5": baseline["body_md5"], "variant_md5": variant["body_md5"],
+            "baseline_sensitive": baseline["sensitive"], "variant_sensitive": variant["sensitive"],
+            "details": {**meta, "reasons": reasons}, "poc": f"curl -k{poc_header} '{url}'",
+            "score": min(70 + len(reasons) * 10, 95), "priority": "high", "tags": ["idor"],
         }
 
-    @staticmethod
-    def _safe_json_dict(response: "requests.Response") -> Dict[str, object]:
-        try:
-            data = response.json()
-        except Exception:
-            return {}
-        if isinstance(data, dict):
-            return data
-        return {}
+    def _extract_sensitive(self, data_json: Dict[str, object], text: str) -> Dict[str, object]:
+        payload = {}
+        if data_json: self._collect_sensitive(data_json, payload, prefix="", depth=0)
+        if not payload and text:
+            lowered = text.lower()
+            for key in self.SENSITIVE_KEYS:
+                if key in lowered: payload[key] = True
+        return payload
 
-    def _collect_sensitive(
-        self, node: object, out: Dict[str, object], *, prefix: str, depth: int
-    ) -> None:
-        if depth > 4:
-            return
+    def _extract_subject_ids(self, data_json: Dict[str, object], text: str) -> Set[str]:
+        subjects = set()
+        if data_json: self._collect_subject_ids(data_json, subjects, depth=0)
+        if not subjects and text:
+            for match in UUID_RE.findall(text): subjects.add(match.lower())
+        return subjects
+
+    def _collect_sensitive(self, node: object, out: Dict[str, object], *, prefix: str, depth: int) -> None:
+        if depth > 4: return
         if isinstance(node, dict):
             for key, value in node.items():
-                key_str = str(key).lower()
-                new_prefix = f"{prefix}.{key_str}" if prefix else key_str
-                if key_str in self.SENSITIVE_KEYS:
-                    out[new_prefix] = value
-                self._collect_sensitive(value, out, prefix=new_prefix, depth=depth + 1)
-                if len(out) >= 25:
-                    return
+                k = str(key).lower()
+                new_p = f"{prefix}.{k}" if prefix else k
+                if k in self.SENSITIVE_KEYS: out[new_p] = value
+                self._collect_sensitive(value, out, prefix=new_p, depth=depth + 1)
         elif isinstance(node, list):
-            for item in node[:10]:
-                self._collect_sensitive(item, out, prefix=prefix, depth=depth + 1)
-                if len(out) >= 25:
-                    return
+            for item in node[:10]: self._collect_sensitive(item, out, prefix=prefix, depth=depth + 1)
 
     def _collect_subject_ids(self, node: object, out: Set[str], *, depth: int) -> None:
-        if depth > 4:
-            return
+        if depth > 4: return
         if isinstance(node, dict):
             for key, value in node.items():
-                key_str = str(key).lower()
-                if key_str in self.SUBJECT_KEYS or key_str.endswith("_id"):
-                    extracted = self._normalize_subject(value)
-                    if extracted:
-                        out.add(extracted)
+                k = str(key).lower()
+                if k in self.SUBJECT_KEYS or k.endswith("_id"):
+                    val = self._normalize_subject(value)
+                    if val: out.add(val)
                 self._collect_subject_ids(value, out, depth=depth + 1)
-                if len(out) >= 20:
-                    return
         elif isinstance(node, list):
-            for item in node[:20]:
-                self._collect_subject_ids(item, out, depth=depth + 1)
-                if len(out) >= 20:
-                    return
+            for item in node[:20]: self._collect_subject_ids(item, out, depth=depth + 1)
 
     @staticmethod
     def _normalize_subject(value: object) -> str:
-        if isinstance(value, (int, float)):
-            return str(int(value))
+        if isinstance(value, (int, float)): return str(int(value))
         if isinstance(value, str):
-            cleaned = value.strip().strip('"').strip("'")
-            if not cleaned:
-                return ""
-            if UUID_RE.fullmatch(cleaned):
-                return cleaned.lower()
-            if cleaned.isdigit():
-                return cleaned
-            if 3 <= len(cleaned) <= 64:
-                return cleaned[:64]
+            c = value.strip().strip('"').strip("'")
+            if UUID_RE.fullmatch(c) or c.isdigit() or 3 <= len(c) <= 64: return c[:64]
         return ""
 
     def _looks_like_validation_error(self, payload: Dict[str, object]) -> bool:
-        status = int(payload.get("status") or 0)  # type: ignore[call-overload]
-        if status in {400, 422}:
-            return True
-        text = str(payload.get("text_sample") or "").lower()
-        validation_hints = ("validation", "invalid", "malformed", "missing required")
-        return any(hint in text for hint in validation_hints)
+        if int(payload.get("status", 0)) in {400, 422}: return True
+        return any(h in str(payload.get("text_sample", "")).lower() for h in ("validation", "invalid", "malformed"))
 
     def _looks_like_auth_error(self, payload: Dict[str, object]) -> bool:
-        status = int(payload.get("status") or 0)  # type: ignore[call-overload]
-        if status in {401, 403}:
-            return True
-        text = str(payload.get("text_sample") or "").lower()
-        return any(hint in text for hint in self.AUTH_ERROR_HINTS)
+        if int(payload.get("status", 0)) in {401, 403}: return True
+        return any(h in str(payload.get("text_sample", "")).lower() for h in self.AUTH_ERROR_HINTS)
