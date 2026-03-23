@@ -152,13 +152,13 @@ load_profiles() {
     local output=""
     if ! output="$($PYTHON_BIN - <<'PY'
 from recon_cli import config
-base = ["passive", "full", "fuzz-only", "ultra-deep"]
+base = ["passive", "full", "fuzz-only", "ultra-deep", "local-benchmark"]
 profiles = sorted(set(base) | set(config.available_profiles().keys()))
 print("\n".join(profiles))
 PY
 )"; then
         print_warn "Could not read profiles dynamically. Falling back to defaults."
-        PROFILES=("passive" "full", "fuzz-only", "ultra-deep")
+        PROFILES=("passive" "full" "fuzz-only" "ultra-deep" "local-benchmark")
         return
     fi
 
@@ -648,6 +648,11 @@ scan_ultra_deep_hunter() {
     run_scan_flow "ultra-deep" --mode hunter
 }
 
+scan_local_benchmark() {
+    print_info "Local Benchmark: local-benchmark profile"
+    run_scan_flow "local-benchmark"
+}
+
 scan_api_only() {
     if profile_exists "api-only"; then
         run_scan_flow "api-only"
@@ -1099,38 +1104,39 @@ show_main_menu() {
     echo -e "${WHITE}[3]${NC} Full scan"
     echo -e "${WHITE}[4]${NC} Deep scan"
     echo -e "${WHITE}[5]${NC} Ultra-Deep Hunter (ultra-deep + hunter mode)"
-    echo -e "${WHITE}[6]${NC} API-only scan"
-    echo -e "${WHITE}[7]${NC} Secure scan"
-    echo -e "${WHITE}[8]${NC} Fuzz-only scan"
-    echo -e "${WHITE}[9]${NC} WordPress mode (full + wpscan)"
-    echo -e "${WHITE}[10]${NC} Select profile manually"
+    echo -e "${WHITE}[6]${NC} Local Benchmark (optimized for localhost)"
+    echo -e "${WHITE}[7]${NC} API-only scan"
+    echo -e "${WHITE}[8]${NC} Secure scan"
+    echo -e "${WHITE}[9]${NC} Fuzz-only scan"
+    echo -e "${WHITE}[10]${NC} WordPress mode (full + wpscan)"
+    echo -e "${WHITE}[11]${NC} Select profile manually"
     echo -e "${WHITE}==================== Job Control ======================${NC}"
-    echo -e "${WHITE}[11]${NC} List jobs"
-    echo -e "${WHITE}[12]${NC} Job status"
-    echo -e "${WHITE}[13]${NC} Tail job logs"
-    echo -e "${WHITE}[14]${NC} Rerun job"
-    echo -e "${WHITE}[15]${NC} Requeue job"
-    echo -e "${WHITE}[16]${NC} Cancel running job"
-    echo -e "${WHITE}[17]${NC} Verify job files"
+    echo -e "${WHITE}[12]${NC} List jobs"
+    echo -e "${WHITE}[13]${NC} Job status"
+    echo -e "${WHITE}[14]${NC} Tail job logs"
+    echo -e "${WHITE}[15]${NC} Rerun job"
+    echo -e "${WHITE}[16]${NC} Requeue job"
+    echo -e "${WHITE}[17]${NC} Cancel running job"
+    echo -e "${WHITE}[18]${NC} Verify job files"
     echo -e "${WHITE}==================== Hardening & Perf =================${NC}"
-    echo -e "${WHITE}[18]${NC} Set Stage Timeout (Current: ${RECON_STAGE_TIMEOUT:-3600}s)"
-    echo -e "${WHITE}[19]${NC} Host Circuit Breaker (Threshold: ${RECON_CB_THRESHOLD:-10})"
-    echo -e "${WHITE}[20]${NC} Toggle Parallel Stages (${RECON_PARALLEL:-ON})"
+    echo -e "${WHITE}[19]${NC} Set Stage Timeout (Current: ${RECON_STAGE_TIMEOUT:-3600}s)"
+    echo -e "${WHITE}[20]${NC} Host Circuit Breaker (Threshold: ${RECON_CB_THRESHOLD:-10})"
+    echo -e "${WHITE}[21]${NC} Toggle Parallel Stages (${RECON_PARALLEL:-ON})"
     echo -e "${WHITE}==================== Output / Reports =================${NC}"
-    echo -e "${WHITE}[21]${NC} Export results"
-    echo -e "${WHITE}[22]${NC} Generate report"
-    echo -e "${WHITE}[23]${NC} Generate PDF report"
+    echo -e "${WHITE}[22]${NC} Export results"
+    echo -e "${WHITE}[23]${NC} Generate report"
+    echo -e "${WHITE}[24]${NC} Generate PDF report"
     echo -e "${WHITE}==================== Utilities ========================${NC}"
-    echo -e "${WHITE}[24]${NC} Doctor"
-    echo -e "${WHITE}[25]${NC} Prune finished jobs"
-    echo -e "${WHITE}[26]${NC} Wizard"
-    echo -e "${WHITE}[27]${NC} Interactive mode"
-    echo -e "${WHITE}[28]${NC} Quickstart guide"
-    echo -e "${WHITE}[29]${NC} Shell completions"
-    echo -e "${WHITE}[30]${NC} Trace summary"
-    echo -e "${WHITE}[31]${NC} Cache stats"
-    echo -e "${WHITE}[32]${NC} Cache clear"
-    echo -e "${WHITE}[33]${NC} Start Telegram Bot"
+    echo -e "${WHITE}[25]${NC} Doctor"
+    echo -e "${WHITE}[26]${NC} Prune finished jobs"
+    echo -e "${WHITE}[27]${NC} Wizard"
+    echo -e "${WHITE}[28]${NC} Interactive mode"
+    echo -e "${WHITE}[29]${NC} Quickstart guide"
+    echo -e "${WHITE}[30]${NC} Shell completions"
+    echo -e "${WHITE}[31]${NC} Trace summary"
+    echo -e "${WHITE}[32]${NC} Cache stats"
+    echo -e "${WHITE}[33]${NC} Cache clear"
+    echo -e "${WHITE}[34]${NC} Start Telegram Bot"
     echo -e "${WHITE}[0]${NC} Exit"
     echo ""
     echo -ne "${MAGENTA}Choose: ${NC}"
@@ -1156,34 +1162,35 @@ main() {
             3) scan_full ;;
             4) scan_deep ;;
             5) scan_ultra_deep_hunter ;;
-            6) scan_api_only ;;
-            7) scan_secure ;;
-            8) scan_fuzz_only ;;
-            9) scan_wordpress ;;
-            10) select_profile_and_scan ;;
-            11) list_jobs ;;
-            12) job_status ;;
-            13) tail_logs ;;
-            14) rerun_job ;;
-            15) requeue_job ;;
-            16) cancel_job ;;
-            17) verify_job ;;
-            18) set_stage_timeout ;;
-            19) set_cb_threshold ;;
-            20) toggle_parallel ;;
-            21) export_results ;;
-            22) generate_report ;;
-            23) run_pdf_report ;;
-            24) run_doctor ;;
-            25) prune_jobs ;;
-            26) run_wizard ;;
-            27) run_interactive ;;
-            28) run_quickstart ;;
-            29) setup_completions ;;
-            30) show_trace ;;
-            31) cache_stats ;;
-            32) cache_clear ;;
-            33) run_recon telegram-bot ;;
+            6) scan_local_benchmark ;;
+            7) scan_api_only ;;
+            8) scan_secure ;;
+            9) scan_fuzz_only ;;
+            10) scan_wordpress ;;
+            11) select_profile_and_scan ;;
+            12) list_jobs ;;
+            13) job_status ;;
+            14) tail_logs ;;
+            15) rerun_job ;;
+            16) requeue_job ;;
+            17) cancel_job ;;
+            18) verify_job ;;
+            19) set_stage_timeout ;;
+            20) set_cb_threshold ;;
+            21) toggle_parallel ;;
+            22) export_results ;;
+            23) generate_report ;;
+            24) run_pdf_report ;;
+            25) run_doctor ;;
+            26) prune_jobs ;;
+            27) run_wizard ;;
+            28) run_interactive ;;
+            29) run_quickstart ;;
+            30) setup_completions ;;
+            31) show_trace ;;
+            32) cache_stats ;;
+            33) cache_clear ;;
+            34) run_recon telegram-bot ;;
             0|q|Q)
                 echo ""
                 print_ok "Bye"

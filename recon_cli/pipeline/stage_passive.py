@@ -57,14 +57,10 @@ class PassiveEnumerationStage(Stage):
 
         subfinder_hosts: set[str] = set()
         amass_hosts: set[str] = set()
+        wayback_hosts: set[str] = set()
 
         if hostname_targets:
-            subfinder_hosts: set[str] = set()
-            amass_hosts: set[str] = set()
-            wayback_hosts: set[str] = set()
-
             # 1. Subfinder
-
             subfinder_hosts = self._run_subfinder(context, targets_file, tool_timeout)
 
             # 3. Amass
@@ -75,7 +71,7 @@ class PassiveEnumerationStage(Stage):
             logger.info("Skipping passive subdomain discovery (targets are all IPs)")
 
         # 4. Wayback URL discovery (includes fallback)
-        wayback_hosts = self._run_wayback(context, list(targets), tool_timeout, wayback_out)
+        wayback_hosts = self._run_wayback(context, list(targets), tool_timeout, wayback_out) or set()
 
         # 5. Result Collation & Tracking
         for hostname in sorted(subfinder_hosts):

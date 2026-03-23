@@ -20,6 +20,14 @@ def normalize_hostname(value: str) -> str:
     value = value.strip().rstrip(".")
     if not value:
         raise ValueError("Hostname cannot be empty")
+        
+    port_part = ""
+    if ":" in value and not (value.startswith("[") and "]" in value):
+        parts = value.rsplit(":", 1)
+        if parts[1].isdigit():
+            value = parts[0]
+            port_part = f":{parts[1]}"
+            
     ascii_value = _encode_idna(value)
     labels = ascii_value.split(".")
     if len(ascii_value) > 253:
@@ -27,7 +35,8 @@ def normalize_hostname(value: str) -> str:
     for label in labels:
         if not LABEL_RE.match(label):
             raise ValueError(f"Invalid hostname label: {label}")
-    return ascii_value.lower()
+            
+    return ascii_value.lower() + port_part
 
 
 def is_ip(value: str) -> bool:

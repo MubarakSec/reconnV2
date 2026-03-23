@@ -96,7 +96,13 @@ class ScoringStage(Stage):
                     if "pii" in tags: score += 50
                     if "vulnerability" in tags: score += 40
                     if "exploit" in tags: score += 60
-                    if "verified" in entry.get("metadata", {}): score += 30
+                    if "confirmed" in tags: score += 30
+                    
+                    # Elite Logic Bug Boosts
+                    f_type = entry.get("finding_type", "")
+                    if f_type in ["bola", "mass_assignment", "ssrf_internal_pivot", "cache_poisoning", "prototype_pollution"]:
+                        score = max(score, 98)
+                        tags.add("hunter:critical-logic")
                     
                 entry["score"] = min(score, 100)
                 entry["priority"] = enrich_utils.classify_priority(entry["score"])

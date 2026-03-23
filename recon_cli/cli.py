@@ -2164,8 +2164,8 @@ def _save_to_env(key: str, value: str) -> None:
 
 @app.command("diff")
 def diff_jobs(
-    job_id_1: str = typer.Argument(..., help="The older job ID to compare from"),
-    job_id_2: str = typer.Argument(..., help="The newer job ID to compare to"),
+    job_id_1: str = typer.Argument(None, help="The older job ID to compare from"),
+    job_id_2: str = typer.Argument(None, help="The newer job ID to compare to"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Save text report to file"),
 ) -> None:
     """Compare two jobs and show the new attack surface (Git-Ops Continuous Monitoring)."""

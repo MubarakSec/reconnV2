@@ -66,6 +66,17 @@ class IDORValidatorStage(Stage):
         artifacts: List[Dict[str, object]] = []
         seen: Set[Tuple[str, str]] = set()
 
+        baseline_url = ""
+        host = ""
+        
+        # Determine host-specific Soft-404 Fingerprint
+        # We need a host, so we take it from the first candidate if available
+        if candidates:
+            baseline_url = str(candidates[0].get("baseline_url") or "")
+            host = urlparse(baseline_url).hostname or ""
+            
+        soft_404_fingerprint = self._get_soft_404_fingerprint(context, session, host, timeout, verify_tls)
+
         for candidate in candidates:
             variant_url = str(candidate.get("url") or "")
             auth_label = str(candidate.get("auth") or "anon")
@@ -103,6 +114,14 @@ class IDORValidatorStage(Stage):
                 backoff_factor=retry_backoff_factor,
                 limiter=limiter,
             )
+            
+            # Anti-False Positive Check: Is the legitimate owner getting a soft-404?
+            if profile_a and soft_404_fingerprint:
+                if profile_a["status"] == soft_404_fingerprint["status"] and profile_a["body_md5"] == soft_404_fingerprint["body_md5"]:
+                    context.logger.debug("IDOR baseline matches Soft-404 fingerprint. Skipping %s", baseline_url)
+                    skipped += 1
+                    continue
+                    
             if not profile_a or profile_a["status"] >= 400:  # type: ignore[operator]
                 skipped += 1
                 continue
@@ -332,6 +351,28 @@ class IDORValidatorStage(Stage):
             selected.extend(items[:max_per_host])
         selected.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)  # type: ignore[call-overload]
         return selected[:max_candidates]
+
+    def _get_soft_404_fingerprint(self, context: PipelineContext, session: Any, host: str, timeout: int, verify_tls: bool) -> Optional[Dict[str, Any]]:
+        import uuid
+        import hashlib
+        
+        if not host: return None
+        
+        # Generate a completely random, guaranteed-to-fail path
+        random_path = f"/this-does-not-exist-{uuid.uuid4().hex[:10]}"
+        url = f"https://{host}{random_path}"
+        if not context.url_allowed(url):
+            url = f"http://{host}{random_path}"
+            
+        try:
+            resp = session.get(url, timeout=timeout, verify=verify_tls, allow_redirects=True)
+            body = resp.content or b""
+            return {
+                "status": int(resp.status_code),
+                "body_md5": hashlib.md5(body, usedforsecurity=False).hexdigest()
+            }
+        except Exception:
+            return None
 
     def _fetch_profile(
         self,

@@ -271,6 +271,19 @@ DEFAULT_PROFILES_CONTENT = """{
       "retry_count": 5
     }
   },
+  "local-benchmark": {
+    "base_profile": "ultra-deep",
+    "runtime": {
+      "enable_subfinder": false,
+      "enable_amass": false,
+      "enable_wayback": false,
+      "enable_dns_resolve": false,
+      "enable_vhost": false,
+      "enable_origin_discovery": false,
+      "enable_cloud_discovery": false,
+      "always_use_proxy": false
+    }
+  },
   "api-only": {
     "base_profile": "full",
     "runtime": {

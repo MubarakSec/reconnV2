@@ -49,4 +49,19 @@ class NormalizeStage(Stage):
         targets_artifact = context.record.paths.artifact("targets.txt")
         targets_artifact.write_text("\n".join(targets) + "\n", encoding="utf-8")
         context.record.metadata.stats["targets"] = len(targets)
+        
+        # Seed results with initial target URLs
+        for target in targets:
+            url = f"http://{target}/" if not target.startswith("http") else target
+            from urllib.parse import urlparse
+            hostname = urlparse(url).hostname or target
+            context.results.append({
+                "type": "url",
+                "source": "input",
+                "url": url,
+                "hostname": hostname,
+                "score": 50,
+                "tags": ["seed"]
+            })
+            
         context.manager.update_metadata(context.record)
