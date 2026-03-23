@@ -169,12 +169,13 @@ DEFAULT_PROFILES_CONTENT = """{
       "graphql_recon", "graphql_exploit", "api_schema_probe", "api_reconstructor",
       "api_logic_fuzzer", "oauth_discovery", "oauth_vuln", "ws_grpc_discovery", 
       "param_mining", "html_form_mining", "upload_probe", "vuln_scan", "cms_scan", 
-      "rescore", "trim_results", "correlation", "learning", "scanner", "nuclei",
+      "trim_results", "correlation", "learning", "scanner",
       "verify_findings", "extended_validation", "idor_validator", "ssrf_validator", 
       "ssrf_pivot", "open_redirect_validator", "auth_bypass_validator", 
       "secret_exposure_validator", "exploit_validation", "screenshots", "finalize",
       "poc_generator"
-    ],
+      ],
+
     "active_modules": ["backup", "cors", "js-secrets", "diff"],
     "runtime": {
       "timeout_http": 30,
@@ -229,7 +230,7 @@ DEFAULT_PROFILES_CONTENT = """{
       "enable_verification": true,
       "enable_exploit_validation": true,
       "enable_ssrf_pivot": true,
-      "enable_nuclei": true,
+      "enable_nuclei": false,
       "enable_poc_generator": true,
       "auth_discovery_max_urls": 150,
       "auth_discovery_max_forms": 300,

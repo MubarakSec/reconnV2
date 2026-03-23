@@ -157,7 +157,7 @@
       "enable_verification": true,
       "enable_exploit_validation": true,
       "enable_ssrf_pivot": true,
-      "enable_nuclei": true,
+      "enable_nuclei": false,
       "enable_poc_generator": true,
       "auth_discovery_max_urls": 150,
       "auth_discovery_max_forms": 300,
