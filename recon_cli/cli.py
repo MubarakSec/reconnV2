@@ -349,6 +349,9 @@ def scan(
     cookie: Optional[str] = typer.Option(
         None, "--cookie", help="Override Cookie header for all requests"
     ),
+    email_domain: Optional[str] = typer.Option(
+        None, "--email-domain", help="Custom domain for autonomous signup (e.g. my-private-domain.com)"
+    ),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
@@ -381,6 +384,8 @@ def scan(
         runtime_overrides["auth_bearer_token"] = bearer_token
     if cookie:
         runtime_overrides["auth_cookies"] = cookie
+    if email_domain:
+        runtime_overrides["auth_email_domain"] = email_domain
     if base_profile not in BASE_PROFILES:
         typer.echo(
             f"Profile preset maps to unknown base profile: {base_profile}", err=True

@@ -1189,6 +1189,7 @@ class RuntimeConfig:
     auth_headers: Optional[str] = os.environ.get("RECON_AUTH_HEADERS")
     auth_cookies: Optional[str] = os.environ.get("RECON_AUTH_COOKIES")
     auth_bearer_token: Optional[str] = os.environ.get("RECON_AUTH_BEARER")
+    auth_email_domain: str = os.environ.get("RECON_AUTH_EMAIL_DOMAIN", "1secmail.com")
     auth_basic_user: Optional[str] = os.environ.get("RECON_AUTH_BASIC_USER")
     auth_basic_pass: Optional[str] = os.environ.get("RECON_AUTH_BASIC_PASS")
     auth_login_url: Optional[str] = os.environ.get("RECON_AUTH_LOGIN_URL")

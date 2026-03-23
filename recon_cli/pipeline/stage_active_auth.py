@@ -30,6 +30,13 @@ class ActiveAuthStage(Stage):
     name = "active_auth"
     ACCOUNTS_FILE = Path("data/accounts.json")
 
+    # ELITE: Email Provider Pool to bypass blacklists
+    EMAIL_DOMAINS = [
+        "1secmail.com", "1secmail.net", "1secmail.org",
+        "guerrillamail.com", "sharklasers.com", "guerrillamail.info",
+        "grr.la", "guerrillamail.biz", "mailnull.com"
+    ]
+
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_active_auth", True))
 
@@ -142,24 +149,36 @@ class ActiveAuthStage(Stage):
         url = form.get("url")
         action = urljoin(url, form.get("action") or "")
         
+        # Select domain (prefer custom, fallback to pool)
+        runtime_domain = getattr(context.runtime_config, "auth_email_domain", "1secmail.com")
+        if runtime_domain == "1secmail.com":
+            import random
+            domain = random.choice(self.EMAIL_DOMAINS)
+        else:
+            domain = runtime_domain
+
         identity = {
             "username": f"recon_{uuid.uuid4().hex[:8]}",
             "password": f"P@ssw0rd_{uuid.uuid4().hex[:6]}!",
             "email_prefix": f"user_{uuid.uuid4().hex[:8]}",
-            "email_domain": "1secmail.com",
+            "email_domain": domain,
         }
         identity["email"] = f"{identity['email_prefix']}@{identity['email_domain']}"
 
         csrf = await self._extract_csrf(context, client, url)
         payload = self._map_form_fields(form.get("inputs", []), identity, csrf)
 
-        context.logger.info("Attempting signup at %s", action)
+        context.logger.info("Attempting signup at %s with email %s", action, identity["email"])
         try:
             resp = await client.post(action, data=payload, follow_redirects=True)
             
             if any(h in resp.body.lower() for h in ["verify", "activation", "confirm", "check your email"]):
-                if await self._verify_email(context, client, identity["email_prefix"], identity["email_domain"]):
-                    return identity
+                # verification currently only supports 1secmail API
+                if "1secmail" in identity["email_domain"]:
+                    if await self._verify_email(context, client, identity["email_prefix"], identity["email_domain"]):
+                        return identity
+                else:
+                    context.logger.warning("Signup requires verification, but custom/pool domain %s has no auto-verification handler.", identity["email_domain"])
             
             if resp.status in [200, 302] and ("success" in resp.body.lower() or "welcome" in resp.body.lower()):
                 return identity
