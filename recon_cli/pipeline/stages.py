@@ -11,6 +11,7 @@ from recon_cli.pipeline.stage_dedupe import DedupeStage
 from recon_cli.pipeline.stage_resolve import ResolveStage
 from recon_cli.pipeline.stage_enrichment import EnrichmentStage
 from recon_cli.pipeline.stage_cloud_assets import CloudAssetDiscoveryStage
+from recon_cli.pipeline.stage_cloud_looter import CloudBucketLooterStage
 from recon_cli.pipeline.stage_nmap import NmapStage
 from recon_cli.pipeline.stage_http_probe import HttpProbeStage
 from recon_cli.pipeline.stage_vhost import VHostDiscoveryStage
@@ -57,6 +58,7 @@ from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
 from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.stage_idor_validator import IDORValidatorStage
 from recon_cli.pipeline.stage_ssrf_validator import SSRFValidatorStage
+from recon_cli.pipeline.stage_ssrf_pivot import SSRFPivotStage
 from recon_cli.pipeline.stage_open_redirect_validator import OpenRedirectValidatorStage
 from recon_cli.pipeline.stage_input_validator import InputValidatorStage
 from recon_cli.pipeline.stage_auth_bypass_validator import AuthBypassValidatorStage
@@ -78,6 +80,7 @@ PIPELINE_STAGES: List[Stage] = [
     ResolveStage(),
     EnrichmentStage(),
     CloudAssetDiscoveryStage(),
+    CloudBucketLooterStage(),
     NmapStage(),
     HttpProbeStage(),
     VHostDiscoveryStage(),
@@ -124,6 +127,7 @@ PIPELINE_STAGES: List[Stage] = [
     ExtendedValidationStage(),
     IDORValidatorStage(),
     SSRFValidatorStage(),
+    SSRFPivotStage(),
     OpenRedirectValidatorStage(),
     InputValidatorStage(),
     AuthBypassValidatorStage(),

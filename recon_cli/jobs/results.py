@@ -143,6 +143,7 @@ class ResultsTracker:
     path: Path
     allow: Optional[Callable[[Dict[str, object]], bool]] = None
     event_bus: Optional["PipelineEventBus"] = None
+    on_finding: Optional[Callable[[Dict[str, Any]], None]] = None
     _writer: JsonlWriter = field(init=False)
     _lock: threading.RLock = field(init=False, default_factory=threading.RLock)
     _seen: set[tuple] = field(default_factory=set)
@@ -279,6 +280,11 @@ class ResultsTracker:
 
             if ptype:
                 self.stats[f"type:{ptype}"] += 1
+            
+            # Trigger notification callback for new findings
+            if ptype == "finding" and self.on_finding:
+                self.on_finding(payload) # type: ignore[arg-type]
+                
             return True
 
     def extend(self, payloads: Iterable[Dict[str, object]]) -> int:

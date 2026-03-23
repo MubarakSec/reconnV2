@@ -89,12 +89,13 @@ class DependencyResolver:
         # بعد DNS/HTTP
         "asset_enrichment": {"dns_resolve"},
         "cloud_asset_discovery": {"asset_enrichment"},
+        "cloud_looter": {"cloud_asset_discovery"},
         "takeover_check": {"dns_resolve", "http_probe"},
         # Tagging/scoring (تحتاج نتائج المراحل السابقة كاملة)
         "scoring_tagging": {
             "http_probe",
             "asset_enrichment",
-            "cloud_asset_discovery",
+            "cloud_looter",
             "takeover_check",
             "nmap_scan",
             "vhost_discovery",
@@ -140,7 +141,8 @@ class DependencyResolver:
         "extended_validation": {"verify_findings"},
         "idor_validator": {"extended_validation"},
         "ssrf_validator": {"extended_validation"},
-        "open_redirect_validator": {"extended_validation"},
+        "ssrf_pivot": {"ssrf_validator"},
+        "open_redirect_validator": {"ssrf_pivot"},
         "auth_bypass_validator": {"extended_validation"},
         "secret_exposure_validator": {"extended_validation"},
         "exploit_validation": {

@@ -169,6 +169,7 @@ class PipelineContext:
             self.record.paths.results_jsonl,
             allow=_allow_payload,
             event_bus=self.event_bus,
+            on_finding=self.notify_finding
         )
         self.stage_attempts: Dict[str, int] = dict(self.record.metadata.attempts)
         self.targets = [spec.target]
@@ -624,6 +625,32 @@ class PipelineContext:
             self._stop_request_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+    def notify_finding(self, finding: Dict[str, Any]) -> None:
+        """Sends a notification for a high-value finding."""
+        if not self.runtime_config: return
+        
+        severity = str(finding.get("severity", "low")).lower()
+        if severity not in ["high", "critical"] and int(finding.get("score", 0)) < 80:
+            return
+
+        from recon_cli.utils import notify
+        
+        message = f"🚨 RECONN FINDING [{severity.upper()}]\n"
+        message += f"Type: {finding.get('finding_type', 'unknown')}\n"
+        message += f"Target: {finding.get('url') or finding.get('hostname')}\n"
+        message += f"Desc: {finding.get('description')}\n"
+        
+        # Try Telegram
+        token = getattr(self.runtime_config, "telegram_token", None)
+        chat_id = getattr(self.runtime_config, "telegram_chat_id", None)
+        if token and chat_id:
+            notify.send_telegram_message(token, chat_id, message)
+            
+        # Try Discord/Slack webhooks if configured
+        disc_webhook = getattr(self.runtime_config, "discord_webhook_url", None)
+        if disc_webhook:
+            notify.send_discord_message(disc_webhook, message)
 
     def close(self) -> None:
         if self._cache_dirty:
