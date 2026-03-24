@@ -66,7 +66,10 @@ def _write_url_finding(path: Path, url: str):
 @pytest.mark.asyncio
 async def test_jwt_vuln_stage_detects_weak_secret(tmp_path: Path, monkeypatch):
     # JWT with secret "secret"
-    token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    # Header: {"alg":"HS256","typ":"JWT"} -> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+    # Payload: {"sub":"1234567890","name":"John Doe","iat":1516239022} -> eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ
+    # Signature: XbPfbIHMI6arZ3Y922BhjWgQzWXcXNrz0ogtVhfEd2o
+    token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.XbPfbIHMI6arZ3Y922BhjWgQzWXcXNrz0ogtVhfEd2o"
     
     record = _make_record(tmp_path, {"enable_jwt_vuln": True})
     _write_jwt_finding(record.paths.results_jsonl, token)
@@ -100,7 +103,7 @@ async def test_jwt_vuln_stage_detects_weak_secret(tmp_path: Path, monkeypatch):
 @pytest.mark.asyncio
 async def test_jwt_vuln_stage_detects_alg_none(tmp_path: Path, monkeypatch):
     # Valid JWT
-    token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.XbPfbIHMI6arZ3Y922BhjWgQzWXcXNrz0ogtVhfEd2o"
     
     record = _make_record(tmp_path, {"enable_jwt_vuln": True})
     _write_jwt_finding(record.paths.results_jsonl, token)
@@ -114,7 +117,8 @@ async def test_jwt_vuln_stage_detects_alg_none(tmp_path: Path, monkeypatch):
     
     def side_effect(url, headers=None, **kwargs):
         auth = headers.get("Authorization", "")
-        if "eyJhbGciOiJub25lIn0" in auth: # alg: none in base64
+        # Header {"alg":"none","typ":"JWT"} -> eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0
+        if "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0" in auth:
             resp = MagicMock()
             resp.status = 200
             resp.body = '{"id": 1, "user": "admin"}'

@@ -72,7 +72,6 @@ class JWTVulnerabilityStage(Stage):
             if evidence.get("type") == "jwt_token":
                 val = evidence.get("value")
                 if val and val not in seen:
-                    context.logger.debug(f"Found JWT in js_secret: {val[:20]}...")
                     tokens.append({"token": val, "url": entry.get("url")})
                     seen.add(val)
 
@@ -85,11 +84,9 @@ class JWTVulnerabilityStage(Stage):
             text = str(entry)
             for match in jwt_re.findall(text):
                 if match not in seen:
-                    context.logger.debug(f"Found JWT in results: {match[:20]}...")
                     tokens.append({"token": match, "url": entry.get("url")})
                     seen.add(match)
 
-        context.logger.info(f"Collected {len(tokens)} unique JWTs for analysis")
         return tokens
 
     def _collect_test_endpoints(self, context: PipelineContext) -> List[str]:
@@ -214,11 +211,7 @@ class JWTVulnerabilityStage(Stage):
                     hashlib.sha256
                 ).digest()
                 
-                encoded_sig = self._b64_encode(expected_signature)
-                if secret == "secret":
-                    context.logger.debug(f"Testing 'secret': expected {encoded_sig}, got {parts[2]}")
-                if encoded_sig == parts[2]:
-                    context.logger.info(f"JWT Weak Secret Found: {secret}")
+                if self._b64_encode(expected_signature) == parts[2]:
                     # Found the secret! Now we can forge any token.
                     context.emit_signal(
                         "jwt_weak_secret", "url", endpoints[0] if endpoints else "unknown",
@@ -227,8 +220,7 @@ class JWTVulnerabilityStage(Stage):
                         evidence={"secret": secret, "token": token}
                     )
                     return
-        except Exception as e:
-            context.logger.error(f"Error in _test_weak_secrets: {e}")
+        except Exception: pass
 
     async def _verify_token(self, context: PipelineContext, client: AsyncHTTPClient, url: str, token: str, vuln_type: str) -> bool:
         """Checks if a forged token is accepted by the server."""
