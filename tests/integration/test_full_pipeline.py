@@ -199,7 +199,8 @@ class TestFullPipeline:
         record = lifecycle.manager.load_job(job_id)
         context = PipelineContext(record)
 
-        await runner.run(context)
+        with pytest.raises(RuntimeError):
+            await runner.run(context)
         
         # Current PipelineRunner behavior: status is finished if loop completes
         # even if individual stages failed, UNLESS we catch the error variable.
@@ -216,7 +217,8 @@ class TestFullPipeline:
         record = lifecycle.manager.load_job(job_id)
         context = PipelineContext(record)
 
-        await runner.run(context)
+        with pytest.raises(RuntimeError):
+            await runner.run(context)
         assert record.metadata.status in ["finished", "failed"]
 
 
@@ -379,5 +381,6 @@ class TestErrorRecovery:
         record = lifecycle.manager.load_job(job_id)
         context = PipelineContext(record)
 
-        await runner.run(context)
+        with pytest.raises(RuntimeError):
+            await runner.run(context)
         assert record.metadata.status in ["finished", "failed"]

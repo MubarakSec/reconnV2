@@ -16,7 +16,8 @@ class TLSHygieneStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_tls_hygiene", False))
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
+        import asyncio
         items = context.get_results()
         if not items:
             return
@@ -67,11 +68,11 @@ class TLSHygieneStage(Stage):
             port = parsed.port or 443
             if not host:
                 continue
-            if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+            if limiter and not await limiter.wait_for_slot(url, timeout=timeout):
                 continue
             checked += 1
             try:
-                result = self._probe_host(host, port, timeout, verify_tls)
+                result = await asyncio.to_thread(self._probe_host, host, port, timeout, verify_tls)
             except Exception:
                 if limiter:
                     limiter.on_error(url)

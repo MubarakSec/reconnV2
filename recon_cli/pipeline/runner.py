@@ -485,6 +485,8 @@ class PipelineRunner:
             )
             if use_parallel:
                 await self._run_parallel(context, selected_stages, trace=trace)
+                if context._any_stage_failed:
+                    raise RuntimeError("Scan completed with partial failures")
                 return
 
             progress_map = self._initialize_progress(context, selected_stages)
@@ -504,6 +506,7 @@ class PipelineRunner:
                 finished_at = time_utils.iso_now()
                 if outcome.error:
                     error_recorded = True
+                    context.mark_stage_failed()
                     self._handle_stage_failure(
                         context,
                         stage,
@@ -539,6 +542,8 @@ class PipelineRunner:
                 )
             context.mark_finished()
             summary.generate_summary(context)
+            if context._any_stage_failed:
+                raise RuntimeError("Scan completed with partial failures")
         except Exception as exc:
             error = error or exc
             if not error_recorded:
@@ -603,6 +608,7 @@ class PipelineRunner:
 
             if outcome.error:
                 nonlocal first_error
+                context.mark_stage_failed()
                 if not first_error:
                     first_error = outcome.error
                 self._handle_stage_failure(

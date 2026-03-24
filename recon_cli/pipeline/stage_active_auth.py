@@ -108,7 +108,7 @@ class ActiveAuthStage(Stage):
                 data = fs.read_json(self.ACCOUNTS_FILE)
             except Exception: pass
         data[host] = credentials
-        fs.write_json(self.ACCOUNTS_FILE, data)
+        fs.write_json(self.ACCOUNTS_FILE, data, redacted=False)
 
     async def _extract_form_context(self, context: PipelineContext, client: AsyncHTTPClient, url: str) -> Tuple[Dict[str, str], str]:
         tokens = {}
@@ -300,7 +300,7 @@ class ActiveAuthStage(Stage):
                 except Exception: pass
 
             if resp.status < 400:
-                cookies = {c.name: c.value for c in resp.cookies}
+                cookies = resp.cookies
                 if cookies or token_data:
                     host = urlparse(action).hostname or "unknown"
                     self._save_session(context, host, action, cookies, token_data, credentials)
@@ -342,6 +342,6 @@ class ActiveAuthStage(Stage):
         if email: sessions = [s for s in sessions if s.get("credentials", {}).get("email") != email]
             
         sessions.append(new_auth)
-        fs.write_json(artifact_path, sessions)
+        fs.write_json(artifact_path, sessions, redacted=False)
         context.logger.info("Captured and added session for %s (Total: %d)", host, len(sessions))
         context.emit_signal("auth_session", "host", host, confidence=1.0, source=self.name, evidence={"session_count": len(sessions)})

@@ -96,7 +96,7 @@ class ApiSchemaProbeStage(Stage):
                     break
                 if not context.url_allowed(spec_url):
                     continue
-                if limiter and not limiter.wait_for_slot(spec_url, timeout=timeout):
+                if limiter and not await limiter.wait_for_slot(spec_url, timeout=timeout):
                     continue
                 
                 headers = context.auth_headers({"User-Agent": "recon-cli api-schema"})
@@ -219,7 +219,7 @@ class ApiSchemaProbeStage(Stage):
                         probe_mode = "safe-write"
                         mutating_probed += 1
 
-                    if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+                    if limiter and not await limiter.wait_for_slot(url, timeout=timeout):
                         continue
                     probed += 1
                     

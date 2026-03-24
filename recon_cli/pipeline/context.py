@@ -48,6 +48,7 @@ class PipelineContext:
     _host_blocks: Dict[str, str] = field(init=False, default_factory=dict)
     _host_adaptive_jitter: Dict[str, float] = field(init=False, default_factory=dict)
     _host_force_proxy: Set[str] = field(init=False, default_factory=set)
+    _any_stage_failed: bool = field(init=False, default=False)
     _auth_manager: object = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
     _global_limiter: Optional[object] = field(init=False, default=None)
@@ -66,34 +67,52 @@ class PipelineContext:
         self.trace_recorder = current_trace_recorder()
         self.event_bus = PipelineEventBus()
         
-        # Initialize Scope Manager
+        # 1. Initialize Runtime Config FIRST (critical for overrides)
+        if self.record is not None:
+            if self.manager is None:
+                self.manager = JobManager()
+            spec = self.record.spec
+            overrides = getattr(spec, "runtime_overrides", {}) or {}
+            base_config = config.RuntimeConfig()
+            if getattr(spec, "insecure", False):
+                overrides = {**overrides, "verify_tls": False}
+            if overrides:
+                base_config = base_config.clone(**overrides)
+            self.runtime_config = base_config
+            self._cache_path = self.record.paths.root / "cache.json"
+            self._stop_request_path = self.record.paths.root / "stop.request"
+        else:
+            self._simple_mode = True
+            if self.job_id is None:
+                self.job_id = "job"
+            if self.work_dir is not None and self.results_file is None:
+                self.results_file = self.work_dir / "results.jsonl"
+            base_dir = self.work_dir or Path.cwd()
+            self._cache_path = base_dir / "cache.json"
+            self._stop_request_path = None
+            if not hasattr(self, "runtime_config") or self.runtime_config is None:
+                self.runtime_config = config.RuntimeConfig()
+
+        # 2. Initialize Scope Manager
         if self.record and self.record.spec.scope_file:
             self.scope_manager = ScopeManager.from_file(Path(self.record.spec.scope_file))
         else:
             self.scope_manager = ScopeManager()
 
-        # Initialize Stealth Manager
+        # 3. Initialize Stealth Manager (now uses correct runtime_config)
         proxies = getattr(self.runtime_config, "proxies", []) or []
         stealth_cfg = StealthConfig(
             proxies=list(proxies) if isinstance(proxies, list) else [],
             jitter_min=float(getattr(self.runtime_config, "stealth_jitter_min", 0.1)),
-            jitter_max=float(getattr(self.runtime_config, "stealth_jitter_max", 0.0)) # Default 0 (disabled)
+            jitter_max=float(getattr(self.runtime_config, "stealth_jitter_max", 0.0))
         )
         self.stealth_manager = StealthManager(stealth_cfg)
 
-        # Initialize Global Rate Limiter
+        # 4. Initialize Global Rate Limiter
         from recon_cli.utils.rate_limiter import RateLimitConfig, RateLimiter
 
-        global_rps = float(
-            getattr(self.runtime_config, "global_rps", 50.0)
-            if hasattr(self, "runtime_config")
-            else 50.0
-        )
-        global_per_host = float(
-            getattr(self.runtime_config, "global_per_host_rps", 10.0)
-            if hasattr(self, "runtime_config")
-            else 10.0
-        )
+        global_rps = float(getattr(self.runtime_config, "global_rps", 50.0))
+        global_per_host = float(getattr(self.runtime_config, "global_per_host_rps", 10.0))
         self._global_limiter = RateLimiter(
             RateLimitConfig(
                 requests_per_second=global_rps,
@@ -103,27 +122,9 @@ class PipelineContext:
         )
 
         if self.record is None:
-            self._simple_mode = True
-            if self.job_id is None:
-                self.job_id = "job"
-            if self.work_dir is not None and self.results_file is None:
-                self.results_file = self.work_dir / "results.jsonl"
-            base_dir = self.work_dir or Path.cwd()
-            self._cache_path = base_dir / "cache.json"
-            self._stop_request_path = None
             return
-        if self.manager is None:
-            self.manager = JobManager()
-        spec = self.record.spec
-        overrides = getattr(spec, "runtime_overrides", {}) or {}
-        base_config = config.RuntimeConfig()
-        if getattr(spec, "insecure", False):
-            overrides = {**overrides, "verify_tls": False}
-        if overrides:
-            base_config = base_config.clone(**overrides)
-        self.runtime_config = base_config
-        self._cache_path = self.record.paths.root / "cache.json"
-        self._stop_request_path = self.record.paths.root / "stop.request"
+
+        # 5. Rest of initialization
         raw_cache = fs.read_json(self._cache_path, default={})
         self._delta_cache = {}
         if isinstance(raw_cache, dict):
@@ -659,7 +660,18 @@ class PipelineContext:
         self.record.metadata.mark_started()
         self.manager.update_metadata(self.record)
 
+    def mark_stage_failed(self) -> None:
+        self._any_stage_failed = True
+
     def mark_finished(self, status: str = "finished") -> None:
+        if self._any_stage_failed and status == "finished":
+             # We still mark it as finished, but we could use a specific error field
+             # for partial failure, or change status to 'partial_success' if the user allows.
+             # For now, let's keep status='finished' but ensure the record has the error message
+             # set if none exists.
+             if not self.record.metadata.error:
+                 self.record.metadata.error = "Scan completed with partial failures in some stages"
+        
         self.record.metadata.mark_finished(status=status)
         self.record.metadata.attempts = self.stage_attempts
         self.manager.update_metadata(self.record)

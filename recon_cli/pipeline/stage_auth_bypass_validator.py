@@ -136,7 +136,15 @@ class AuthBypassValidatorStage(Stage):
                 if finding is None and enable_boundary and len(tokens) >= 2 and self._is_sensitive_target(url):
                     auth_profiles = {}
                     for label, token in tokens:
-                        resp = await self._fetch(client, context, "GET", url, headers={"User-Agent": "recon-cli auth-bypass-validator", "Authorization": token})
+                        headers = {"User-Agent": "recon-cli auth-bypass-validator"}
+                        if token.startswith("Bearer ") or token.startswith("Basic "):
+                            headers["Authorization"] = token
+                        elif "=" in token: # Likely cookies
+                            headers["Cookie"] = token
+                        else:
+                            headers["Authorization"] = token
+                        
+                        resp = await self._fetch(client, context, "GET", url, headers=headers)
                         attempted += 1
                         if resp: auth_profiles[label] = resp
                     

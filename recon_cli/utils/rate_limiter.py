@@ -48,12 +48,13 @@ class TokenBucket:
         self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
         self.last_update = now
 
-    def acquire(self, tokens: float = 1.0, timeout: Optional[float] = None) -> bool:
-        """الحصول على tokens للسماح بالطلب"""
+    async def acquire(self, tokens: float = 1.0, timeout: Optional[float] = None) -> bool:
+        """الحصول على tokens للسماح بالطلب (Async)"""
+        import asyncio
         deadline = time.monotonic() + timeout if timeout else None
 
-        with self.lock:
-            while True:
+        while True:
+            with self.lock:
                 self._refill()
 
                 if self.tokens >= tokens:
@@ -68,8 +69,8 @@ class TokenBucket:
                 if deadline:
                     wait_time = min(wait_time, deadline - time.monotonic())
 
-                if wait_time > 0:
-                    time.sleep(min(wait_time, 0.1))  # انتظار قصير
+            if wait_time > 0:
+                await asyncio.sleep(min(wait_time, 0.1))  # انتظار قصير (Async)
 
     def try_acquire(self, tokens: float = 1.0) -> bool:
         """محاولة الحصول على tokens بدون انتظار"""
@@ -161,19 +162,20 @@ class RateLimiter:
         if self.parent:
             self.parent.set_cooldown(host, duration)
 
-    def wait_for_slot(self, url: str, timeout: Optional[float] = 30.0) -> bool:
+    async def wait_for_slot(self, url: str, timeout: Optional[float] = 30.0) -> bool:
         """
-        انتظار حتى يُسمح بالطلب
+        انتظار حتى يُسمح بالطلب (Async)
 
         Returns:
             True إذا تم الحصول على إذن، False إذا انتهى الوقت
         """
+        import asyncio
         host = self._extract_host(url)
         start_time = time.monotonic()
 
         # 1. التنسيق مع الأب أولاً (إذا وجد)
         if self.parent:
-            if not self.parent.wait_for_slot(url, timeout=timeout):
+            if not await self.parent.wait_for_slot(url, timeout=timeout):
                 return False
             # تحديث الوقت المتبقي
             if timeout:
@@ -186,15 +188,15 @@ class RateLimiter:
             if remaining > 0:
                 if timeout and remaining > timeout:
                     return False
-                time.sleep(remaining)
+                await asyncio.sleep(remaining)
 
         # 3. الحصول على إذن عام من الـ bucket الخاص بنا
-        if not self._global_bucket.acquire(timeout=timeout):
+        if not await self._global_bucket.acquire(timeout=timeout):
             return False
 
         # 4. الحصول على إذن للمضيف من الـ bucket الخاص بنا
         host_bucket = self._get_host_bucket(host)
-        allowed = host_bucket.acquire(timeout=timeout)
+        allowed = await host_bucket.acquire(timeout=timeout)
         if allowed:
             self._stats["total_requests"] += 1
         return allowed
@@ -235,40 +237,6 @@ class RateLimiter:
             }
         )
         return stats  # type: ignore[return-value]
-
-
-# Decorator للاستخدام السهل
-def rate_limited(limiter: RateLimiter):
-    """
-    Decorator لتطبيق Rate Limiting على دوال
-
-    مثال:
-        limiter = RateLimiter()
-
-        @rate_limited(limiter)
-        def fetch_url(url):
-            return requests.get(url)
-    """
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(url, *args, **kwargs):
-            if not limiter.wait_for_slot(url):
-                raise TimeoutError(f"Rate limit timeout for {url}")
-
-            try:
-                result = func(url, *args, **kwargs)
-                # استخراج status code إذا كان response
-                if hasattr(result, "status_code"):
-                    limiter.on_response(url, result.status_code)
-                return result
-            except Exception:
-                limiter.on_error(url)
-                raise
-
-        return wrapper
-
-    return decorator
 
 
 # Async version

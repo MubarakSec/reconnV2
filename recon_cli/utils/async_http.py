@@ -89,6 +89,7 @@ class HTTPResponse:
     headers: Dict[str, str]
     body: str
     elapsed: float
+    cookies: Dict[str, str] = field(default_factory=dict)
     error: Optional[str] = None
 
     @property
@@ -106,6 +107,7 @@ class HTTPResponse:
             "url": self.url,
             "status": self.status,
             "headers": self.headers,
+            "cookies": self.cookies,
             "body_length": len(self.body),
             "elapsed": self.elapsed,
             "error": self.error,
@@ -194,7 +196,16 @@ class AsyncHTTPClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._host_semaphores: Dict[str, asyncio.Semaphore] = {}
-        self._rate_limiter = RateLimiter(self.config.requests_per_second)
+        
+        if self.context:
+            self._rate_limiter = self.context.get_rate_limiter(
+                "http_client",
+                rps=self.config.requests_per_second,
+                per_host=self.config.max_per_host
+            )
+        else:
+            self._rate_limiter = RateLimiter(self.config.requests_per_second)
+
         self._stats = {
             "requests": 0,
             "successes": 0,
@@ -275,9 +286,16 @@ class AsyncHTTPClient:
 
         async with self._semaphore:
             async with host_sem:
-                await self._rate_limiter.acquire(host)
+                if hasattr(self._rate_limiter, "wait_for_slot"):
+                    await self._rate_limiter.wait_for_slot(url)
+                else:
+                    await self._rate_limiter.acquire(host)
+
                 resp = await self._request_with_retry(method=method, url=url, headers=headers, follow_redirects=follow_redirects, **kwargs)
                 
+                if hasattr(self._rate_limiter, "on_response"):
+                    self._rate_limiter.on_response(url, resp.status)
+
                 # ELITE: Handle Session Expiry (401)
                 if resp.status == 401 and self.context and self.context.auth_enabled():
                     self._stats["auth_401_count"] += 1
@@ -303,6 +321,8 @@ class AsyncHTTPClient:
                 return await self._do_request(method=method, url=url, headers=headers, follow_redirects=follow_redirects, **kwargs)
             except Exception as e:
                 last_error = e
+                if hasattr(self._rate_limiter, "on_error"):
+                    self._rate_limiter.on_error(url)
                 self._stats["retries"] += 1
                 if attempt < self.config.max_retries:
                     delay = self.config.retry_delay * (self.config.retry_multiplier**attempt)
@@ -322,7 +342,15 @@ class AsyncHTTPClient:
                 elapsed = time.monotonic() - start_time
                 self._stats["total_time"] += elapsed
                 self._stats["successes"] += 1
-                return HTTPResponse(url=str(response.url), status=response.status, headers=dict(response.headers), body=body, elapsed=elapsed)
+                cookies = {k: str(v.value) for k, v in response.cookies.items()}
+                return HTTPResponse(
+                    url=str(response.url),
+                    status=response.status,
+                    headers=dict(response.headers),
+                    body=body,
+                    elapsed=elapsed,
+                    cookies=cookies,
+                )
         except asyncio.TimeoutError: raise Exception(f"Timeout after {self.config.total_timeout}s")
         except Exception as e:
             if AIOHTTP_AVAILABLE and isinstance(e, aiohttp.ClientError): raise Exception(f"Client error: {e}")

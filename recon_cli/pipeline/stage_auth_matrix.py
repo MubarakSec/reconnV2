@@ -303,7 +303,7 @@ class AuthMatrixStage(Stage):
             
         if token:
             headers["Authorization"] = token
-        if limiter and not limiter.wait_for_slot(url, timeout=timeout):
+        if limiter and not await limiter.wait_for_slot(url, timeout=timeout):
             return None
         try:
             resp = await client.get(

@@ -383,7 +383,7 @@ class JobManager:
                 }
                 sync_job_to_db(job_id, job_data)
             except Exception as e:
-                self.logger.debug("Failed to sync job state to SQLite DB: %s", e)
+                logger.debug("Failed to sync job state to SQLite DB: %s", e)
 
     def _apply_permissions(self, paths: JobPaths) -> None:
         try:

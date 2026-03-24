@@ -1,8 +1,11 @@
 import json
 import sys
 import types
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
@@ -25,7 +28,7 @@ class FakeLimiter:
         self.response_calls = 0
         self.error_calls = 0
 
-    def wait_for_slot(self, _url, timeout=None):
+    async def wait_for_slot(self, _url, timeout=None):
         self.wait_calls += 1
         return True
 
@@ -71,7 +74,8 @@ def _write_url(path: Path, url: str, status_code: int = 200):
 # Test removed as APIReconStage now uses AsyncHTTPClient's built-in rate limiting
 
 
-def test_rate_limiter_used_in_waf_probe(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_rate_limiter_used_in_waf_probe(monkeypatch, tmp_path: Path):
     record = make_record(tmp_path, {"enable_waf_probe": True})
     _write_url(record.paths.results_jsonl, "http://example.com/", status_code=403)
 
@@ -114,7 +118,7 @@ def test_rate_limiter_used_in_waf_probe(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(context, "get_rate_limiter", lambda *a, **k: limiter)
 
     stage = WafProbeStage()
-    stage.run(context)
+    await stage.run_async(context)
 
     assert limiter.wait_calls > 0
     assert limiter.response_calls > 0
