@@ -10,11 +10,12 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 from recon_cli.utils.ws_fuzzer import WSFuzzer
+from recon_cli.utils.grpc_fuzzer import GRPCFuzzer
 
 
 class WsGrpcDiscoveryStage(Stage):
     """
-    WebSocket & gRPC Discovery and Basic Fuzzing Stage.
+    WebSocket & gRPC Discovery, Reflection Probe and Basic Fuzzing.
     Identifies endpoints and performs initial message-level security probes.
     """
     name = "ws_grpc_discovery"
@@ -45,19 +46,17 @@ class WsGrpcDiscoveryStage(Stage):
         )
 
         fuzzer = WSFuzzer(timeout=float(timeout), verify_tls=verify_tls)
+        grpc_fuzzer = GRPCFuzzer(timeout=float(timeout), verify_tls=verify_tls)
 
         async with AsyncHTTPClient(config, context=context) as client:
             for url in ws_candidates:
                 if not context.url_allowed(url): continue
                 ws_found += 1
                 
-                # Convert ws/wss to http/https for AsyncHTTPClient probe
                 probe_url = url.replace("wss://", "https://").replace("ws://", "http://")
-                
                 headers = context.auth_headers({
                     "User-Agent": "recon-cli ws-grpc",
-                    "Connection": "Upgrade",
-                    "Upgrade": "websocket",
+                    "Connection": "Upgrade", "Upgrade": "websocket",
                     "Sec-WebSocket-Version": "13",
                     "Sec-WebSocket-Key": base64.b64encode(os.urandom(16)).decode("ascii"),
                 })
@@ -67,46 +66,46 @@ class WsGrpcDiscoveryStage(Stage):
                     is_detected = resp.status == 101
                     tags = ["service:ws"]
                     if is_detected:
-                        ws_confirmed += 1
-                        tags.append("ws:confirmed")
-                        # PERFORM FUZZING/TAMPERING on confirmed WS
+                        ws_confirmed += 1; tags.append("ws:confirmed")
                         await self._perform_ws_fuzzing(context, fuzzer, url, headers)
-                    else:
-                        tags.append("ws:candidate")
+                    else: tags.append("ws:candidate")
                     
-                    context.results.append({
-                        "type": "url", "source": self.name, "url": url, 
-                        "hostname": urlparse(url).hostname, "tags": tags, 
-                        "score": 30 if is_detected else 15
-                    })
-                    context.emit_signal(
-                        "ws_detected" if is_detected else "ws_candidate", 
-                        "url", url, confidence=0.5, source=self.name, 
-                        tags=tags, evidence={"status": resp.status}
-                    )
+                    context.results.append({"type": "url", "source": self.name, "url": url, "hostname": urlparse(url).hostname, "tags": tags, "score": 30 if is_detected else 15})
+                    context.emit_signal("ws_detected" if is_detected else "ws_candidate", "url", url, confidence=0.5, source=self.name, tags=tags, evidence={"status": resp.status})
                 except Exception: continue
 
+        # gRPC Processing
         grpc_hosts.update(self._detect_grpc_from_urls(context))
         grpc_hosts.update(self._detect_grpc_from_services(context))
+        
         for h in grpc_hosts:
             context.emit_signal("grpc_detected", "host", h, confidence=0.5, source=self.name, tags=["service:grpc"])
+            # Probing gRPC reflection
+            for port in self.GRPC_PORTS:
+                is_vuln, reason, _ = await grpc_fuzzer.check_reflection(h, port)
+                if is_vuln:
+                    context.logger.warning("🚨 gRPC Reflection Enabled on %s:%d", h, port)
+                    context.emit_signal("grpc_reflection_enabled", "host", h, confidence=0.8, source=self.name, tags=["grpc", "misconfiguration"], evidence={"port": port, "reason": reason})
+                    context.results.append({
+                        "type": "finding", "finding_type": "grpc_reflection",
+                        "hostname": h, "description": f"gRPC Reflection is enabled on port {port}. This allows enumeration of all services and methods.",
+                        "severity": "medium", "tags": ["grpc", "recon"]
+                    })
+                
+                # Basic method fuzzing
+                methods = await grpc_fuzzer.fuzz_methods(h, port, [])
+                for m in methods:
+                    context.emit_signal("grpc_method_exposed", "host", h, confidence=0.6, source=self.name, tags=["grpc", "leak"], evidence={"port": port, "method": m})
+
+        stats = context.record.metadata.stats.setdefault("ws_grpc", {})
+        stats.update({"ws_candidates": ws_found, "ws_confirmed": ws_confirmed, "grpc_hosts": len(grpc_hosts)})
+        context.manager.update_metadata(context.record)
 
     async def _perform_ws_fuzzing(self, context: PipelineContext, fuzzer: WSFuzzer, url: str, headers: Dict[str, str]):
-        """Runs basic message-level fuzzing on detected WebSocket."""
         findings = await fuzzer.fuzz_endpoint(url, headers)
         for f in findings:
-            context.emit_signal(
-                f["type"], "url", url,
-                confidence=f["confidence"],
-                source=self.name,
-                tags=["websocket", "vulnerability"],
-                evidence=f["evidence"]
-            )
-            context.results.append({
-                "type": "finding", "finding_type": f["type"],
-                "url": url, "description": f["description"],
-                "severity": "medium", "tags": ["websocket", "security"]
-            })
+            context.emit_signal(f["type"], "url", url, confidence=f["confidence"], source=self.name, tags=["websocket", "vulnerability"], evidence=f["evidence"])
+            context.results.append({"type": "finding", "finding_type": f["type"], "url": url, "description": f["description"], "severity": "medium", "tags": ["websocket", "security"]})
 
     def _collect_ws_candidates(self, context: PipelineContext) -> List[str]:
         urls = []
