@@ -26,6 +26,9 @@ recon_cli.egg-info/
 /archive/
 /data/projects.json
 /data/users.db
+/data/recon.db
+/data/*.tmp
+/data/accounts.json
 
 # Tools & Logs
 .coverage
