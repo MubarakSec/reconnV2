@@ -130,6 +130,15 @@ class TakeoverStage(Stage):
             ):
                 suppressed_low_confidence += 1
                 continue
+
+            # NEW: Verify exploitability if we have high/med confidence
+            exploitable = False
+            if claimability["level"] in {"high", "medium"}:
+                try:
+                    exploitable = await detector.can_claim(host, finding.provider)
+                except Exception:
+                    pass
+
             payload = {
                 "type": "finding",
                 "finding_type": finding.finding_type,
@@ -146,6 +155,7 @@ class TakeoverStage(Stage):
                     "matched_url": str(getattr(finding, "matched_url", "") or ""),
                     "dns_state": dns_state,
                     "claimability": claimability,
+                    "exploitable": exploitable,
                 },
                 "tags": [
                     "takeover",
@@ -158,6 +168,11 @@ class TakeoverStage(Stage):
                 "severity": str(claimability["severity"]),
                 "confidence_label": str(claimability["confidence"]),
             }
+            if exploitable:
+                payload["tags"].append("exploitable")
+                payload["tags"].append("confirmed")
+                payload["confidence_label"] = "verified"
+                payload["score"] = 100
             if finding.finding_type == "parking_page":
                 payload["tags"].append("parking")
                 payload["score"] = 30

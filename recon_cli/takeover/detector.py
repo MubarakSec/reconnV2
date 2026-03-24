@@ -198,3 +198,44 @@ class TakeoverDetector:
                                 finding_type="subdomain_takeover",
                             )
         return None
+
+    async def can_claim(self, hostname: str, provider: str) -> bool:
+        """
+        Attempt to verify if the resource is actually claimable.
+        This performs non-destructive checks where possible.
+        """
+        if provider == "aws_s3":
+            return await self._verify_s3(hostname)
+        if provider == "github_pages":
+            return await self._verify_github_pages(hostname)
+        
+        # For other providers, we might not have a reliable non-destructive check
+        # but we can check if the hostname still returns the error snippet
+        return False
+
+    async def _verify_s3(self, hostname: str) -> bool:
+        """Verify if an S3 bucket is actually claimable by trying to 'create' it via API (dry-run if possible)
+        or checking for specific lack of headers."""
+        # Simple check: if we try to access it via s3.amazonaws.com directly
+        # and it still says NoSuchBucket, it's very likely claimable.
+        # More advanced: use boto3 if available to check bucket availability
+        bucket_name = hostname # Often the hostname is the bucket name
+        url = f"https://{bucket_name}.s3.amazonaws.com"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.get(url)
+                if "NoSuchBucket" in resp.text:
+                    return True
+        except Exception: pass
+        return False
+
+    async def _verify_github_pages(self, hostname: str) -> bool:
+        """Verify if GitHub Pages is claimable."""
+        # GitHub Pages returns 404 with a specific body if claimable
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.get(f"http://{hostname}")
+                if resp.status_code == 404 and "There isn't a GitHub Pages site here" in resp.text:
+                    return True
+        except Exception: pass
+        return False

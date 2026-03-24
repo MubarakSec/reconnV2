@@ -155,3 +155,60 @@ def test_takeover_stage_suppresses_low_confidence_fingerprints(
     stats = record.metadata.stats.get("takeover", {})
     assert stats.get("findings") == 0
     assert stats.get("suppressed_low_confidence") == 1
+
+
+def test_takeover_stage_verifies_exploitability(monkeypatch, tmp_path: Path):
+    from recon_cli.pipeline import stage_takeover as stage_mod
+
+    record = _make_record(
+        tmp_path,
+        {
+            "enable_takeover": True,
+            "takeover_max_hosts": 5,
+            "takeover_timeout": 1,
+            "takeover_dns_timeout": 1,
+            "takeover_require_cname": True,
+        },
+    )
+    _write_host(record.paths.results_jsonl, "confirmed.example.com")
+    context = PipelineContext(record=record, manager=DummyManager())
+    stage = TakeoverStage()
+
+    monkeypatch.setattr(stage_mod, "dns", object())
+    monkeypatch.setattr(
+        stage,
+        "_resolve_cname_chain",
+        lambda _host, _timeout: ["bucket.s3.amazonaws.com"],
+    )
+    monkeypatch.setattr(stage, "_target_has_address", lambda _host, _timeout: False)
+
+    async def fake_check(_self, hostname, providers=None):
+        return TakeoverFinding(
+            hostname=hostname,
+            provider="aws_s3",
+            evidence="NoSuchBucket",
+            status_code=404,
+            matched_url=f"https://{hostname}",
+        )
+
+    async def fake_can_claim(_self, hostname, provider):
+        assert provider == "aws_s3"
+        return True
+
+    monkeypatch.setattr(stage_mod.TakeoverDetector, "check_host", fake_check)
+    monkeypatch.setattr(stage_mod.TakeoverDetector, "can_claim", fake_can_claim)
+    monkeypatch.setattr(stage, "_has_wildcard_dns", lambda *_a, **_k: False)
+
+    stage.run(context)
+
+    findings = [
+        item
+        for item in read_jsonl(record.paths.results_jsonl)
+        if item.get("source") == "takeover-check"
+    ]
+    assert len(findings) == 1
+    assert findings[0].get("confidence_label") == "verified"
+    assert findings[0].get("score") == 100
+    assert "exploitable" in findings[0].get("tags")
+    assert "confirmed" in findings[0].get("tags")
+    assert findings[0]["details"]["exploitable"] is True
