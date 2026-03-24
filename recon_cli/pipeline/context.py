@@ -14,11 +14,59 @@ import re
 
 from recon_cli import config
 from recon_cli.jobs.manager import JobManager, JobRecord
+from recon_cli.jobs.models import IdentityRecord
 from recon_cli.jobs.results import ResultsTracker
 from recon_cli.tools.executor import CommandExecutor, CommandCache
 from recon_cli.utils import fs, time as time_utils, validation
+from recon_cli.utils.auth import UnifiedAuthManager
 from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.logging import build_file_logger, silence_logger
+
+
+class TargetGraph:
+    """
+    A persistent, queryable model of the target attack surface.
+    Used for planning and cross-stage memory.
+    """
+    def __init__(self):
+        from recon_cli.correlation.graph import Graph
+        self._graph = Graph()
+        self._lock = threading.Lock()
+
+    def add_entity(self, entity_type: str, entity_id: str, **attrs) -> None:
+        with self._lock:
+            self._graph.add_node(entity_type, entity_id, **attrs)
+
+    def add_relation(self, src_type: str, src_id: str, label: str, dst_type: str, dst_id: str, **attrs) -> None:
+        with self._lock:
+            self._graph.add_edge(src_type, src_id, label, dst_type, dst_id, **attrs)
+
+    def get_related(self, entity_type: str, entity_id: str, relation_label: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Simplified query logic for now
+        results = []
+        key = (entity_type, entity_id)
+        with self._lock:
+            if key in self._graph._adjacency:
+                for related_key in self._graph._adjacency[key]:
+                    # Find the edge to check label
+                    for edge in self._graph._edges.values():
+                        if (edge.source == key and edge.target == related_key) or \
+                           (edge.source == related_key and edge.target == key):
+                            if relation_label and edge.label != relation_label:
+                                continue
+                            
+                            node = self._graph._nodes[related_key]
+                            results.append({
+                                "type": node.type,
+                                "id": node.id,
+                                "attrs": node.attrs,
+                                "relation": edge.label
+                            })
+        return results
+
+    def to_dict(self) -> Dict[str, Any]:
+        with self._lock:
+            return self._graph.to_dict()
 
 
 @dataclass
@@ -50,7 +98,8 @@ class PipelineContext:
     _host_adaptive_jitter: Dict[str, float] = field(init=False, default_factory=dict)
     _host_force_proxy: Set[str] = field(init=False, default_factory=set)
     _any_stage_failed: bool = field(init=False, default=False)
-    _auth_manager: object = field(init=False, default=None)
+    _auth_manager: UnifiedAuthManager = field(init=False)
+    target_graph: TargetGraph = field(init=False)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
     _global_limiter: Optional[object] = field(init=False, default=None)
     event_bus: "PipelineEventBus" = field(init=False)
@@ -123,10 +172,16 @@ class PipelineContext:
             )
         )
 
+        # 5. Initialize Unified Auth Manager
+        self._auth_manager = UnifiedAuthManager(self)
+
+        # 6. Initialize Target Graph
+        self.target_graph = TargetGraph()
+
         if self.record is None:
             return
 
-        # 5. Rest of initialization
+        # 7. Rest of initialization
         raw_cache = fs.read_json(self._cache_path, default={})
         self._delta_cache = {}
         if isinstance(raw_cache, dict):
@@ -653,6 +708,14 @@ class PipelineContext:
     def checkpoint(self, stage: str) -> None:
         self.record.metadata.checkpoint(stage)
         self.manager.update_metadata(self.record)
+
+    def auth_headers(self, base: Optional[Dict[str, str]] = None, identity_id: Optional[str] = None) -> Dict[str, str]:
+        """Get authentication headers for a specific identity or default."""
+        return self._auth_manager.get_auth_headers(identity_id=identity_id, base=base)
+
+    def auth_cookie_header(self, identity_id: Optional[str] = None) -> Optional[str]:
+        """Get Cookie header for a specific identity or default."""
+        return self._auth_manager.get_cookie_header(identity_id=identity_id)
 
     def mark_error(self, message: str) -> None:
         self.record.metadata.record_error(message)

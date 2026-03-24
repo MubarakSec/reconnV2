@@ -271,18 +271,33 @@ class AsyncHTTPClient:
             self._host_semaphores[host] = asyncio.Semaphore(self.config.max_per_host)
         return self._host_semaphores[host]
 
-    async def get(self, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True) -> HTTPResponse:
-        return await self._request("GET", url, headers=headers, follow_redirects=follow_redirects)
+    async def get(self, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, identity_id: Optional[str] = None) -> HTTPResponse:
+        return await self._request("GET", url, headers=headers, follow_redirects=follow_redirects, identity_id=identity_id)
 
-    async def post(self, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, **kwargs: Any) -> HTTPResponse:
-        return await self._request("POST", url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+    async def post(self, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, identity_id: Optional[str] = None, **kwargs: Any) -> HTTPResponse:
+        return await self._request("POST", url, headers=headers, follow_redirects=follow_redirects, identity_id=identity_id, **kwargs)
 
-    async def _request(self, method: str, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, **kwargs: Any) -> HTTPResponse:
+    async def _request(self, method: str, url: str, headers: Optional[Dict[str, str]] = None, follow_redirects: bool = True, identity_id: Optional[str] = None, **kwargs: Any) -> HTTPResponse:
         if not self._session:
             await self.start()
 
         host = self._get_host(url)
         host_sem = self._get_host_semaphore(host)
+
+        # Merge headers from identity if provided
+        final_headers = dict(headers or {})
+        if self.context:
+            # If identity_id is provided, get its headers.
+            # If not provided, context.auth_headers() will fall back to legacy/default.
+            final_headers = self.context.auth_headers(base=final_headers, identity_id=identity_id)
+            
+            # Also handle cookies if any
+            cookie_header = self.context.auth_cookie_header(identity_id=identity_id)
+            if cookie_header:
+                if "Cookie" in final_headers:
+                    final_headers["Cookie"] = f"{final_headers['Cookie']}; {cookie_header}"
+                else:
+                    final_headers["Cookie"] = cookie_header
 
         async with self._semaphore:
             async with host_sem:
@@ -291,7 +306,7 @@ class AsyncHTTPClient:
                 else:
                     await self._rate_limiter.acquire(host)
 
-                resp = await self._request_with_retry(method=method, url=url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+                resp = await self._request_with_retry(method=method, url=url, headers=final_headers, follow_redirects=follow_redirects, **kwargs)
                 
                 if hasattr(self._rate_limiter, "on_response"):
                     self._rate_limiter.on_response(url, resp.status)
@@ -307,12 +322,24 @@ class AsyncHTTPClient:
                         self._stats["reauth_success"] += 1
                         logger.info("Auto re-auth SUCCESS. Retrying original request...")
                         # Refresh headers with new token
-                        new_headers = self.context.auth_headers(headers)
+                        new_headers = self.context.auth_headers(headers, identity_id=identity_id)
                         return await self._request_with_retry(method=method, url=url, headers=new_headers, follow_redirects=follow_redirects, **kwargs)
                     else:
                         logger.error("Auto re-auth FAILED for %s", url)
                 
                 return resp
+
+    async def get_by_role(self, url: str, role: str, headers: Optional[Dict[str, str]] = None) -> List[HTTPResponse]:
+        """Fetch a URL using all identities belonging to a specific role."""
+        if not self.context:
+            return []
+        
+        identities = self.context._auth_manager.get_identities_by_role(role)
+        if not identities:
+            return []
+            
+        tasks = [self.get(url, headers=headers, identity_id=i.identity_id) for i in identities]
+        return await asyncio.gather(*tasks)
 
     async def _request_with_retry(self, method: str, url: str, headers: Optional[Dict[str, str]], follow_redirects: bool, **kwargs: Any) -> HTTPResponse:
         last_error: Optional[Exception] = None

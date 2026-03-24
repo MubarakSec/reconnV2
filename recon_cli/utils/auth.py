@@ -449,6 +449,153 @@ class AuthSessionManager:
             pass
 
 
+class UnifiedAuthManager:
+    """
+    Manages multiple authentication identities for a single job.
+    Supports cookies, bearer tokens, basic auth, and role-based replay.
+    """
+
+    def __init__(self, context: "PipelineContext") -> None:
+        from typing import TYPE_CHECKING
+        if TYPE_CHECKING:
+            from recon_cli.pipeline.context import PipelineContext
+        
+        self.context = context
+        self._identities: Dict[str, IdentityRecord] = {}
+        self._legacy_manager: Optional[AuthSessionManager] = None
+        
+        # Load existing identities from job record
+        if context.record:
+            from recon_cli.jobs.models import IdentityRecord
+            for identity in context.record.metadata.identities:
+                self._identities[identity.identity_id] = identity
+        
+        # Build legacy manager for backward compatibility if configured
+        self._legacy_manager = build_auth_manager(context.runtime_config, 
+                                                logger=context.logger,
+                                                record=context.record,
+                                                manager=context.manager)
+
+    def register_identity(self, 
+                          identity_id: str, 
+                          role: str, 
+                          auth_material: Dict[str, Any], 
+                          source: str = "active_auth",
+                          host: Optional[str] = None) -> IdentityRecord:
+        """Register a new identity or update an existing one."""
+        from recon_cli.jobs.models import IdentityRecord
+        
+        identity = IdentityRecord(
+            identity_id=identity_id,
+            role=role,
+            auth_material=auth_material,
+            source=source,
+            host=host,
+            verified=True # Usually verified if coming from active_auth
+        )
+        self._identities[identity_id] = identity
+        
+        # Sync back to job metadata
+        if self.context.record:
+            # Update or append
+            found = False
+            for i, existing in enumerate(self.context.record.metadata.identities):
+                if existing.identity_id == identity_id:
+                    self.context.record.metadata.identities[i] = identity
+                    found = True
+                    break
+            if not found:
+                self.context.record.metadata.identities.append(identity)
+            
+            if self.context.manager:
+                self.context.manager.update_metadata(self.context.record)
+        
+        return identity
+
+    def get_identity(self, identity_id: str) -> Optional[IdentityRecord]:
+        return self._identities.get(identity_id)
+
+    def get_identities_by_role(self, role: str) -> List[IdentityRecord]:
+        return [i for i in self._identities.values() if i.role == role]
+
+    def get_all_identities(self) -> List[IdentityRecord]:
+        return list(self._identities.values())
+
+    async def verify_identity(self, identity_id: str) -> bool:
+        """Actively verify if an identity's session is still valid."""
+        identity = self.get_identity(identity_id)
+        if not identity:
+            return False
+            
+        # Basic verification: check a common profile endpoint
+        # In a real scenario, we might want to use a specific endpoint provided during registration
+        host = identity.host or self.context.record.spec.target if self.context.record else "unknown"
+        scheme = "https" if self.context.runtime_config.verify_tls else "http"
+        url = f"{scheme}://{host}/api/v1/me" # Default probe
+        
+        try:
+            from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
+            config = HTTPClientConfig(total_timeout=10.0, max_retries=0)
+            async with AsyncHTTPClient(config, context=self.context) as client:
+                resp = await client.get(url, identity_id=identity_id)
+                is_valid = resp.status == 200
+                
+                # Update identity status
+                identity.verified = is_valid
+                identity.last_seen = time_utils.iso_now()
+                
+                # If invalid and we have credentials, we could attempt re-login here
+                # But for now, we just mark it as unverified
+                
+                return is_valid
+        except Exception:
+            return False
+
+    def get_auth_headers(self, identity_id: Optional[str] = None, base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """Get headers for a specific identity, or fall back to legacy manager."""
+        headers = dict(base or {})
+        
+        if identity_id:
+            identity = self.get_identity(identity_id)
+            if identity:
+                material = identity.auth_material
+                if "headers" in material:
+                    headers.update(material["headers"])
+                if "bearer" in material:
+                    headers["Authorization"] = f"Bearer {material['bearer']}"
+                if "token" in material:
+                    headers["Authorization"] = f"Bearer {material['token']}"
+                if "basic_user" in material and "basic_pass" in material:
+                    token = f"{material['basic_user']}:{material['basic_pass']}".encode("utf-8")
+                    headers["Authorization"] = f"Basic {base64.b64encode(token).decode('ascii')}"
+                return headers
+
+        # Fallback to legacy
+        if self._legacy_manager:
+            return self._legacy_manager.prepare_headers(base)
+            
+        return headers
+
+    def get_cookie_header(self, identity_id: Optional[str] = None) -> Optional[str]:
+        """Get Cookie header string for a specific identity."""
+        if identity_id:
+            identity = self.get_identity(identity_id)
+            if identity:
+                cookies = identity.auth_material.get("cookies", {})
+                if cookies:
+                    return "; ".join(f"{k}={v}" for k, v in cookies.items())
+        
+        # Fallback to legacy
+        if self._legacy_manager:
+            return self._legacy_manager.cookie_header()
+            
+        return None
+
+    def close(self) -> None:
+        if self._legacy_manager:
+            self._legacy_manager.close()
+
+
 def build_auth_manager(
     runtime_config,
     *,

@@ -144,6 +144,44 @@ class JobSpec:
 
 
 @dataclass
+class IdentityRecord:
+    """Represents a set of authentication material (session, token, etc.)"""
+    identity_id: str
+    role: str  # e.g., 'anonymous', 'low-priv', 'admin', 'authenticated'
+    auth_material: Dict[str, Any]  # cookies, headers, bearer, etc.
+    source: str  # 'active_auth', 'manual', 'captured'
+    verified: bool = False
+    last_seen: str = field(default_factory=time_utils.iso_now)
+    reachable_surfaces: List[str] = field(default_factory=list)
+    host: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "identity_id": self.identity_id,
+            "role": self.role,
+            "auth_material": self.auth_material,
+            "source": self.source,
+            "verified": self.verified,
+            "last_seen": self.last_seen,
+            "reachable_surfaces": self.reachable_surfaces,
+            "host": self.host,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "IdentityRecord":
+        return cls(
+            identity_id=payload["identity_id"],
+            role=payload.get("role", "authenticated"),
+            auth_material=dict(payload.get("auth_material", {})),
+            source=payload.get("source", "manual"),
+            verified=bool(payload.get("verified", False)),
+            last_seen=payload.get("last_seen", time_utils.iso_now()),
+            reachable_surfaces=list(payload.get("reachable_surfaces", [])),
+            host=payload.get("host"),
+        )
+
+
+@dataclass
 class JobMetadata:
     job_id: str
     queued_at: str
@@ -156,6 +194,7 @@ class JobMetadata:
     stats: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
     attempts: Dict[str, int] = field(default_factory=dict)
+    identities: List[IdentityRecord] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -170,10 +209,14 @@ class JobMetadata:
             "stats": self.stats,
             "error": self.error,
             "attempts": self.attempts,
+            "identities": [i.to_dict() for i in self.identities],
         }
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "JobMetadata":
+        identities_raw = payload.get("identities", [])
+        identities = [IdentityRecord.from_dict(i) for i in identities_raw]
+        
         return cls(
             job_id=payload["job_id"],
             queued_at=payload["queued_at"],
@@ -186,6 +229,7 @@ class JobMetadata:
             stats=payload.get("stats", {}),
             error=payload.get("error"),
             attempts=payload.get("attempts", {}),
+            identities=identities,
         )
 
     def checkpoint(self, stage: str) -> None:

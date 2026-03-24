@@ -75,7 +75,7 @@ class ActiveAuthStage(Stage):
             for host, host_forms in forms_by_host.items():
                 if context.is_host_blocked(host): continue
 
-                credentials = self._get_existing_credentials(host)
+                credentials = self._get_existing_credentials(context, host)
                 
                 signup_forms = [f for f in host_forms if "surface:register" in f.get("tags", [])]
                 login_forms = [f for f in host_forms if "surface:login" in f.get("tags", [])]
@@ -84,7 +84,7 @@ class ActiveAuthStage(Stage):
                     for form in signup_forms[:1]:
                         credentials = await self._attempt_signup(context, client, form)
                         if credentials:
-                            self._save_credentials(host, credentials)
+                            self._save_credentials(context, host, credentials)
                             break
 
                 for form in login_forms[:2]:
@@ -92,7 +92,13 @@ class ActiveAuthStage(Stage):
                         await self._extract_identity(context, client, host, form.get("url"))
                         break
 
-    def _get_existing_credentials(self, host: str) -> Optional[Dict[str, str]]:
+    def _get_existing_credentials(self, context: PipelineContext, host: str) -> Optional[Dict[str, str]]:
+        # 1. Check current job identities first (Phase 1)
+        for identity in context._auth_manager.get_all_identities():
+            if identity.host == host and "credentials" in identity.auth_material:
+                return identity.auth_material["credentials"]
+
+        # 2. Fallback to legacy global file
         if os.path.exists(self.ACCOUNTS_FILE):
             try:
                 data = fs.read_json(self.ACCOUNTS_FILE)
@@ -100,7 +106,17 @@ class ActiveAuthStage(Stage):
             except Exception: pass
         return None
 
-    def _save_credentials(self, host: str, credentials: Dict[str, str]) -> None:
+    def _save_credentials(self, context: PipelineContext, host: str, credentials: Dict[str, str]) -> None:
+        # Register with UnifiedAuthManager (Phase 1)
+        identity_id = f"creds_{host}_{credentials.get('username', 'user')}"
+        context._auth_manager.register_identity(
+            identity_id=identity_id,
+            role="authenticated",
+            auth_material={"credentials": credentials},
+            host=host
+        )
+        
+        # Also save to legacy file
         os.makedirs("data", exist_ok=True)
         data = {}
         if os.path.exists(self.ACCOUNTS_FILE):
@@ -303,6 +319,17 @@ class ActiveAuthStage(Stage):
                 cookies = resp.cookies
                 if cookies or token_data:
                     host = urlparse(action).hostname or "unknown"
+                    
+                    # Register identity with UnifiedAuthManager (Phase 1)
+                    material = {"cookies": cookies, "tokens": token_data, "credentials": credentials}
+                    identity_id = f"auth_{host}_{credentials.get('username', 'user')}"
+                    context._auth_manager.register_identity(
+                        identity_id=identity_id,
+                        role="authenticated",
+                        auth_material=material,
+                        host=host
+                    )
+                    
                     self._save_session(context, host, action, cookies, token_data, credentials)
                     return True
         except Exception: pass
