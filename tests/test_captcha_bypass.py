@@ -67,10 +67,8 @@ class TestCaptchaBypass:
             assert mock_post.called, "mock_post should have been called"
             args, kwargs = mock_post.call_args
             payload = kwargs.get("data", {})
-            print(f"DEBUG: ActiveAuth payload: {payload}")
             assert payload.get("csrf") == "123"
             assert payload.get("g-recaptcha-response") == "solved_token"
-
 
     @pytest.mark.asyncio
     async def test_headless_crawl_with_captcha(self, mock_context):
@@ -101,36 +99,17 @@ class TestCaptchaBypass:
         # and mock_p should support __aenter__ and __aexit__
         mock_p.__aenter__.return_value = mock_p
         
-        print("DEBUG: Starting headless crawl")
         with patch("playwright.async_api.async_playwright", return_value=mock_p), \
              patch("recon_cli.utils.captcha.CaptchaSolver.solve_turnstile", return_value="solved_turnstile_token"):
             
             # Mock select_targets to ensure our URL is picked
             with patch.object(HeadlessCrawlStage, "_select_targets", return_value=["https://example.com/"]):
-                print("DEBUG: Calling run_async")
                 await stage.run_async(mock_context)
-                print(f"DEBUG: run_async finished")
-
-                # Verify that _crawl_url was called
-                print(f"DEBUG: page.on calls: {mock_page.on.call_count}")
-                assert mock_page.on.called, "page.on should have been called if _crawl_url ran"
-
-                # Verify that injection was attempted
-                evaluate_calls = [str(call) for call in mock_page.evaluate.call_args_list]
-
-            print(f"DEBUG: evaluate_calls: {evaluate_calls}")
             
-            # Check if any call contains cf-turnstile-response
-            found = False
-            for call in evaluate_calls:
-                if "cf-turnstile-response" in call:
-                    found = True
-                    break
-            
-            if not found:
-                print("DEBUG: Injection not found in evaluate calls")
-                # Let's check why by checking if solve_turnstile was called
-                # Wait, I patched CaptchaSolver.solve_turnstile, but I didn't mock the solver instance
-                # Actually patch on class method works
-                
+            # Verify that _crawl_url was called
+            assert mock_page.on.called, "page.on should have been called if _crawl_url ran"
+
+            # Verify that injection was attempted
+            evaluate_calls = [str(call) for call in mock_page.evaluate.call_args_list]
+            found = any("cf-turnstile-response" in call for call in evaluate_calls)
             assert found

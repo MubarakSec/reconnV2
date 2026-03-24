@@ -25,6 +25,8 @@ from recon_cli.pipeline.stage_auth_discovery import AuthDiscoveryStage
 from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
 from recon_cli.pipeline.stage_waf import WafProbeStage
 from recon_cli.pipeline.stage_waf_bypass import WafBypassStage
+from recon_cli.pipeline.stage_http_smuggling import HttpSmugglingStage
+from recon_cli.pipeline.stage_host_injection import HostInjectionStage
 from recon_cli.pipeline.stage_race_condition import RaceConditionStage
 from recon_cli.pipeline.stage_cache_vuln import WebCacheVulnStage
 from recon_cli.pipeline.stage_idor import IDORStage
@@ -44,6 +46,7 @@ from recon_cli.pipeline.stage_api_reconstructor import ApiSchemaReconstructorSta
 from recon_cli.pipeline.stage_api_logic_fuzzer import ApiLogicFuzzerStage
 from recon_cli.pipeline.stage_oauth_discovery import OAuthDiscoveryStage
 from recon_cli.pipeline.stage_oauth_vuln import OAuthVulnerabilityStage
+from recon_cli.pipeline.stage_jwt_vuln import JWTVulnerabilityStage
 from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 from recon_cli.pipeline.stage_param_mining import ParamMiningStage
 from recon_cli.pipeline.stage_html_forms import HTMLFormMiningStage
@@ -98,6 +101,8 @@ PIPELINE_STAGES: List[Stage] = [
     ActiveAuthStage(),
     WafProbeStage(),
     WafBypassStage(),
+    HttpSmugglingStage(),
+    HostInjectionStage(),
     RaceConditionStage(),
     WebCacheVulnStage(),
     IDORStage(),
@@ -117,6 +122,7 @@ PIPELINE_STAGES: List[Stage] = [
     ApiLogicFuzzerStage(),
     OAuthDiscoveryStage(),
     OAuthVulnerabilityStage(),
+    JWTVulnerabilityStage(),
     WsGrpcDiscoveryStage(),
     ParamMiningStage(),
     HTMLFormMiningStage(),

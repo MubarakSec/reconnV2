@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import os
 from typing import Dict, List, Set, Any
 from urllib.parse import urlparse, urljoin
 
@@ -137,7 +138,7 @@ class HeadlessCrawlStage(Stage):
                 if href and href.startswith("http"): captured_urls.add(href)
                     
         except Exception as e:
-            context.logger.error("Headless crawl error for %s: %s", url, e)
+            context.logger.debug("Headless crawl error for %s: %s", url, e)
         finally:
             await page.close()
             await page_context.close()
