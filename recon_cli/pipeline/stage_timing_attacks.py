@@ -4,16 +4,20 @@ import asyncio
 import time
 import statistics
 import uuid
+import os
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Tuple
 from urllib.parse import urlparse, parse_qsl
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils import fs
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 class TimingAttackStage(Stage):
     name = "timing_attacks"
     optional = True
+    ACCOUNTS_FILE = Path("data/accounts.json")
 
     LOGIN_HINTS = {"login", "signin", "auth", "reset", "forgot", "signup", "register"}
     USER_PARAMS = {"user", "username", "email", "login", "handle", "account"}
@@ -30,63 +34,94 @@ class TimingAttackStage(Stage):
             return
 
         timeout = float(getattr(runtime, "timing_timeout", 10.0))
-        iterations = int(getattr(runtime, "timing_iterations", 5))
+        iterations = int(getattr(runtime, "timing_iterations", 10)) # Increased default iterations for better accuracy
         
         config = HTTPClientConfig(
-            max_concurrent=2, # Keep it low to avoid noise
+            max_concurrent=1, # Strict sequential testing to minimize local noise
             total_timeout=timeout,
             verify_ssl=bool(getattr(runtime, "verify_tls", True)),
         )
 
+        accounts_data = {}
+        if self.ACCOUNTS_FILE.exists():
+            try:
+                accounts_data = fs.read_json(self.ACCOUNTS_FILE)
+            except Exception: pass
+
         async with AsyncHTTPClient(config, context=context) as client:
             for url, method, user_param in endpoints:
+                host = urlparse(url).hostname or ""
                 context.logger.info("Testing timing on %s (%s)", url, user_param)
                 
-                # We need a "valid" looking user and a "non-existent" one
-                # If we don't have a valid one, we can still compare two different non-existent ones
-                # but better is a known valid. For now, let's use a very long vs very short.
-                invalid_user = f"nonexistent_{uuid.uuid4().hex}"
+                # Try to find a valid username for this host
+                valid_user = None
+                creds = accounts_data.get(host)
+                if creds:
+                    valid_user = creds.get("email") or creds.get("username")
                 
-                # Measure baseline (invalid)
+                if not valid_user:
+                    context.logger.debug("No valid user found for %s, skipping high-confidence timing test", host)
+                    continue
+
+                invalid_user = f"nonexistent_{uuid.uuid4().hex[:12]}@example.com"
+                
+                # 1. Warm up (discard)
+                await self._measure(client, context, url, method, user_param, invalid_user, 2)
+                
+                # 2. Measure invalid
                 invalid_times = await self._measure(client, context, url, method, user_param, invalid_user, iterations)
                 if not invalid_times: continue
                 
-                # Measure another one to see variance
-                another_invalid_user = f"another_{uuid.uuid4().hex}"
-                another_times = await self._measure(client, context, url, method, user_param, another_invalid_user, iterations)
-                if not another_times: continue
+                # 3. Measure valid
+                valid_times = await self._measure(client, context, url, method, user_param, valid_user, iterations)
+                if not valid_times: continue
                 
-                # If iterations > 2, we can do some stats
-                avg_1 = statistics.mean(invalid_times)
-                avg_2 = statistics.mean(another_times)
-                std_1 = statistics.stdev(invalid_times) if len(invalid_times) > 1 else 0
+                avg_invalid = statistics.mean(invalid_times)
+                avg_valid = statistics.mean(valid_times)
                 
-                # This is just a basic check. Real timing attacks are harder.
-                # If we had a VALID user, the difference would be more obvious.
-                diff = abs(avg_1 - avg_2)
-                if diff > 0.1: # 100ms difference is quite large for two invalid users
+                # Use standard deviation to see if the difference is statistically significant
+                std_invalid = statistics.stdev(invalid_times) if len(invalid_times) > 1 else 0
+                std_valid = statistics.stdev(valid_times) if len(valid_times) > 1 else 0
+                
+                diff = abs(avg_valid - avg_invalid)
+                
+                # Heuristic: Difference should be greater than 2x the standard deviation of both
+                is_significant = diff > (std_invalid * 2) and diff > (std_valid * 2)
+                
+                if is_significant and diff > 0.05: # At least 50ms difference
+                    severity = "medium"
+                    confidence = "medium"
+                    if diff > 0.2: 
+                        severity = "high"
+                        confidence = "high"
+
                     finding = {
                         "type": "finding",
-                        "finding_type": "timing_leak",
-                        "confidence": "low",
+                        "finding_type": "user_enumeration_timing",
+                        "confidence": confidence,
                         "url": url,
-                        "severity": "medium",
-                        "description": f"Potential timing side-channel detected on {url}. Average response time varied by {diff:.4f}s.",
+                        "severity": severity,
+                        "description": f"Potential user enumeration via timing detected on {url}. Valid user responded in {avg_valid:.4f}s vs invalid user in {avg_invalid:.4f}s.",
                         "tags": ["business-logic", "timing-attack", "enumeration"],
                         "evidence": {
                             "parameter": user_param,
-                            "avg_1": avg_1,
-                            "avg_2": avg_2,
+                            "valid_user": valid_user,
+                            "avg_valid": avg_valid,
+                            "avg_invalid": avg_invalid,
+                            "std_valid": std_valid,
+                            "std_invalid": std_invalid,
                             "diff": diff,
                             "iterations": iterations
                         }
                     }
                     context.results.append(finding)
+                    context.emit_signal("timing_enumeration", "url", url, confidence=0.7, source=self.name, evidence={"diff": diff})
 
     async def _measure(self, client: AsyncHTTPClient, context: PipelineContext, url: str, method: str, param: str, value: str, iterations: int) -> List[float]:
         times = []
         headers = context.auth_headers({"User-Agent": "recon-cli timing-attack", "Content-Type": "application/x-www-form-urlencoded"})
-        data = {param: value, "password": "Password123!"} # Common dummy password
+        # We use a password that is definitely wrong but consistent
+        data = {param: value, "password": f"WrongPass_{uuid.uuid4().hex[:8]}"}
         
         for _ in range(iterations):
             start = time.perf_counter()
@@ -98,8 +133,9 @@ class TimingAttackStage(Stage):
                 times.append(time.perf_counter() - start)
             except Exception:
                 continue
-            await asyncio.sleep(0.5) # Jitter reduction
+            await asyncio.sleep(0.3) # Small delay to avoid server-side rate limiting noise
         return times
+
 
     def _collect_endpoints(self, context: PipelineContext, items: List[Dict[str, Any]]) -> List[Tuple[str, str, str]]:
         endpoints = []

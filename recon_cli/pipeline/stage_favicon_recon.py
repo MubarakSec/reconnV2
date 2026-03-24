@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse, urljoin
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils import fs
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 from recon_cli.utils.favicon import fetch_favicon_hash
 
@@ -17,8 +21,9 @@ class FaviconReconStage(Stage):
     """
     name = "favicon_recon"
     requires = ["http_probe"]
+    FAVICONS_DATA = Path("data/favicons.json")
 
-    # Known Favicon Hashes (Shodan-style)
+    # Fallback/Core Map (in case external file is missing)
     TECH_MAP = {
         1163230216: "Spring Boot",
         -1253869855: "Django",
@@ -32,6 +37,21 @@ class FaviconReconStage(Stage):
         -1670852252: "Citrix ADC",
     }
 
+    def _load_tech_map(self, context: PipelineContext) -> Dict[int, str]:
+        """Loads extended fingerprints from data/favicons.json"""
+        full_map = self.TECH_MAP.copy()
+        if self.FAVICONS_DATA.exists():
+            try:
+                data = fs.read_json(self.FAVICONS_DATA)
+                for h, tech in data.items():
+                    try:
+                        full_map[int(h)] = str(tech)
+                    except ValueError: continue
+                context.logger.debug("Loaded %d favicon fingerprints from %s", len(data), self.FAVICONS_DATA)
+            except Exception as e:
+                context.logger.warning("Failed to load favicon fingerprints: %s", e)
+        return full_map
+
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_favicon_recon", True))
 
@@ -40,7 +60,8 @@ class FaviconReconStage(Stage):
         if not targets:
             return True
 
-        context.logger.info("Starting Favicon Recon on %d targets", len(targets))
+        tech_map = self._load_tech_map(context)
+        context.logger.info("Starting Favicon Recon on %d targets (Fingerprints: %d)", len(targets), len(tech_map))
         
         config = HTTPClientConfig(max_concurrent=10, verify_ssl=False)
         async with AsyncHTTPClient(config, context=context) as client:
@@ -48,10 +69,10 @@ class FaviconReconStage(Stage):
                 favicon_url = urljoin(url, "/favicon.ico")
                 fhash = await fetch_favicon_hash(favicon_url, client)
                 if fhash is not None:
-                    tech = self.TECH_MAP.get(fhash)
+                    tech = tech_map.get(fhash)
                     tags = ["favicon", f"hash:{fhash}"]
                     if tech:
-                        tags.append(f"tech:{tech.lower()}")
+                        tags.append(f"tech:{tech.lower().replace(' ', '_')}")
                         context.logger.info("Found %s on %s via favicon", tech, url)
                         context.results.append({
                             "type": "finding", "finding_type": "tech_identified",

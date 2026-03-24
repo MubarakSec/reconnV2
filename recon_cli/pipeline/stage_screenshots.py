@@ -181,6 +181,12 @@ class ScreenshotStage(Stage):
         self, context: PipelineContext, limit: int
     ) -> List[Dict[str, object]]:
         urls: List[Dict[str, object]] = []
+        # Common extensions that trigger downloads and cause playwright to fail
+        DOWNLOAD_EXTENSIONS = {
+            ".zip", ".tar", ".gz", ".tgz", ".rar", ".7z", ".exe", ".msi", ".bin",
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".mkv", ".old", ".bak"
+        }
         for entry in context.get_results():
             if entry.get("type") != "url":
                 continue
@@ -190,6 +196,12 @@ class ScreenshotStage(Stage):
             url = entry.get("url")
             if not url:
                 continue
+            
+            # Skip likely downloads
+            path = urlparse(url).path.lower()
+            if any(path.endswith(ext) for ext in DOWNLOAD_EXTENSIONS):
+                continue
+
             score = int(entry.get("score", 0))
             urls.append(
                 {

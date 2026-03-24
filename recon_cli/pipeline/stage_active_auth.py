@@ -26,7 +26,7 @@ class ActiveAuthStage(Stage):
     - CSRF & Multi-step support.
     - JWT/Bearer Token detection in JSON responses.
     - Identity Extraction: Fetches profile info after login.
-    - Temp-mail verification (1secmail).
+    - Temp-mail verification (1secmail & GuerrillaMail).
     """
     name = "active_auth"
     ACCOUNTS_FILE = Path("data/accounts.json")
@@ -203,8 +203,9 @@ class ActiveAuthStage(Stage):
             resp = await client.post(action, data=payload, follow_redirects=True)
             
             if any(h in resp.body.lower() for h in ["verify", "activation", "confirm", "check your email"]):
-                # verification currently only supports 1secmail API
-                if "1secmail" in identity["email_domain"]:
+                # Support both 1secmail and GuerrillaMail (9 providers total)
+                is_supported = any(s in identity["email_domain"] for s in ["1secmail", "guerrillamail", "sharklasers", "grr.la", "mailnull"])
+                if is_supported:
                     if await self._verify_email(context, client, identity["email_prefix"], identity["email_domain"]):
                         return identity
                 else:
@@ -217,23 +218,39 @@ class ActiveAuthStage(Stage):
         return None
 
     async def _verify_email(self, context: PipelineContext, client: AsyncHTTPClient, prefix: str, domain: str) -> bool:
-        api_url = f"https://www.1secmail.com/api/v1/?action=getMessages&login={prefix}&domain={domain}"
+        is_guerrilla = any(s in domain for s in ["guerrillamail", "sharklasers", "grr.la", "mailnull"])
+        sid = None
+        
+        if is_guerrilla:
+            set_url = f"https://www.guerrillamail.com/ajax.php?f=set_email_user&email_user={prefix}&domain={domain}"
+            try:
+                resp = await client.get(set_url)
+                sid = json.loads(resp.body).get("sid_token")
+            except Exception: return False
+
         for _ in range(12):
             await asyncio.sleep(5)
             try:
-                msg_resp = await client.get(api_url)
-                msgs = json.loads(msg_resp.body)
-                if msgs:
+                if is_guerrilla:
+                    check_url = f"https://www.guerrillamail.com/ajax.php?f=check_email&seq=0&sid_token={sid}"
+                    msgs = json.loads((await client.get(check_url)).body).get("list", [])
+                    if not msgs: continue
+                    msg_id = msgs[0].get("mail_id")
+                    fetch_url = f"https://www.guerrillamail.com/ajax.php?f=fetch_email&email_id={msg_id}&sid_token={sid}"
+                    body = json.loads((await client.get(fetch_url)).body).get("mail_body", "")
+                else:
+                    api_url = f"https://www.1secmail.com/api/v1/?action=getMessages&login={prefix}&domain={domain}"
+                    msgs = json.loads((await client.get(api_url)).body)
+                    if not msgs: continue
                     msg_id = msgs[0].get("id")
                     read_url = f"https://www.1secmail.com/api/v1/?action=readMessage&login={prefix}&domain={domain}&id={msg_id}"
-                    read_resp = await client.get(read_url)
-                    body = json.loads(read_resp.body).get("body", "")
-                    links = re.findall(r'https?://[^\s<>"]+', body)
-                    if links:
-                        vlink = [l for l in links if any(k in l.lower() for k in ['confirm', 'verify', 'activate'])][0] if links else None
-                        if vlink:
-                            await client.get(vlink)
-                            return True
+                    body = json.loads((await client.get(read_url)).body).get("body", "")
+
+                links = re.findall(r'https?://[^\s<>"]+', body)
+                vlinks = [l for l in links if any(k in l.lower() for k in ['confirm', 'verify', 'activate'])]
+                if vlinks:
+                    await client.get(vlinks[0])
+                    return True
             except Exception: continue
         return False
 

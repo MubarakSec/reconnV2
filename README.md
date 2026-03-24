@@ -25,16 +25,17 @@ ReconnV2 has been upgraded with professional-grade features that bypass standard
 
 | Feature | Description |
 |:--- |:--- |
-| 🌐 **Autonomous Auth** | Automatic Signup/Signin using **1secmail** API for authenticated reconnaissance. |
+| 🌐 **Autonomous Auth** | Automatic Signup/Signin using **1secmail & GuerrillaMail** APIs for authenticated reconnaissance. |
 | 🧬 **API Reconstructor** | Automatically builds **OpenAPI/Swagger specs** from observed traffic and JS hints. |
 | 🎯 **Logic Fuzzer** | Intelligent **BOLA** and **Mass Assignment** detection using reconstructed schemas. |
 | 🕵️ **Stealth & Evasion** | **Proxy Rotation**, User-Agent randomization, and **Jitter** to bypass WAFs/Rate Limits. |
 | 🏁 **Race Condition** | Sync-burst request testing for state-changing endpoints (Turbo-Intruder style). |
-| 🕸️ **Headless Crawl** | Playwright-powered rendering to fix the **"SPA Gap"** and find dynamic endpoints. |
+| 🕸️ **Headless Crawl** | Playwright-powered rendering (skips binary downloads) to fix the **"SPA Gap"**. |
 | 🛰️ **SSRF Pivot Pro** | Pivots confirmed SSRF to perform **Internal Port Scanning** (Redis, DBs, Localhost). |
 | 🧪 **Cache Destruction** | Tests for **Web Cache Deception** and **Cache Poisoning** via unkeyed headers. |
 | 🎯 **Wordlist Miner** | Generates **Target-Aware** dictionaries by scraping keywords from the target site. |
 | 🐍 **Auto-POC Gen** | Automatically generates standalone **Python exploit scripts** for confirmed bugs. |
+| ⚡ **QUIC Bypass** | Identifies **HTTP/3 (QUIC)** support and probes for **WAF Bypasses** over UDP. |
 
 ---
 
@@ -44,8 +45,9 @@ ReconnV2 follows the **Honest Recon** standard: it prioritizes **Proof** over vo
 
 - **SPA Soft-404 Destroyer**: Uses dynamic fingerprinting to eliminate false positives on modern Single Page Apps.
 - **Cross-Token Validation**: Confirms IDORs by comparing access between User A and User B sessions.
-- **Origin IP Discovery**: Bypasses Cloudflare/CDNs using **Favicon MurmurHash3**, **Censys SSL Search**, and **IPv6 Leaks**.
+- **Origin IP Discovery**: Bypasses Cloudflare/CDNs using **50+ Favicon Fingerprints**, **Censys SSL**, and **IPv6 Leaks**.
 - **OOB Integration**: Confirms Blind RCE, SQLi, and SSRF via **Interactsh** real-time interactions.
+- **Statistical Timing**: Detects **User Enumeration** via high-precision timing delta comparison (Valid vs Invalid).
 
 ---
 
@@ -57,10 +59,11 @@ reconnV2/
 ├── 📜 ROADMAP_ELITE.md     # Future goals (Distributed Celery, LLM Validation)
 ├── 📜 objective.md         # The "Honest Recon" core standards
 ├── 📁 recon_cli/           # The Engine
-│   ├── pipeline/           # 50+ Autonomous Stages
+│   ├── pipeline/           # 60+ Autonomous Stages (BOLA, Mass Assignment, QUIC, etc.)
 │   ├── utils/              # Stealth, OAST, and Captcha utilities
 │   └── ...
 ├── 📁 config/              # Elite Profiles (ultra-deep, local-benchmark)
+├── 📁 data/                # Persistence (Accounts, Favicon Fingerprints)
 ├── 📁 jobs/                # Job state (SQLite-backed for fault tolerance)
 └── 📁 tests/               # Elite Feature Test Suite (test_elite_features.py)
 ```
@@ -106,8 +109,8 @@ recon diff job_yesterday job_today
 1.  **Passive Discovery**: Subfinder, Amass, CRT.sh.
 2.  **Infrastructure**: IPv6 leak detection, Censys Origin Discovery, Nmap.
 3.  **Active Surface**: Headless rendering, JS Secret Harvesting, API Reconstruction.
-4.  **Logical Attack**: BOLA Fuzzing, Race Conditions, Auth Bypass, Cache Poisoning.
-5.  **Evidence**: POC Generation, Screenshotting, OAST Interaction collection.
+4.  **Logical Attack**: BOLA Fuzzing, **Mass Assignment**, Race Conditions, Auth Bypass, Cache Poisoning.
+5.  **Evidence**: POC Generation, Screenshotting (optimized for media), OAST Interaction collection.
 6.  **Reporting**: Git-Ops Diffing and Live War-Room Notifications.
 
 ---

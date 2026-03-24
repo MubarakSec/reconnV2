@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import uuid
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple, Any, Optional
 from urllib.parse import urlparse
@@ -79,19 +80,58 @@ class VerifyFindingsStage(Stage):
                 
                 verified += 1
                 status_counts[str(resp.status)] += 1
-                final_url = url # resp.url not easily available in current AsyncHTTPClient without modification
+                final_url = url
                 
-                signal_type = "verified_blocked" if resp.status in {401, 403, 429, 503} else "verified_live"
-                signal_id = context.emit_signal(signal_type, "url", final_url, confidence=0.6, source=self.name, evidence={"status_code": resp.status})
+                # ELITE: Deep Verification for High-Risk Findings
+                finding_type = str(entry.get("finding_type") or entry.get("type")).lower()
+                is_real = True
+                verification_note = ""
+                
+                if resp.status == 200:
+                    # Check for Soft-404 or generic landing pages
+                    if len(resp.body) < 500 and any(h in resp.body.lower() for h in ["not found", "error", "invalid"]):
+                        is_real = False
+                        verification_note = "Soft-404 detected"
+                    
+                    # Backup/Archive Specific Deep Check
+                    if any(ext in url.lower() for ext in [".zip", ".tar", ".gz", ".bak", ".sql", ".old"]):
+                        ctype = resp.headers.get("Content-Type", "").lower()
+                        # If it's a backup but returns text/html, it's likely a fake 200 (landing page)
+                        if "text/html" in ctype and not any(m in resp.body for m in ["PK\x03\x04", "gzip", "SQL"]):
+                            is_real = False
+                            verification_note = "Backup URL returned HTML instead of binary data"
+                        
+                        # Check Magic Numbers in body for binary files
+                        if ".zip" in url.lower() and not resp.body.startswith("PK"):
+                            is_real = False
+                            verification_note = "ZIP magic number missing"
+
+                if not is_real:
+                    signal_type = "verified_false_positive"
+                    entry["score"] = 0 # Downgrade score
+                    entry["tags"] = entry.get("tags", []) + ["false-positive", "soft-404"]
+                else:
+                    signal_type = "verified_blocked" if resp.status in {401, 403, 429, 503} else "verified_live"
+                
+                if is_real and resp.status == 200 and any(ext in url.lower() for ext in [".zip", ".bak", ".sql", ".env", ".php"]):
+                    # Sample the first 1KB for evidence
+                    sample = resp.body[:1024]
+                    sample_file = context.record.paths.artifact(f"sample_{uuid.uuid4().hex[:8]}.txt")
+                    sample_file.write_text(sample, encoding="utf-8", errors="ignore")
+                    records[-1]["evidence_sample"] = str(sample_file.name)
+
+                signal_id = context.emit_signal(signal_type, "url", final_url, confidence=0.9 if is_real else 0.1, source=self.name, evidence={"status_code": resp.status, "note": verification_note})
 
                 records.append({
                     "url": url, "final_url": final_url,
                     "hostname": self._extract_host(final_url, entry),
                     "status_code": resp.status,
                     "content_length": len(resp.body),
+                    "is_real": is_real,
+                    "verification_note": verification_note,
                     "server": resp.headers.get("Server"),
-                    "score": score,
-                    "finding_type": entry.get("finding_type") or entry.get("type"),
+                    "score": entry["score"],
+                    "finding_type": finding_type,
                     "source": entry.get("source"),
                     "description": entry.get("description") or entry.get("title"),
                     "timestamp": time_utils.iso_now(),

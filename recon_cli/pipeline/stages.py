@@ -44,6 +44,7 @@ from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
 from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
 from recon_cli.pipeline.stage_api_reconstructor import ApiSchemaReconstructorStage
 from recon_cli.pipeline.stage_api_logic_fuzzer import ApiLogicFuzzerStage
+from recon_cli.pipeline.stage_mass_assignment import MassAssignmentStage
 from recon_cli.pipeline.stage_second_order_injection import SecondOrderInjectionStage
 from recon_cli.pipeline.stage_advanced_idor import AdvancedIDORStage
 from recon_cli.pipeline.stage_timing_attacks import TimingAttackStage
@@ -129,6 +130,7 @@ PIPELINE_STAGES: List[Stage] = [
     ApiSchemaProbeStage(),
     ApiSchemaReconstructorStage(),
     ApiLogicFuzzerStage(),
+    MassAssignmentStage(),
     SecondOrderInjectionStage(),
     AdvancedIDORStage(),
     TimingAttackStage(),

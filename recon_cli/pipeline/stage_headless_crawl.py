@@ -226,11 +226,23 @@ class HeadlessCrawlStage(Stage):
         # Prioritize high-value pages like dashboards, profile, etc.
         results = context.get_results()
         dynamic_urls = []
+        # Extensions that trigger downloads and cause playwright to fail
+        DOWNLOAD_EXTENSIONS = {
+            ".zip", ".tar", ".gz", ".tgz", ".rar", ".7z", ".exe", ".msi", ".bin",
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".mkv", ".old", ".bak"
+        }
         for r in results:
             if r.get("type") == "url":
                 url = r["url"]
+                parsed = urlparse(url)
+                path = parsed.path.lower()
+                
+                # Skip likely downloads
+                if any(path.endswith(ext) for ext in DOWNLOAD_EXTENSIONS):
+                    continue
+
                 # Heuristic: if it has 'app', 'dashboard', or is a root, it's a good candidate
-                path = urlparse(url).path.lower()
                 if not path or path == "/" or any(h in path for h in ["app", "dashboard", "console", "portal"]):
                     dynamic_urls.append(url)
         

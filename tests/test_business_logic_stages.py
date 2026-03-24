@@ -88,6 +88,11 @@ async def test_advanced_idor_sequential_detection(monkeypatch, tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_timing_attack_detection(monkeypatch, tmp_path: Path):
+    # Setup accounts.json so stage has a "valid" user to test against
+    accounts_file = tmp_path / "data" / "accounts.json"
+    accounts_file.parent.mkdir(parents=True)
+    accounts_file.write_text(json.dumps({"example.com": {"username": "admin", "password": "abc"}}))
+
     record = _make_record(tmp_path, {"enable_timing_attacks": True, "timing_iterations": 2})
     context = PipelineContext(record=record, manager=DummyManager())
     # Mock event_bus to avoid coroutine warnings
@@ -104,27 +109,33 @@ async def test_timing_attack_detection(monkeypatch, tmp_path: Path):
     mock_client.post.return_value = HTTPResponse(url="...", status=401, headers={}, body="fail", elapsed=0.1)
     
     # TimingAttackStage calls time.perf_counter() before and after request
+    # iterations=2, 2 warm-ups (4 calls), 2 invalid (4 calls), 2 valid (4 calls)
     perf_values = [
-        1.0, 1.05, # Measure 1, user 1: diff 0.05
-        2.0, 2.05, # Measure 2, user 1: diff 0.05 -> avg 0.05
-        3.0, 3.25, # Measure 1, user 2: diff 0.25
-        4.0, 4.25, # Measure 2, user 2: diff 0.25 -> avg 0.25
+        1.0, 1.1, # Warmup 1 (diff 0.1)
+        1.2, 1.3, # Warmup 2 (diff 0.1)
+        2.0, 2.05, # Invalid 1 (diff 0.05)
+        2.1, 2.15, # Invalid 2 (diff 0.05) -> avg_invalid = 0.05, std=0
+        3.0, 3.25, # Valid 1 (diff 0.25)
+        3.3, 3.55, # Valid 2 (diff 0.25) -> avg_valid = 0.25, std=0
     ]
     it = iter(perf_values)
     def mock_perf():
         try:
             return next(it)
         except StopIteration:
-            return 100.0 # Return a default high value if exhausted
+            return 100.0
 
     monkeypatch.setattr("time.perf_counter", mock_perf)
 
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
     monkeypatch.setattr("recon_cli.pipeline.stage_timing_attacks.AsyncHTTPClient", MagicMock(return_value=mock_client))
-
+    
     stage = TimingAttackStage()
+    stage.ACCOUNTS_FILE = accounts_file
     await stage.run_async(context)
 
-    findings = [r for r in context.get_results() if r.get("finding_type") == "timing_leak"]
+    findings = [r for r in context.get_results() if r.get("finding_type") == "user_enumeration_timing"]
     assert len(findings) > 0
+    assert findings[0]["severity"] == "high"
+    assert findings[0]["evidence"]["valid_user"] == "admin"
 
