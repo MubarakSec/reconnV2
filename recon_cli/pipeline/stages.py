@@ -54,7 +54,6 @@ from recon_cli.pipeline.stage_cms_scan import CMSScanStage
 from recon_cli.pipeline.stage_trim_results import TrimResultsStage
 from recon_cli.pipeline.stage_rescore import RescoreStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
-from recon_cli.pipeline.stage_learning import LearningStage
 from recon_cli.pipeline.stage_scanner import ScannerStage
 from recon_cli.pipeline.stage_nuclei import NucleiStage
 from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
@@ -127,7 +126,6 @@ PIPELINE_STAGES: List[Stage] = [
     RescoreStage(),
     TrimResultsStage(),
     CorrelationStage(),
-    LearningStage(),
     ScannerStage(),
     NucleiStage(),
     VerifyFindingsStage(),

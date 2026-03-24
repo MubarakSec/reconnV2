@@ -352,6 +352,9 @@ def scan(
     email_domain: Optional[str] = typer.Option(
         None, "--email-domain", help="Custom domain for autonomous signup (e.g. my-private-domain.com)"
     ),
+    proxy: Optional[str] = typer.Option(
+        None, "--proxy", help="Route HTTP traffic through a proxy (e.g. http://127.0.0.1:8080). Can be repeated.",
+    ),
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
@@ -386,6 +389,9 @@ def scan(
         runtime_overrides["auth_cookies"] = cookie
     if email_domain:
         runtime_overrides["auth_email_domain"] = email_domain
+    if proxy:
+        # PipelineContext expects a list of proxies
+        runtime_overrides["proxies"] = [proxy]
     if base_profile not in BASE_PROFILES:
         typer.echo(
             f"Profile preset maps to unknown base profile: {base_profile}", err=True

@@ -214,7 +214,6 @@ DEFAULT_PROFILES_CONTENT = """{
       "enable_secrets": true,
       "enable_extended_validation": true,
       "enable_correlation": true,
-      "enable_learning": true,
       "enable_graphql_recon": true,
       "enable_graphql_exploit": true,
       "enable_oauth_discovery": true,
@@ -550,11 +549,6 @@ class RuntimeConfig:
         default_factory=lambda: (
             os.environ.get("RECON_ENABLE_CORRELATION", "0")
             not in {"0", "false", "False"}
-        )
-    )
-    enable_learning: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_LEARNING", "0") not in {"0", "false", "False"}
         )
     )
     enable_fuzz: bool = field(
