@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import httpx
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
+from recon_cli.utils.race_burst import RaceBurstClient, BurstResponse
 
 
 class RaceConditionStage(Stage):
     """
     Advanced Race Condition Stage (Turbo-Intruder style).
     Targets critical state-changing actions to find business logic flaws.
+    Uses Last-Byte Sync technique to bypass network jitter.
     """
     name = "race_condition"
+    requires = ["http_probe", "js_intel"]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_race_condition", True))
@@ -25,60 +27,88 @@ class RaceConditionStage(Stage):
         if not candidates:
             return
 
-        context.logger.info("Starting race condition testing on %d high-value endpoints", len(candidates))
+        context.logger.info("Starting advanced race condition testing on %d high-value endpoints", len(candidates))
         
-        async with httpx.AsyncClient(verify=False, timeout=20) as client:
-            for url in candidates:
-                await self._test_race(context, client, url)
+        verify_tls = getattr(context.runtime_config, "verify_tls", True)
+        client = RaceBurstClient(verify_tls=verify_tls)
+        
+        for url in candidates:
+            await self._test_race(context, client, url)
 
-    async def _test_race(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
+    async def _test_race(self, context: PipelineContext, client: RaceBurstClient, url: str) -> None:
         # We send 20 simultaneous requests
         num_requests = 20
-        method = "POST" # Usually race conditions impact state-changing POSTs
+        method = "POST" 
         
-        # Prepare tokens/auth if available
-        headers = context.auth_headers({"User-Agent": "recon-cli race-pro"})
+        # Prepare headers
+        headers = context.auth_headers({
+            "User-Agent": "recon-cli/2.0 race-pro",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        })
         
-        context.logger.info("Triggering race condition sync-burst on %s", url)
+        # Simple generic payload
+        body = b'{"race_test": "1"}'
         
-        tasks = [
-            client.request(method, url, headers=headers, json={"recon_race": "1"}) 
-            for _ in range(num_requests)
-        ]
+        context.logger.info("Triggering Last-Byte Sync burst on %s", url)
         
-        start_time = time.time()
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        end_time = time.time()
+        results = await client.sync_burst(
+            url, 
+            method=method, 
+            headers=headers, 
+            body=body, 
+            count=num_requests
+        )
         
-        # Analyze results for anomalies (e.g., more than one 'Success' where only one is expected)
-        self._analyze_race_results(context, url, responses, end_time - start_time)
+        self._analyze_race_results(context, url, results)
 
-    def _analyze_race_results(self, context: PipelineContext, url: str, responses: List[Any], duration: float) -> None:
+    def _analyze_race_results(self, context: PipelineContext, url: str, results: List[Tuple[Optional[BurstResponse], Optional[str]]]) -> None:
         stats = {}
-        for resp in responses:
-            if isinstance(resp, httpx.Response):
-                stats[resp.status_code] = stats.get(resp.status_code, 0) + 1
+        durations = []
         
-        # If we see multiple 200s or 201s in a very short time, it's worth flagging
+        for resp, err in results:
+            if resp:
+                stats[resp.status] = stats.get(resp.status, 0) + 1
+                durations.append(resp.elapsed)
+        
+        if not durations:
+            return
+
+        avg_duration = sum(durations) / len(durations)
         success_codes = {200, 201, 302}
         total_success = sum(count for code, count in stats.items() if code in success_codes)
         
+        # Heuristic: If we see multiple successes in a tight window
         if total_success > 1:
             context.emit_signal(
                 "race_condition_suspect", "url", url,
-                confidence=0.4, source=self.name,
-                tags=["business-logic", "race-condition"],
-                evidence={"stats": stats, "burst_duration": duration}
+                confidence=0.5, source=self.name,
+                tags=["business-logic", "race-condition", "last-byte-sync"],
+                evidence={
+                    "stats": stats, 
+                    "avg_burst_elapsed": round(avg_duration, 4),
+                    "total_success": total_success,
+                    "method": "Last-Byte Sync"
+                }
             )
 
     def _select_candidates(self, context: PipelineContext) -> List[str]:
         results = context.get_results()
         candidates = []
+        high_value_keywords = ["transfer", "pay", "update", "coupon", "redeem", "vote", "checkout", "withdraw", "gift"]
+        
         for r in results:
             if r.get("type") == "url":
                 url = r["url"]
                 path = urlparse(url).path.lower()
                 # Target sensitive looking paths
-                if any(h in path for h in ["transfer", "pay", "update", "coupon", "redeem", "vote"]):
+                if any(h in path for h in high_value_keywords):
                     candidates.append(url)
+        
+        # Also include any API endpoints that look like they might be state-changing
+        for r in context.filter_results("api"):
+             url = r.get("url")
+             if url and any(h in url.lower() for h in high_value_keywords):
+                 candidates.append(url)
+
         return list(dict.fromkeys(candidates))[:5]
