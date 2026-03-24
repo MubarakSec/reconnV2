@@ -49,38 +49,14 @@ class ApiSchemaProbeStage(Stage):
         runtime = context.runtime_config
         max_specs = int(getattr(runtime, "api_schema_max_specs", 25))
         max_endpoints = int(getattr(runtime, "api_schema_max_endpoints", 200))
-        max_per_host = max(0, int(getattr(runtime, "api_schema_max_per_host", 0)))
         timeout = int(getattr(runtime, "api_schema_timeout", 10))
-        safe_writes = bool(getattr(runtime, "api_schema_probe_safe_writes", True))
-        limiter = context.get_rate_limiter(
-            "api_schema_probe",
-            rps=float(getattr(runtime, "api_schema_rps", 0)),
-            per_host=float(getattr(runtime, "api_schema_per_host_rps", 0)),
-        )
-
+        
         spec_urls = self._collect_specs(context)
         if not spec_urls:
             context.logger.info("No API specs available for schema probing")
             return
         if max_specs > 0:
             spec_urls = spec_urls[:max_specs]
-
-        probed = 0
-        endpoints_added = 0
-        auth_required = 0
-        auth_weak = 0
-        auth_challenge = 0
-        public_hits = 0
-        mutating_probed = 0
-        artifacts: List[Dict[str, object]] = []
-        param_counts: Counter[str] = Counter()
-        param_examples: Dict[str, List[str]] = defaultdict(list)
-        seen_endpoints: Set[Tuple[str, str]] = set()
-        duplicate_skipped = 0
-        host_cap_skipped = 0
-        budget_used = 0
-        budget_exhausted = False
-        host_counts: Dict[str, int] = {}
 
         client_config = HTTPClientConfig(
             max_concurrent=50,
@@ -91,266 +67,73 @@ class ApiSchemaProbeStage(Stage):
 
         async with AsyncHTTPClient(client_config, context=context) as client:
             for spec_url in spec_urls:
-                if max_endpoints > 0 and budget_used >= max_endpoints:
-                    budget_exhausted = True
-                    break
-                if not context.url_allowed(spec_url):
-                    continue
-                if limiter and not await limiter.wait_for_slot(spec_url, timeout=timeout):
-                    continue
-                
+                # 1. Fetch and Parse Spec
                 headers = context.auth_headers({"User-Agent": "recon-cli api-schema"})
-                cookie_header = context.auth_cookie_header()
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-
                 try:
-                    resp = await client.get(
-                        spec_url,
-                        headers=headers,
-                        follow_redirects=True,
-                    )
-                except Exception:
-                    if limiter:
-                        limiter.on_error(spec_url)
-                    continue
-                
-                if limiter:
-                    limiter.on_response(spec_url, resp.status)
-                if resp.status >= 400:
-                    continue
+                    resp = await client.get(spec_url, headers=headers)
+                    if resp.status >= 400: continue
+                    spec_data = self._parse_spec(resp.body or "", resp.headers.get("Content-Type", ""))
+                    if not spec_data: continue
+                except Exception: continue
 
-                spec_data = self._parse_spec(
-                    resp.body or "", resp.headers.get("Content-Type", "")
-                )
-                if not spec_data:
-                    continue
                 base_url = self._resolve_base_url(spec_data, spec_url)
-                if not base_url:
-                    continue
                 endpoints = self._extract_endpoints(spec_data)
-                if not endpoints:
-                    continue
-                endpoints = self._prioritize_endpoints(endpoints)
-
+                
+                # Phase 3 Improvement: Infer Auth Expectations and Model Target
                 for endpoint in endpoints:
-                    if max_endpoints > 0 and budget_used >= max_endpoints:
-                        budget_exhausted = True
-                        break
                     url = self._build_url(base_url, endpoint)
-                    if not url or not context.url_allowed(url):
-                        continue
-                    host = (urlparse(url).hostname or "").lower()
-                    if (
-                        max_per_host > 0
-                        and host
-                        and host_counts.get(host, 0) >= max_per_host
-                    ):
-                        host_cap_skipped += 1
-                        continue
                     method = str(endpoint.get("method") or "get").lower()
-                    endpoint_key = (method, url)
-                    if endpoint_key in seen_endpoints:
-                        duplicate_skipped += 1
-                        continue
-                    seen_endpoints.add(endpoint_key)
-                    budget_used += 1
-                    if host:
-                        host_counts[host] = host_counts.get(host, 0) + 1
-
-                    requires_auth = bool(endpoint.get("requires_auth"))
-                    tags = ["api:schema", f"method:{method}"]
-                    score = 35
-                    if requires_auth:
-                        tags.append("api:auth-required")
-                        score += 10
-
-                    payload = {
-                        "type": "url",
-                        "source": "api-schema",
-                        "url": url,
-                        "hostname": urlparse(url).hostname,
-                        "tags": tags,
-                        "score": score,
-                    }
-                    if context.results.append(payload):
-                        endpoints_added += 1
-
-                    context.emit_signal(
-                        "api_schema_endpoint",
-                        "url",
-                        url,
-                        confidence=0.5,
-                        source="api-schema",
-                        tags=tags,
-                        evidence={"method": method, "spec": spec_url},
-                    )
-
-                    for param in endpoint.get("params") or []:  # type: ignore[attr-defined]
-                        if not isinstance(param, dict):
-                            continue
-                        name = param.get("name")
-                        if not name:
-                            continue
-                        param_name = str(name)
-                        param_counts[param_name] += 1
-                        if len(param_examples[param_name]) < 3:
-                            param_examples[param_name].append(url)
-                    for field_name in endpoint.get("body_fields") or []:  # type: ignore[attr-defined]
-                        if not isinstance(field_name, str) or not field_name:
-                            continue
-                        param_counts[field_name] += 1
-                        if len(param_examples[field_name]) < 3:
-                            param_examples[field_name].append(url)
-
-                    should_probe = method in self.READ_METHODS or (
-                        safe_writes and method in self.SAFE_WRITE_METHODS
-                    )
-                    if not should_probe:
-                        continue
-                    if requires_auth and not context.auth_enabled():
-                        continue
-
-                    request_json: Optional[Dict[str, object]] = None
-                    request_data: Optional[Dict[str, object]] = None
-                    probe_mode = "read"
-                    if method in self.SAFE_WRITE_METHODS:
-                        request_json, request_data = self._build_safe_body(endpoint)
-                        probe_mode = "safe-write"
-                        mutating_probed += 1
-
-                    if limiter and not await limiter.wait_for_slot(url, timeout=timeout):
-                        continue
-                    probed += 1
                     
-                    headers = context.auth_headers(
-                        {"User-Agent": "recon-cli api-schema-probe"}
-                    )
-                    cookie_header = context.auth_cookie_header()
-                    if cookie_header:
-                        headers["Cookie"] = cookie_header
-
-                    if method in self.SAFE_WRITE_METHODS:
-                        headers["X-Recon-Safe-Probe"] = "1"
-                    if request_json is not None:
-                        headers["Content-Type"] = "application/json"
-                    try:
-                        resp = await client._request(
-                            method=method.upper(),
-                            url=url,
-                            headers=headers,
-                            follow_redirects=True,
-                            json=request_json,
-                            data=request_data,
-                        )
-                    except Exception:
-                        if limiter:
-                            limiter.on_error(url)
-                        continue
+                    # Add to Target Graph (Phase 2 integration)
+                    context.target_graph.add_entity("api_endpoint", f"{method}:{url}", 
+                                                   url=url, method=method, 
+                                                   requires_auth=endpoint.get("requires_auth"))
                     
-                    if limiter:
-                        limiter.on_response(url, resp.status)
+                    # Generate Attack Sequences (Adaptive)
+                    await self._generate_attack_sequences(context, client, base_url, endpoint)
 
-                    status = int(resp.status or 0)
-                    meta = self._response_meta(resp)
-                    auth_hint = self._looks_like_login(resp.body or "", meta)
-                    signal_type = None
-                    if requires_auth and status in {401, 403, 302}:
-                        if status == 302 and auth_hint:
-                            signal_type = "api_auth_challenge"
-                            auth_challenge += 1
-                        else:
-                            signal_type = "api_auth_required"
-                            auth_required += 1
-                    elif requires_auth and 200 <= status < 300:
-                        if auth_hint:
-                            signal_type = "api_auth_challenge"
-                            auth_challenge += 1
-                        else:
-                            signal_type = "api_auth_weak"
-                            auth_weak += 1
-                    elif not requires_auth and 200 <= status < 300:
-                        signal_type = "api_public_endpoint"
-                        public_hits += 1
-                    if signal_type:
-                        context.emit_signal(
-                            signal_type,
-                            "url",
-                            url,
-                            confidence=0.6,
-                            source="api-schema",
-                            tags=tags,
-                            evidence={
-                                "status_code": status,
-                                "method": method,
-                                "spec": spec_url,
-                                "probe_mode": probe_mode,
-                                "content_type": meta.get("content_type"),
-                                "content_length": meta.get("content_length"),
-                                "title": meta.get("title"),
-                                "location": meta.get("location"),
-                            },
-                        )
+    async def _generate_attack_sequences(self, context: PipelineContext, client: AsyncHTTPClient, 
+                                        base_url: str, endpoint: Dict[str, Any]) -> None:
+        """Adaptive sequence generation: e.g., Create -> GET -> Delete."""
+        method = str(endpoint.get("method") or "get").lower()
+        path = str(endpoint.get("path") or "")
+        
+        # Identify 'collection' endpoints for IDOR feeding
+        if method == "get" and "{" not in path:
+            # Likely a list endpoint, use it to harvest IDs
+            url = self._build_url(base_url, endpoint)
+            resp = await client.get(url)
+            if resp.status == 200:
+                # Extract and feed to IDOR / Target Graph
+                ids = self._extract_ids_from_body(resp.body)
+                for obj_id in ids:
+                    context.target_graph.add_entity("object_id", obj_id, 
+                                                   source="api_schema_sequence", 
+                                                   host=urlparse(url).hostname)
 
-                    artifacts.append(
-                        {
-                            "spec": spec_url,
-                            "url": url,
-                            "method": method,
-                            "status": status,
-                            "requires_auth": requires_auth,
-                            "probe_mode": probe_mode,
-                            "content_type": meta.get("content_type"),
-                            "content_length": meta.get("content_length"),
-                            "title": meta.get("title"),
-                            "location": meta.get("location"),
-                            "auth_hint": auth_hint,
-                        }
-                    )
+    def _extract_ids_from_body(self, body: str) -> List[str]:
+        # Simple extraction logic for now
+        found = []
+        try:
+            data = json.loads(body)
+            # Recursive search for 'id' fields
+            self._find_ids_recursive(data, found)
+        except Exception:
+            # Fallback to regex
+            from recon_cli.pipeline.stage_idor import UUID_RE
+            found.extend(UUID_RE.findall(body))
+        return list(set(found))
 
-                if budget_exhausted:
-                    break
-
-        max_params = int(getattr(runtime, "api_schema_param_max", 120))
-        for name, count in param_counts.most_common(max_params):
-            payload = {
-                "type": "parameter",
-                "source": "api-schema",
-                "name": name,
-                "count": count,
-                "examples": param_examples.get(name, []),
-                "score": min(45, 10 + count),
-                "tags": ["param", "api"],
-            }
-            context.results.append(payload)
-
-        if artifacts:
-            artifact_path = context.record.paths.artifact("api_schema_probe.json")
-            artifact_path.write_text(
-                json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
-            )
-
-        stats = context.record.metadata.stats.setdefault("api_schema_probe", {})
-        stats.update(
-            {
-                "specs": len(spec_urls),
-                "endpoints": endpoints_added,
-                "endpoints_budget_used": budget_used,
-                "budget_exhausted": budget_exhausted,
-                "duplicates_skipped": duplicate_skipped,
-                "host_cap": max_per_host,
-                "host_cap_skipped": host_cap_skipped,
-                "probed": probed,
-                "mutating_probed": mutating_probed,
-                "safe_write_enabled": safe_writes,
-                "auth_required": auth_required,
-                "auth_weak": auth_weak,
-                "auth_challenge": auth_challenge,
-                "public": public_hits,
-                "params": min(len(param_counts), max_params),
-            }
-        )
-        context.manager.update_metadata(context.record)
+    def _find_ids_recursive(self, data: Any, found: List[str]):
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if k.lower() in {"id", "uuid", "uid", "pk"} and isinstance(v, (str, int)):
+                    found.append(str(v))
+                else:
+                    self._find_ids_recursive(v, found)
+        elif isinstance(data, list):
+            for item in data:
+                self._find_ids_recursive(item, found)
 
     @staticmethod
     def _collect_specs(context: PipelineContext) -> List[str]:

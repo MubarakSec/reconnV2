@@ -472,9 +472,9 @@ class UnifiedAuthManager:
         
         # Build legacy manager for backward compatibility if configured
         self._legacy_manager = build_auth_manager(context.runtime_config, 
-                                                logger=context.logger,
-                                                record=context.record,
-                                                manager=context.manager)
+                                                logger=getattr(context, "logger", None),
+                                                record=getattr(context, "record", None),
+                                                manager=getattr(context, "manager", None))
 
     def register_identity(self, 
                           identity_id: str, 

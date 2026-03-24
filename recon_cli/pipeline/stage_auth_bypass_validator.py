@@ -39,21 +39,9 @@ class AuthBypassValidatorStage(Stage):
         enable_boundary = bool(getattr(runtime, "auth_bypass_validator_enable_privilege_boundary", True))
         
         candidates = self._collect_candidates(context, min_score=int(getattr(runtime, "auth_bypass_validator_min_score", 35)), max_urls=max_urls, max_per_host=max_per_host)
-        stats = context.record.metadata.stats.setdefault("auth_bypass_validator", {})
+        context.update_stats(self.name, attempted=0, confirmed=0)
         if not candidates:
-            stats.update({"attempted": 0, "confirmed": 0, "confirmed_forced": 0, "confirmed_boundary": 0, "failed": 0, "skipped": 0})
-            context.manager.update_metadata(context.record)
-            context.logger.info("No auth bypass validator candidates")
             return
-
-        attempted = 0
-        confirmed = 0
-        confirmed_forced = 0
-        confirmed_boundary = 0
-        failed = 0
-        skipped = 0
-        artifacts: List[Dict[str, object]] = []
-        session_cache: Dict[str, List[Tuple[str, str]]] = {}
 
         client_config = HTTPClientConfig(
             max_concurrent=15,
@@ -63,113 +51,52 @@ class AuthBypassValidatorStage(Stage):
         )
 
         async with AsyncHTTPClient(client_config, context=context) as client:
+            # 1. Identity Matrix (Phase 1 integration)
+            identities = context._auth_manager.get_all_identities()
+            
             for candidate in candidates:
                 url = str(candidate.get("url") or "")
                 if not url or not context.url_allowed(url):
-                    skipped += 1; continue
+                    continue
                 
-                parsed_url = urlparse(url)
-                host = parsed_url.hostname or ""
-                path = str(parsed_url.path or "/")
+                host = urlparse(url).hostname or ""
+                path = urlparse(url).path or "/"
 
-                # Resolve tokens
-                if host not in session_cache:
-                    host_tokens = []
-                    t_a = str(getattr(runtime, "idor_token_a", "") or "").strip()
-                    t_b = str(getattr(runtime, "idor_token_b", "") or "").strip()
-                    if t_a: host_tokens.append(("token-a", t_a))
-                    if t_b: host_tokens.append(("token-b", t_b))
-                    if not host_tokens:
-                        try:
-                            art_path = context.record.paths.artifact(f"sessions_{host}.json")
-                            if art_path.exists():
-                                from recon_cli.utils import fs
-                                sessions = fs.read_json(art_path)
-                                for idx, sess in enumerate(sessions[:2]):
-                                    stoken = ""
-                                    if "access_token" in sess.get("tokens", {}): stoken = f"Bearer {sess['tokens']['access_token']}"
-                                    elif sess.get("cookies"): stoken = "; ".join([f"{k}={v}" for k, v in sess["cookies"].items()])
-                                    if stoken: host_tokens.append((f"captured-session-{idx+1}", stoken))
-                        except Exception: pass
-                    session_cache[host] = host_tokens
-
-                tokens = session_cache[host]
-                
-                # Baseline
-                baseline_resp = await self._fetch(client, context, "GET", url, headers={"User-Agent": "recon-cli auth-bypass-validator"})
-                attempted += 1
+                # 2. Baseline: Anonymous/Unauthenticated
+                baseline_resp = await self._fetch(client, context, "GET", url, identity_id=None)
                 if baseline_resp is None:
-                    failed += 1; continue
+                    continue
 
                 restricted = self._is_auth_restricted(
                     status=baseline_resp["status"], text=baseline_resp["text"], 
                     location=baseline_resp.get("location", ""), hinted=bool(candidate.get("restricted_hint"))
                 )
 
-                finding: Optional[Dict[str, object]] = None
-
+                # 3. Forced Browse Techniques (Path/Header Confusion)
                 if enable_forced_browse and restricted:
                     for technique in self._forced_browse_techniques(url, path):
                         test_url = str(technique["url"])
-                        if not context.url_allowed(test_url): continue
-                        headers = {"User-Agent": "recon-cli auth-bypass-validator"}
-                        headers.update(dict(technique.get("headers") or {}))
+                        headers = technique.get("headers", {})
                         
                         resp = await self._fetch(client, context, "GET", test_url, headers=headers)
-                        attempted += 1
-                        if resp is None:
-                            failed += 1; continue
-                        
-                        artifacts.append({"timestamp": time_utils.iso_now(), "kind": "forced_browse_probe", "url": url, "test_url": test_url, "technique": technique["name"], "status": resp["status"]})
+                        if resp is None: continue
                         
                         if not self._is_auth_restricted(status=resp["status"], text=resp["text"], location=resp.get("location", ""), hinted=False) and int(resp["status"]) in self.SUCCESS_STATUS:
-                            signal_id = context.emit_signal("auth_bypass_confirmed", "url", url, confidence=1.0, source=self.name, tags=["auth-bypass", "forced-browse", "confirmed"], evidence={"technique": technique["name"], "status_code": resp["status"]})
-                            finding = {
-                                "type": "finding", "finding_type": "auth_bypass", "source": self.name, "url": url, "hostname": host,
-                                "description": "Authentication bypass confirmed using forced-browse technique",
-                                "details": {"reason": "forced_browse_bypass", "technique": technique["name"], "probe_url": test_url, "baseline_status": baseline_resp["status"], "bypass_status": resp["status"]},
-                                "proof": f"{technique['name']} -> {resp['status']}", "tags": ["auth-bypass", "forced-browse", "confirmed"],
-                                "score": max(90, int(candidate.get("score", 0) or 0)), "priority": "high", "severity": "critical", "confidence_label": "verified", "evidence_id": signal_id or None,
-                            }
+                            self._report_bypass(context, url, "forced_browse", technique["name"], baseline_resp, resp)
                             break
 
-                if finding is None and enable_boundary and len(tokens) >= 2 and self._is_sensitive_target(url):
-                    auth_profiles = {}
-                    for label, token in tokens:
-                        headers = {"User-Agent": "recon-cli auth-bypass-validator"}
-                        if token.startswith("Bearer ") or token.startswith("Basic "):
-                            headers["Authorization"] = token
-                        elif "=" in token: # Likely cookies
-                            headers["Cookie"] = token
-                        else:
-                            headers["Authorization"] = token
+                # 4. Privilege Boundary Matrix (Adaptive role comparison)
+                if enable_boundary and identities:
+                    role_responses = {}
+                    for identity in identities:
+                        # Only test relevant identities for this host
+                        if identity.host and identity.host != host: continue
                         
-                        resp = await self._fetch(client, context, "GET", url, headers=headers)
-                        attempted += 1
-                        if resp: auth_profiles[label] = resp
+                        resp = await self._fetch(client, context, "GET", url, identity_id=identity.identity_id)
+                        if resp: role_responses[identity.identity_id] = resp
                     
-                    finding = self._evaluate_boundary_issue(url, candidate, baseline_resp, auth_profiles)
-                    if finding:
-                        artifacts.append({
-                            "timestamp": time_utils.iso_now(), "kind": "privilege_boundary_probe", "url": url, 
-                            "baseline_status": baseline_resp["status"], 
-                            "token_a_status": auth_profiles.get("token-a", {}).get("status", 0),
-                            "token_b_status": auth_profiles.get("token-b", {}).get("status", 0),
-                            "reason": finding.get("details", {}).get("reason")
-                        })
-
-                if finding and context.results.append(finding):
-                    confirmed += 1
-                    if (finding.get("details") or {}).get("reason") == "forced_browse_bypass": confirmed_forced += 1
-                    else: confirmed_boundary += 1
-
-        # Save artifacts and stats
-        artifacts_dir = context.record.paths.ensure_subdir("auth_bypass_validator")
-        artifact_path = artifacts_dir / "auth_bypass_validator.json"
-        artifact_path.write_text(json.dumps({"timestamp": time_utils.iso_now(), "probes": artifacts, "confirmed": confirmed, "confirmed_forced": confirmed_forced, "confirmed_boundary": confirmed_boundary}, indent=2, sort_keys=True), encoding="utf-8")
-        
-        stats.update({"attempted": attempted, "confirmed": confirmed, "confirmed_forced": confirmed_forced, "confirmed_boundary": confirmed_boundary, "failed": failed, "skipped": skipped, "candidates": len(candidates), "artifact": str(artifact_path.relative_to(context.record.paths.root))})
-        context.manager.update_metadata(context.record)
+                    # Analyze the matrix
+                    self._analyze_boundary_matrix(context, url, candidate, baseline_resp, role_responses)
 
     async def _fetch(
         self,
@@ -177,11 +104,12 @@ class AuthBypassValidatorStage(Stage):
         context: PipelineContext,
         method: str,
         url: str,
-        *,
-        headers: Dict[str, str],
+        identity_id: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
-            resp = await client._request(method=method, url=url, headers=headers, follow_redirects=False)
+            # Multi-identity replay (Phase 1)
+            resp = await client._request(method=method, url=url, headers=headers, identity_id=identity_id, follow_redirects=False)
         except Exception:
             return None
             
@@ -190,7 +118,54 @@ class AuthBypassValidatorStage(Stage):
         location = str(resp.headers.get("Location", ""))
         body_hash = hashlib.md5(text.encode("utf-8", errors="ignore"), usedforsecurity=False).hexdigest() if text else ""
         
-        return {"status": status, "text": text, "location": location, "hash": body_hash}
+        return {"status": status, "text": text, "location": location, "hash": body_hash, "identity_id": identity_id}
+
+    def _analyze_boundary_matrix(self, context: PipelineContext, url: str, candidate: Dict[str, Any], 
+                                baseline: Dict[str, Any], role_responses: Dict[str, Dict[str, Any]]) -> None:
+        """Adaptive analysis of response equivalence across different roles."""
+        identities_tested = list(role_responses.keys())
+        
+        for i, id_a_name in enumerate(identities_tested):
+            resp_a = role_responses[id_a_name]
+            identity_a = context._auth_manager.get_identity(id_a_name)
+            if not identity_a: continue
+
+            # 1. Unauthenticated-to-Authenticated Leak
+            if baseline["status"] in self.SUCCESS_STATUS and baseline["hash"] == resp_a["hash"]:
+                if self._is_sensitive_target(url):
+                    self._report_bypass(context, url, "boundary_leak", f"unauth_matches_{identity_a.role}", baseline, resp_a)
+            
+            # 2. Cross-Role Equivalence (Boundary Indistinguishable)
+            for id_b_name in identities_tested[i+1:]:
+                resp_b = role_responses[id_b_name]
+                identity_b = context._auth_manager.get_identity(id_b_name)
+                if not identity_b: continue
+                
+                # If two DIFFERENT roles see the exact same thing, and it's a success
+                if identity_a.role != identity_b.role and resp_a["status"] in self.SUCCESS_STATUS and resp_a["hash"] == resp_b["hash"]:
+                    # This suggests the privilege boundary is weak or non-existent for this resource
+                    if self._is_sensitive_target(url):
+                        self._report_bypass(context, url, "boundary_weakness", f"{identity_a.role}_matches_{identity_b.role}", resp_a, resp_b)
+
+    def _report_bypass(self, context: PipelineContext, url: str, kind: str, technique: str, 
+                       baseline: Dict[str, Any], bypass: Dict[str, Any]) -> None:
+        host = urlparse(url).hostname
+        signal_id = context.emit_signal(
+            "auth_bypass_confirmed", "url", url, 
+            confidence=1.0, source=self.name, 
+            tags=["auth-bypass", kind, "confirmed"], 
+            evidence={"technique": technique, "status_code": bypass["status"]}
+        )
+        
+        finding = {
+            "type": "finding", "finding_type": "auth_bypass", "source": self.name, "url": url, "hostname": host,
+            "description": f"Authentication bypass confirmed via {kind} ({technique})",
+            "details": {"reason": f"{kind}_bypass", "technique": technique, "baseline_status": baseline["status"], "bypass_status": bypass["status"]},
+            "proof": f"{technique} -> {bypass['status']}", "tags": ["auth-bypass", kind, "confirmed"],
+            "score": 90, "priority": "high", "severity": "critical", "evidence_id": signal_id or None,
+        }
+        if context.results.append(finding):
+            context.update_stats(self.name, confirmed=1)
 
     def _collect_candidates(self, context: PipelineContext, *, min_score: int, max_urls: int, max_per_host: int) -> List[Dict[str, Any]]:
         grouped = defaultdict(list)

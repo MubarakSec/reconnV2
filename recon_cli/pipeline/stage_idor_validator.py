@@ -29,97 +29,90 @@ class IDORValidatorStage(Stage):
         verify_tls = bool(getattr(runtime, "verify_tls", True))
         
         candidates = self._collect_candidates(context, min_score=min_score, max_candidates=max_candidates, max_per_host=max_per_host)
-        stats = context.record.metadata.stats.setdefault("idor_validator", {})
+        context.update_stats(self.name, attempted=0, confirmed=0, skipped=0)
         if not candidates:
-            stats.update({"attempted": 0, "confirmed": 0, "failed": 0, "skipped": 0})
-            context.manager.update_metadata(context.record)
             return
 
         helper = IDORStage()
-        attempted, confirmed, failed, skipped = 0, 0, 0, 0
-        artifacts: List[Dict[str, object]] = []
-        seen: Set[Tuple[str, str]] = set()
-
         client_config = HTTPClientConfig(
             max_concurrent=15, total_timeout=float(timeout), verify_ssl=verify_tls,
             requests_per_second=float(getattr(runtime, "idor_validator_rps", 20.0))
         )
 
         async with AsyncHTTPClient(client_config, context=context) as client:
+            # 1. Identity Selection (Phase 1 integration)
+            identities = context._auth_manager.get_all_identities()
+            
             # Determine host-specific Soft-404 Fingerprint
             host = urlparse(str(candidates[0].get("baseline_url") or "")).hostname or ""
             soft_404_fingerprint = await self._get_soft_404_fingerprint(context, client, host, timeout)
 
             for candidate in candidates:
                 variant_url = str(candidate.get("url") or "")
-                auth_label = str(candidate.get("auth") or "anon")
                 baseline_url = str(candidate.get("baseline_url") or "")
-                key = (variant_url, auth_label)
-                if not variant_url or not baseline_url or key in seen: continue
-                seen.add(key)
+                if not variant_url or not baseline_url: continue
 
                 host = urlparse(baseline_url).hostname or ""
-                token_a = self._resolve_token(context, "token-a", host, runtime)
-                token_b = self._resolve_token(context, "token-b", host, runtime)
-                if not token_a: skipped += 1; continue
-
-                # 1. Fetch User A Profile (Baseline)
-                profile_a, _ = await self._fetch_profile(context, client, helper, baseline_url, auth_label="token-a", token=token_a)
                 
-                # Soft-404 Check
+                # Filter identities relevant to this host
+                host_identities = [i for i in identities if not i.host or i.host == host]
+                if not host_identities:
+                    # Fallback to legacy resolve_token if needed, but UnifiedAuthManager is preferred
+                    token_a = self._resolve_token(context, "token-a", host, runtime)
+                    if token_a:
+                        context._auth_manager.register_identity("legacy-a", "user", {"bearer": token_a}, host=host, source="legacy")
+                        host_identities = context._auth_manager.get_all_identities()
+
+                if not host_identities:
+                    context.update_stats(self.name, skipped=1)
+                    continue
+
+                # 2. Baseline: Fetch target resource with its legitimate identity
+                harvest_id = host_identities[0].identity_id
+                profile_a, _ = await self._fetch_profile(context, client, helper, variant_url, identity_id=harvest_id)
+                
                 if profile_a and soft_404_fingerprint:
                     if profile_a["status"] == soft_404_fingerprint["status"] and profile_a["body_md5"] == soft_404_fingerprint["body_md5"]:
-                        skipped += 1; continue
+                        continue
                 if not profile_a or profile_a["status"] >= 400: continue
 
-                # ELITE: Harvest real IDs for cross-account testing
-                harvested_ids = profile_a.get("subject_ids") or set()
-                
-                # 2. Test User B & Anon with both original variant AND harvested variants
-                test_urls = [(variant_url, "original")]
-                for hid in list(harvested_ids)[:2]:
-                    h_url = self._swap_id_in_url(variant_url, hid)
-                    if h_url: test_urls.append((h_url, f"harvested:{hid}"))
+                # 3. Cross-Role Validation Loop (Adaptive)
+                # Test with ALL other identities + Anonymous
+                test_identities = [i for i in host_identities if i.identity_id != harvest_id]
+                test_targets = [(ti.identity_id, ti.identity_id) for ti in test_identities]
+                test_targets.append(("anon", None))
 
-                for t_url, t_desc in test_urls:
-                    attempted += 1
-                    profile_b = await self._fetch_profile(context, client, helper, t_url, auth_label="token-b", token=token_b) if token_b else (None, "")
-                    profile_b = profile_b[0] if isinstance(profile_b, tuple) else profile_b
+                for auth_label, identity_id in test_targets:
+                    context.update_stats(self.name, attempted=1)
+                    # Fetch SAME resource with test identity
+                    profile_test, _ = await self._fetch_profile(context, client, helper, variant_url, identity_id=identity_id)
                     
-                    profile_anon, _ = await self._fetch_profile(context, client, helper, t_url, auth_label="anon", token=None)
-                    
-                    is_confirmed = False
-                    reasons = []
-                    final_profile = None
-                    final_auth = "none"
-
-                    if profile_b and profile_b["status"] == profile_a["status"] and profile_b["body_md5"] == profile_a["body_md5"]:
-                        is_confirmed, final_profile, final_auth = True, profile_b, "token-b"
-                        reasons.append("cross_user_access_confirmed")
-                    elif profile_anon and profile_anon["status"] == profile_a["status"] and profile_anon["body_md5"] == profile_a["body_md5"]:
-                        is_confirmed, final_profile, final_auth = True, profile_anon, "anon"
-                        reasons.append("unauthenticated_access_confirmed")
-
-                    if is_confirmed:
-                        signal_id = context.emit_signal("idor_confirmed", "url", t_url, confidence=1.0, source=self.name, tags=["idor", "confirmed", t_desc], evidence={"auth": final_auth})
+                    if profile_test and profile_test["status"] == profile_a["status"] and profile_test["body_md5"] == profile_a["body_md5"]:
+                        # IDOR CONFIRMED!
+                        reasons = ["cross_user_access_confirmed"] if identity_id else ["unauthenticated_access_confirmed"]
+                        signal_id = context.emit_signal("idor_confirmed", "url", variant_url, 
+                                                       confidence=1.0, source=self.name, 
+                                                       tags=["idor", "confirmed"], evidence={"auth": auth_label})
+                        
                         finding = {
-                            "type": "finding", "finding_type": "idor", "source": self.name, "url": t_url, "hostname": host,
-                            "description": f"IDOR confirmed via {final_auth} cross-check ({t_desc})",
-                            "details": {"auth": final_auth, "variant": t_desc, "baseline_status": profile_a["status"], "variant_status": final_profile["status"]},
-                            "proof": f"curl -k -H 'Authorization: {final_auth}' '{t_url}'", "tags": ["idor", "confirmed", "logic-aware"],
+                            "type": "finding", "finding_type": "idor", "source": self.name, "url": variant_url, "hostname": host,
+                            "description": f"IDOR confirmed via {auth_label} cross-check",
+                            "details": {"auth": auth_label, "reasons": reasons, "baseline_status": profile_a["status"], "variant_status": profile_test["status"]},
+                            "proof": f"reconn scan {variant_url} --identity {auth_label}", "tags": ["idor", "confirmed"],
                             "score": max(95, int(candidate.get("score", 0))), "priority": "high", "severity": "critical", "confidence_label": "verified", "evidence_id": signal_id or None,
                         }
-                        if context.results.append(finding): confirmed += 1; break # Found one for this candidate, move on
+                        if context.results.append(finding):
+                            context.update_stats(self.name, confirmed=1)
+                            # Add to Target Graph
+                            context.target_graph.add_entity("vulnerability", f"idor:{variant_url}", type="idor", confirmed=True)
+                            break 
 
-        stats.update({"attempted": attempted, "confirmed": confirmed, "failed": failed, "skipped": skipped, "candidates": len(candidates)})
-        context.manager.update_metadata(context.record)
-
-    async def _fetch_profile(self, context: PipelineContext, client: AsyncHTTPClient, helper: IDORStage, url: str, *, auth_label: str, token: Optional[str]) -> Tuple[Optional[Dict[str, Any]], str]:
+    async def _fetch_profile(self, context: PipelineContext, client: AsyncHTTPClient, helper: IDORStage, 
+                             url: str, *, identity_id: Optional[str]) -> Tuple[Optional[Dict[str, Any]], str]:
         if not context.url_allowed(url): return None, "skipped"
-        headers = {"User-Agent": "recon-cli idor-validator"}
-        if token: headers["Authorization"] = token
         try:
-            resp = await client.get(url, headers=headers)
+            # Multi-identity support (Phase 1)
+            resp = await client.get(url, identity_id=identity_id)
             body = resp.body
             data_json = {}
             try: data_json = json.loads(body)
@@ -131,7 +124,7 @@ class IDORValidatorStage(Stage):
 
             return {
                 "status": resp.status, "body_md5": hashlib.md5(body.encode(), usedforsecurity=False).hexdigest(),
-                "sensitive": helper._extract_sensitive(data_json, body[:4000]), "subject_ids": sids, "url": url, "auth": auth_label,
+                "sensitive": helper._extract_sensitive(data_json, body[:4000]), "subject_ids": sids, "url": url, "identity_id": identity_id,
             }, "ok"
         except Exception: return None, "failed"
 
@@ -161,22 +154,36 @@ class IDORValidatorStage(Stage):
     def _collect_candidates(self, context: PipelineContext, *, min_score: int, max_candidates: int, max_per_host: int) -> List[Dict[str, Any]]:
         grouped = defaultdict(list)
         seen = set()
+        count = 0
         for entry in context.iter_results():
-            if str(entry.get("type") or "").lower() != "idor_suspect": continue
+            count += 1
+            etype = str(entry.get("type") or "").lower()
+            if etype != "idor_suspect":
+                continue
+            
             url = str(entry.get("url") or "").strip()
             if not url or url in seen: continue
             
             details = entry.get("details")
-            if not isinstance(details, dict): continue
+            if not isinstance(details, dict):
+                context.logger.warning("IDORValidator: Candidate %s has no details dict", url)
+                continue
+                
             baseline_url = self._derive_baseline_url(url, details)
-            if not baseline_url: continue
+            if not baseline_url:
+                context.logger.warning("IDORValidator: Could not derive baseline URL for %s from details %s", url, details)
+                continue
             
             score = int(entry.get("score", 0) or 0)
-            if score < min_score: continue
+            if score < min_score:
+                continue
             
             host = urlparse(url).hostname or ""
             grouped[host].append({"url": url, "auth": entry.get("auth", "anon"), "score": score, "baseline_url": baseline_url})
             seen.add(url)
+
+        context.logger.info("IDORValidator: Iterated %d results, found %d unique suspects, %d candidates selected after score/host filtering", 
+                            count, len(seen), sum(len(v) for v in grouped.values()))
 
         selected = []
         for items in grouped.values():

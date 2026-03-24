@@ -86,80 +86,107 @@ class IDORStage(Stage):
             host = urlparse(candidates[0].url).hostname or ""
             soft_404_fingerprint = await self._get_soft_404_fingerprint(context, client, host, timeout)
 
-            tokens: List[Tuple[str, Optional[str]]] = [("anon", None)]
-            if getattr(runtime, "idor_token_a", None):
-                tokens.append(("token-a", runtime.idor_token_a))
-            if getattr(runtime, "idor_token_b", None):
-                tokens.append(("token-b", runtime.idor_token_b))
-
-            stats = context.record.metadata.stats.setdefault("idor", {"tests": 0, "suspects": 0, "harvested_ids": 0})
-            other_id = getattr(runtime, "idor_other_identifier", None)
-
-            # ELITE: Pass 1 - Harvest real IDs using Token-A
-            token_a = tokens[1][1] if len(tokens) > 1 else None
+            # Phase 1: Identity Selection (Autonomous Bug Finder improvement)
+            # Use real identities from UnifiedAuthManager
+            identities = context._auth_manager.get_all_identities()
+            
+            # We need at least one authenticated identity to harvest real IDs
+            # or we can try harvesting anonymously if the app allows.
+            harvest_identity = identities[0] if identities else None
+            harvest_id = harvest_identity.identity_id if harvest_identity else None
+            
+            context.update_stats(self.name, tests=0, suspects=0, harvested_ids=0)
+            
+            # Phase 2: Target Graph Integration - Load previously discovered IDs
             identity_map: Dict[str, Set[str]] = defaultdict(set)
-            if token_a:
-                context.logger.info("Starting ID harvesting pass with Token-A...")
-                harvest_tasks = [self._fetch(client, context, c.url, "token-a", token_a) for c in candidates[:20]]
-                harvest_results = await asyncio.gather(*harvest_tasks)
+            for node in context.target_graph._graph.nodes():
+                if node.type == "object_id" and "host" in node.attrs:
+                    identity_map[str(node.attrs["host"])].add(node.id)
+
+            # Phase 3: Adaptive Harvesting Pass
+            if harvest_identity:
+                context.logger.info("Starting adaptive ID harvesting with identity: %s", harvest_id)
+                # Select top candidates likely to yield IDs
+                harvest_candidates = sorted(candidates, key=lambda c: self._candidate_priority(c), reverse=True)[:20]
+                
+                tasks = [self._fetch(client, context, c.url, harvest_id) for c in harvest_candidates]
+                harvest_results = await asyncio.gather(*tasks)
+                
+                new_ids = 0
                 for res in harvest_results:
                     if res and res.get("subject_ids"):
+                        curr_host = urlparse(res["url"]).hostname or ""
                         for sid in res["subject_ids"]:
-                            identity_map[urlparse(res["url"]).hostname or ""].add(sid)
-                stats["harvested_ids"] = sum(len(ids) for ids in identity_map.values())
-                context.logger.info("Harvested %d unique IDs for logic-aware testing", stats["harvested_ids"])
+                            if sid not in identity_map[curr_host]:
+                                identity_map[curr_host].add(sid)
+                                # Persistent memory: add to Target Graph
+                                context.target_graph.add_entity("object_id", sid, host=curr_host, source=self.name)
+                                new_ids += 1
+                
+                context.update_stats(self.name, harvested_ids=len(identity_map[host]))
+                context.logger.info("Harvested %d new unique IDs. Total known for host %s: %d", 
+                                    new_ids, host, len(identity_map[host]))
 
+            # Phase 4: Adaptive Validation Loop
             for candidate in candidates:
-                # Add harvested IDs to variants for this host
                 host = candidate.parsed.hostname or ""
                 host_harvested = list(identity_map.get(host, set()))
                 
+                other_id = getattr(runtime, "idor_other_identifier", None)
                 variants = self._generate_variants(candidate, other_id, harvested=host_harvested)
                 if not variants:
                     continue
 
                 for variant_url, variant_meta in variants:
-                    # 1. Test with Token A (legitimate user)
-                    data_a = await self._fetch(
-                        client, context, variant_url, "token-a",
-                        tokens[1][1] if len(tokens) > 1 else None,
-                    )
-                    if not data_a or data_a["status"] >= 400:
+                    # 1. Baseline: Test with legitimate identity (if any)
+                    baseline_data = await self._fetch(client, context, variant_url, harvest_id)
+                    if not baseline_data or baseline_data["status"] >= 400:
                         continue
                     
-                    # Soft-404 Destroyer
+                    # Soft-404 check
                     if soft_404_fingerprint:
-                        if data_a["status"] == soft_404_fingerprint["status"] and data_a["body_md5"] == soft_404_fingerprint["body_md5"]:
+                        if baseline_data["status"] == soft_404_fingerprint["status"] and \
+                           baseline_data["body_md5"] == soft_404_fingerprint["body_md5"]:
                             continue
 
-                    # 2. Test with Token B or Anon
-                    token_b = tokens[2][1] if len(tokens) > 2 else None
-                    auth_label = "token-b" if token_b else "anon"
+                    # 2. Cross-Role Validation (Adaptive Loop)
+                    # Try with ALL other identities + Anonymous
+                    test_identities = [i for i in identities if i.identity_id != harvest_id]
                     
-                    data_b = await self._fetch(client, context, variant_url, auth_label, token_b)
-                    if not data_b:
-                        continue
+                    # Always include Anonymous test
+                    test_targets = [(ti.identity_id, ti.identity_id) for ti in test_identities]
+                    test_targets.append(("anon", None))
 
-                    reasons = self._semantic_reasons(data_a, data_b)
-                    is_confirmed = (
-                        data_b["status"] == data_a["status"]
-                        and data_b["body_md5"] == data_a["body_md5"]
-                    )
+                    for auth_label, identity_id in test_targets:
+                        test_data = await self._fetch(client, context, variant_url, identity_id)
+                        if not test_data:
+                            continue
 
-                    if is_confirmed or reasons:
-                        stats["tests"] += 1
-                        finding = self._assemble_finding(
-                            candidate, variant_url, variant_meta, auth_label, token_b, data_a, data_b,
-                            reasons if reasons else ["unauthorized_access_confirmed"],
+                        reasons = self._semantic_reasons(baseline_data, test_data)
+                        is_confirmed = (
+                            test_data["status"] == baseline_data["status"]
+                            and test_data["body_md5"] == baseline_data["body_md5"]
                         )
-                        if is_confirmed:
-                            finding["type"] = "finding"
-                            finding["finding_type"] = "idor"
-                            finding["confidence"] = "high"
-                            finding.setdefault("tags", []).append("confirmed")
 
-                        if context.results.append(finding):
-                            stats["suspects"] += 1
+                        if is_confirmed or reasons:
+                            context.update_stats(self.name, tests=1)
+                            finding = self._assemble_finding(
+                                candidate, variant_url, variant_meta, auth_label, 
+                                baseline_data, test_data,
+                                reasons if reasons else ["unauthorized_access_confirmed"],
+                            )
+                            if is_confirmed:
+                                finding["type"] = "finding"
+                                finding["confidence"] = "high"
+                                finding.setdefault("tags", []).append("confirmed")
+                                
+                                # Trace support
+                                context.emit_signal("idor_confirmed", "url", variant_url, 
+                                                   confidence=0.9, source=self.name, 
+                                                   evidence={"auth_label": auth_label})
+
+                            if context.results.append(finding):
+                                context.update_stats(self.name, suspects=1)
             
             context.manager.update_metadata(context.record)
 
@@ -182,25 +209,23 @@ class IDORStage(Stage):
         client: AsyncHTTPClient,
         context: PipelineContext,
         url: str,
-        auth_label: str,
-        token: Optional[str],
+        identity_id: Optional[str],
     ) -> Optional[Dict[str, Any]]:
         if not context.url_allowed(url):
             return None
-        headers = {"User-Agent": "recon-cli idor"}
-        if token:
-            headers["Authorization"] = token
         
         try:
-            resp = await client.get(url, headers=headers)
+            # UnifiedAuthManager handles headers/cookies correctly (Phase 1)
+            resp = await client.get(url, identity_id=identity_id)
         except Exception as exc:
-            context.logger.debug("IDOR request failed for %s (%s): %s", url, auth_label, exc)
+            context.logger.debug("IDOR request failed for %s (%s): %s", url, identity_id or "anon", exc)
             return None
 
         body = resp.body
         body_md5 = hashlib.md5(body.encode(), usedforsecurity=False).hexdigest()
         
         # Simple JSON helper
+        import json
         data_json = {}
         try:
             data_json = json.loads(body)
@@ -214,7 +239,7 @@ class IDORStage(Stage):
             "subject_ids": self._extract_subject_ids(data_json, body[:4000]),
             "text_sample": body[:4000],
             "url": url,
-            "auth": auth_label,
+            "identity_id": identity_id,
         }
 
     def _collect_candidates(
@@ -380,14 +405,16 @@ class IDORStage(Stage):
             reasons.append("successful_response_changed")
         return list(dict.fromkeys(reasons))
 
-    def _assemble_finding(self, candidate: Candidate, url: str, meta: Dict[str, object], auth_label: str, token: Optional[str], baseline: Dict[str, object], variant: Dict[str, object], reasons: List[str]) -> Dict[str, object]:
-        poc_header = f" -H 'Authorization: {token}'" if token else ""
+    def _assemble_finding(self, candidate: Candidate, url: str, meta: Dict[str, object], 
+                          auth_label: str, baseline: Dict[str, object], 
+                          variant: Dict[str, object], reasons: List[str]) -> Dict[str, object]:
         return {
-            "type": "idor_suspect", "source": "idor-stage", "url": url, "auth": auth_label,
+            "type": "idor_suspect", "source": self.name, "url": url, "auth": auth_label,
             "baseline_status": baseline["status"], "variant_status": variant["status"],
             "baseline_md5": baseline["body_md5"], "variant_md5": variant["body_md5"],
             "baseline_sensitive": baseline["sensitive"], "variant_sensitive": variant["sensitive"],
-            "details": {**meta, "reasons": reasons}, "poc": f"curl -k{poc_header} '{url}'",
+            "details": {**meta, "reasons": reasons}, 
+            "poc": f"reconn scan {url} --identity {auth_label}",
             "score": min(70 + len(reasons) * 10, 95), "priority": "high", "tags": ["idor"],
         }
 

@@ -5,7 +5,7 @@ import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from recon_cli.pipeline.stage_host_injection import HostInjectionStage
 from recon_cli.utils.async_http import HTTPResponse
-from recon_cli.utils.oast import OastInteraction
+from recon_cli.utils.oast import InteractshInteraction
 
 
 @pytest.fixture
@@ -21,6 +21,16 @@ def mock_context():
     
     mock.is_host_blocked.return_value = False
     mock.record.paths.artifact.return_value = MagicMock()
+
+    # Mock auth_headers to return merged headers (fixes refactor bug)
+    def mock_auth_headers(base=None, identity_id=None):
+        headers = {"User-Agent": "test"}
+        if base:
+            headers.update(base)
+        return headers
+    mock.auth_headers.side_effect = mock_auth_headers
+    mock.auth_cookie_header.return_value = None
+
     return mock
 
 
@@ -50,7 +60,7 @@ class TestHostInjection:
             
             # Mock successful interaction
             mock_oast.collect_interactions.return_value = [
-                OastInteraction(token="test", protocol="http", raw={"full-url": "http://random.oast.live/reset?token=123"})
+                InteractshInteraction(raw={"correlation-id": "test", "protocol": "http", "full-url": "http://random.oast.live/reset?token=123"})
             ]
             
             # Mock HTTP responses
