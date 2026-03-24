@@ -86,14 +86,29 @@ def _ranking_key(entry: dict) -> tuple[int, int, int, int]:
     return (confirmed, non_repetitive, score, _priority_rank(entry.get("priority")))
 
 
-def generate_summary_data(record) -> Dict[str, Any]:
-    from recon_cli.utils.reporting import is_finding, resolve_confidence_label
+def generate_summary_data(record, prev_record=None) -> Dict[str, Any]:
+    from recon_cli.utils.reporting import is_finding, resolve_confidence_label, build_finding_fingerprint
 
     results_path = record.paths.results_jsonl
     trimmed_path = record.paths.trimmed_results_jsonl
     summary_path = results_path
     if trimmed_path.exists() and trimmed_path.stat().st_size > 0:
         summary_path = trimmed_path
+
+    # Previous results fingerprinting for diff
+    prev_fingerprints = set()
+    if prev_record:
+        prev_results_path = prev_record.paths.results_jsonl
+        if prev_results_path.exists():
+            for entry in iter_jsonl(prev_results_path):
+                etype = entry.get("type")
+                if is_finding(entry):
+                    prev_fingerprints.add(build_finding_fingerprint(entry))
+                elif etype == "url":
+                    prev_fingerprints.add(f"url_{entry.get('url')}")
+                elif etype in {"host", "hostname", "asset"}:
+                    host = entry.get("hostname") or entry.get("host")
+                    if host: prev_fingerprints.add(f"host_{host}")
 
     counts: Counter[str] = Counter()
     status_counter: Counter[str] = Counter()
@@ -102,6 +117,8 @@ def generate_summary_data(record) -> Dict[str, Any]:
     noise_count = 0
     findings_total = 0
     verified_count = 0
+    new_findings_count = 0
+    new_urls_count = 0
     top_candidates: List[dict] = []
     top_urls: List[dict] = []
     top_findings: List[dict] = []
@@ -109,10 +126,19 @@ def generate_summary_data(record) -> Dict[str, Any]:
     for entry in iter_jsonl(results_path):
         etype = entry.get("type", "unknown")
         counts[etype] += 1
-        if is_finding(entry):
+        
+        is_fnd = is_finding(entry)
+        is_new = False
+        if is_fnd:
             findings_total += 1
             if resolve_confidence_label(entry) == "verified":
                 verified_count += 1
+            if prev_record:
+                fp = build_finding_fingerprint(entry)
+                if fp not in prev_fingerprints:
+                    is_new = True
+                    new_findings_count += 1
+        
         if etype == "signal":
             signal_type = entry.get("signal_type")
             if signal_type:
@@ -122,6 +148,12 @@ def generate_summary_data(record) -> Dict[str, Any]:
             status = entry.get("status_code")
             if status:
                 status_counter[str(status)] += 1
+            
+            if prev_record:
+                if f"url_{entry.get('url')}" not in prev_fingerprints:
+                    is_new = True
+                    new_urls_count += 1
+
             tags = set(entry.get("tags", []))
             if "noise" in tags or score < 75:
                 noise_count += 1
@@ -135,10 +167,22 @@ def generate_summary_data(record) -> Dict[str, Any]:
         elif etype in {"finding", "idor_suspect", "idor_candidate"}:
             priority = entry.get("priority") or "unknown"
             priority_counter[priority] += 1
+        
+        if is_new:
+            entry["is_new_result"] = True
 
     for entry in iter_jsonl(summary_path):
         etype = entry.get("type", "unknown")
         score = int(entry.get("score", 0))
+
+        # Carry over the is_new_result flag if it was set in the first pass
+        is_new = entry.get("is_new_result", False)
+        if not is_new and prev_record:
+            if is_finding(entry):
+                is_new = build_finding_fingerprint(entry) not in prev_fingerprints
+            elif etype == "url":
+                is_new = f"url_{entry.get('url')}" not in prev_fingerprints
+
         if etype == "url":
             if score < 75:
                 continue
@@ -146,12 +190,12 @@ def generate_summary_data(record) -> Dict[str, Any]:
             if "noise" in tags:
                 continue
             priority = entry.get("priority") or "unknown"
-            payload = entry | {"score": score, "priority": priority}
+            payload = entry | {"score": score, "priority": priority, "is_new_result": is_new}
             top_candidates.append(payload)
             top_urls.append(payload)
         elif etype in {"finding", "idor_suspect", "idor_candidate"}:
             priority = entry.get("priority") or "unknown"
-            payload = entry | {"score": score, "priority": priority}
+            payload = entry | {"score": score, "priority": priority, "is_new_result": is_new}
             top_candidates.append(payload)
             top_findings.append(payload)
 
@@ -170,6 +214,8 @@ def generate_summary_data(record) -> Dict[str, Any]:
         "findings_total": findings_total,
         "verified_count": verified_count,
         "verified_ratio": verified_ratio,
+        "new_findings_count": new_findings_count,
+        "new_urls_count": new_urls_count,
         "top_candidates": top_candidates,
         "top_urls": top_urls,
         "top_findings": top_findings,
@@ -178,7 +224,12 @@ def generate_summary_data(record) -> Dict[str, Any]:
 
 def generate_summary(context) -> None:
     record = context.record
-    data = generate_summary_data(record)
+    prev_job_id = getattr(record.spec, "incremental_from", None)
+    prev_record = None
+    if prev_job_id:
+        prev_record = context.manager.load_job(prev_job_id)
+
+    data = generate_summary_data(record, prev_record=prev_record)
 
     metadata = record.metadata
     spec = record.spec
@@ -216,16 +267,18 @@ def generate_summary(context) -> None:
             or "(unknown)"
         )
         context_value = _extract_context(entry)
+        new_tag = " [NEW]" if entry.get("is_new_result") else ""
         if context_value:
-            return f"{label} [{context_value}]"
-        return label
+            return f"{label} [{context_value}]{new_tag}"
+        return f"{label}{new_tag}"
 
     def _format_url_label(entry: dict) -> str:
         label = entry.get("url") or "(unknown)"
         status = entry.get("status_code") or entry.get("status")
+        new_tag = " [NEW]" if entry.get("is_new_result") else ""
         if status:
-            return f"{label} (status:{status})"
-        return label
+            return f"{label} (status:{status}){new_tag}"
+        return f"{label}{new_tag}"
 
     def _parse_iso(value: object) -> Optional[datetime]:
         if not isinstance(value, str) or not value:
@@ -247,7 +300,16 @@ def generate_summary(context) -> None:
     )
     lines.append(f"Job ID       : {metadata.job_id}")
     lines.append(f"Profile      : {spec.profile}")
+    if prev_job_id:
+        lines.append(f"Incremental  : {prev_job_id}")
     lines.append(f"Duration     : {metadata.started_at} -> {metadata.finished_at}")
+
+    if prev_job_id:
+        lines.append("")
+        lines.append("== DIFF SUMMARY (NEW since last scan) ==")
+        lines.append(f"New Hosts    : {data.get('counts', {}).get('asset_enrichment', 0)}")
+        lines.append(f"New URLs     : {data.get('new_urls_count', 0)}")
+        lines.append(f"New Findings : {data.get('new_findings_count', 0)}")
 
     started_dt = _parse_iso(metadata.started_at)
     finished_dt = _parse_iso(metadata.finished_at)
