@@ -1101,10 +1101,7 @@ class CommandExecutor:
         trace_scope = CURRENT_TRACE_SCOPE.get()
         trace_span: Optional[PipelineTraceSpan] = None
 
-        async def _run() -> subprocess.CompletedProcess:  # type: ignore[return]
-            if trace_scope:
-                CURRENT_TRACE_SCOPE.set(trace_scope)
-
+        def _run_sync_logic():
             nonlocal \
                 final_status, \
                 final_error, \
@@ -1112,8 +1109,6 @@ class CommandExecutor:
                 attempt_used, \
                 trace_span
 
-            # Pass recorder and parent_span_id explicitly to start_span logic if possible,
-            # or ensure the contextvar is set before this call.
             trace_span = _start_command_trace_span(
                 cmd_list,
                 policy=policy,
@@ -1134,26 +1129,21 @@ class CommandExecutor:
                         raise CommandError(f"Circuit open for {policy.tool_class}")
 
                     try:
-                        loop = asyncio.get_running_loop()
+                        from recon_cli.utils.pipeline_trace import run_in_scope
 
-                        def _run_in_thread():
-                            from recon_cli.utils.pipeline_trace import run_in_scope
-
-                            return run_in_scope(
-                                trace_scope,
-                                subprocess.run,
-                                cmd_list,
-                                cwd=str(cwd) if cwd else None,
-                                env=dict(env) if env else None,
-                                timeout=policy.timeout,
-                                capture_output=capture_output,
-                                text=True,
-                                encoding="utf-8",
-                                errors="replace",
-                                check=check,
-                            )
-
-                        completed = await loop.run_in_executor(None, _run_in_thread)
+                        completed = run_in_scope(
+                            trace_scope,
+                            subprocess.run,
+                            cmd_list,
+                            cwd=str(cwd) if cwd else None,
+                            env=dict(env) if env else None,
+                            timeout=policy.timeout,
+                            capture_output=capture_output,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            check=check,
+                        )
 
                         if (
                             capture_output
@@ -1198,15 +1188,31 @@ class CommandExecutor:
                 final_error = str(e)
                 raise
 
+        async def _run_async_wrapper():
+            if trace_scope:
+                CURRENT_TRACE_SCOPE.set(trace_scope)
+            
+            # Use run_in_executor to avoid blocking the loop during the actual subprocess call
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, _run_sync_logic)
+
         try:
             try:
                 loop = asyncio.get_running_loop()
+                # If we are in the loop thread, calling .result() on run_coroutine_threadsafe will deadlock.
+                # We check if the loop is running. If so, and we are in the same thread, we must run sync.
+                if loop.is_running():
+                    # Check if we are in the loop thread by trying to see if we can schedule a task
+                    # but actually get_running_loop() ALREADY means we are in the loop thread for this loop.
+                    self.logger.warning("CommandExecutor.run called from event loop; blocking loop to execute: %s", message)
+                    return _run_sync_logic()
+                
                 import contextvars
-
                 ctx = contextvars.copy_context()
-                return asyncio.run_coroutine_threadsafe(ctx.run(_run), loop).result()
+                return asyncio.run_coroutine_threadsafe(ctx.run(_run_async_wrapper), loop).result()
             except RuntimeError:
-                return asyncio.run(_run())
+                # No loop running in this thread, use a temporary one
+                return asyncio.run(_run_async_wrapper())
         finally:
             _finish_command_trace_span(
                 trace_span,

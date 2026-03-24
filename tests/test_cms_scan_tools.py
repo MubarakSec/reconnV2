@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 
 from recon_cli.jobs.manager import JobRecord
@@ -37,7 +38,8 @@ def make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
     return JobRecord(spec=spec, metadata=metadata, paths=paths)
 
 
-def test_cms_scan_prefers_droopescan_for_joomla(monkeypatch, tmp_path: Path):
+@pytest.mark.asyncio
+async def test_cms_scan_prefers_droopescan_for_joomla(monkeypatch, tmp_path: Path):
     from recon_cli.pipeline import stage_cms_scan as stage_mod
 
     record = make_record(tmp_path, {"enable_cms_scan": True})
@@ -58,6 +60,9 @@ def test_cms_scan_prefers_droopescan_for_joomla(monkeypatch, tmp_path: Path):
 
             return Result()
 
+        async def run_async(self, cmd, **kwargs):
+            return self.run(cmd, **kwargs)
+
     dummy_executor = DummyExecutor()
     context.executor = dummy_executor
 
@@ -73,7 +78,7 @@ def test_cms_scan_prefers_droopescan_for_joomla(monkeypatch, tmp_path: Path):
     )
 
     cms_dir = context.record.paths.ensure_subdir("cms")
-    result = stage._run_scan(
+    result = await stage._run_scan(
         context, "joomla", "example.com", "https://example.com", 10, cms_dir
     )
     assert result["tool"] == "droopescan"
@@ -81,7 +86,8 @@ def test_cms_scan_prefers_droopescan_for_joomla(monkeypatch, tmp_path: Path):
     assert dummy_executor.commands[0][:3] == ["droopescan", "scan", "joomla"]
 
 
-def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(
+@pytest.mark.asyncio
+async def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(
     monkeypatch, tmp_path: Path
 ):
     from recon_cli.pipeline import stage_cms_scan as stage_mod
@@ -97,9 +103,7 @@ def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(
     class DummyResult:
         def __init__(self):
             self.findings = [
-                DummyFinding(
-                    {"type": "finding", "details": {"template_id": "joomla-test"}}
-                )
+                {"type": "finding", "details": {"template_id": "joomla-test"}}
             ]
             self.artifact_path = None
 
@@ -124,7 +128,7 @@ def test_cms_scan_falls_back_to_nuclei_when_droopescan_missing(
     )
 
     cms_dir = context.record.paths.ensure_subdir("cms")
-    result = stage._run_scan(
+    result = await stage._run_scan(
         context, "joomla", "example.com", "https://example.com", 10, cms_dir
     )
     assert result["tool"] == "nuclei"

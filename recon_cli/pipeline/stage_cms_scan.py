@@ -80,7 +80,7 @@ class CMSScanStage(Stage):
 
                 for cms in sorted(cms_targets[host]):
                     # External tools still run via executor (sync/subprocess)
-                    scan_result = self._run_scan(context, cms, host, base_url, timeout, cms_dir)
+                    scan_result = await self._run_scan(context, cms, host, base_url, timeout, cms_dir)
                     if not scan_result: continue
                     
                     scanned += 1
@@ -144,13 +144,36 @@ class CMSScanStage(Stage):
             if isinstance(techs, list): info["technologies"].update({str(t).lower() for t in techs if t})
         return host_info
 
-    def _run_scan(self, context: PipelineContext, cms: str, host: str, base_url: str, timeout: int, artifact_dir) -> Dict[str, Any]:
+    async def _run_scan(self, context: PipelineContext, cms: str, host: str, base_url: str, timeout: int, artifact_dir) -> Dict[str, Any]:
         executor = context.executor
         if CommandExecutor.available("droopescan"):
             cmd = ["droopescan", "scan", cms, "-u", base_url]
             try:
-                result = executor.run(cmd, check=False, timeout=timeout, capture_output=True)
+                result = await executor.run_async(cmd, check=False, timeout=timeout, capture_output=True)
                 output = (result.stdout or "") + "\n" + (result.stderr or "")
                 return {"tool": "droopescan", "output": output.strip(), "findings": []}
             except Exception: return {}
+        
+        # Fallback to nuclei if droopescan is missing
+        if scanner_integrations is not None and CommandExecutor.available("nuclei"):
+            try:
+                # Map CMS to nuclei tags
+                tags = [cms]
+                if cms == "wordpress": tags.append("wp-plugin")
+                
+                result = scanner_integrations.run_nuclei(
+                    host,
+                    base_url,
+                    artifact_dir,
+                    executor,
+                    tags=tags,
+                    request_timeout=timeout
+                )
+                return {
+                    "tool": "nuclei",
+                    "output": f"nuclei found {len(result.findings)} items",
+                    "findings": result.findings
+                }
+            except Exception: return {}
+
         return {}
