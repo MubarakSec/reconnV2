@@ -1137,6 +1137,7 @@ class CommandExecutor:
                             cmd_list,
                             cwd=str(cwd) if cwd else None,
                             env=dict(env) if env else None,
+                            stdin=subprocess.DEVNULL,
                             timeout=policy.timeout,
                             capture_output=capture_output,
                             text=True,
@@ -1145,12 +1146,13 @@ class CommandExecutor:
                             check=check,
                         )
 
-                        if (
-                            capture_output
-                            and "IGNORE PREVIOUS INSTRUCTIONS" in completed.stdout
-                        ):
-                            self.logger.warning(
-                                "Potential prompt-injection content detected in output"
+                        if capture_output and completed.stdout:
+                            _report_suspicious_output(
+                                self.logger,
+                                trace_span,
+                                cmd_list,
+                                source="stdout",
+                                text=completed.stdout,
                             )
 
                         final_returncode = completed.returncode
@@ -1299,6 +1301,7 @@ class CommandExecutor:
                             cmd_list,
                             cwd=str(cwd) if cwd else None,
                             env=dict(env) if env else None,
+                            stdin=subprocess.DEVNULL,
                             stdout=handle,
                             stderr=subprocess.STDOUT,
                             text=True,

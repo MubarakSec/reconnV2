@@ -53,9 +53,11 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
 
     ptype = payload.get("type")
     if ptype == "hostname":
-        return (ptype, payload.get("hostname"))
+        hostname = payload.get("hostname")
+        return (ptype, hostname.lower() if isinstance(hostname, str) else hostname)
     if ptype == "asset":
-        return (ptype, payload.get("hostname"), payload.get("ip"))
+        hostname = payload.get("hostname")
+        return (ptype, hostname.lower() if isinstance(hostname, str) else hostname, payload.get("ip"))
     if ptype == "url":
         return (ptype, payload.get("url"))
     if ptype == "api":
@@ -76,26 +78,14 @@ def dedupe_key(payload: Dict[str, object]) -> tuple:
     if ptype == "auth_form":
         return (ptype, payload.get("url"), payload.get("action"), payload.get("method"))
     if ptype == "asset_enrichment":
-        return (ptype, payload.get("hostname"), payload.get("ip"))
+        hostname = payload.get("hostname")
+        return (ptype, hostname.lower() if isinstance(hostname, str) else hostname, payload.get("ip"))
     if ptype == "finding":
         fingerprint = payload.get("finding_fingerprint")
-        if isinstance(fingerprint, str) and fingerprint:
-            return (ptype, fingerprint)
-        url_value = payload.get("url") or payload.get("matched_at")
-        path_fp, query_param_fp = _url_path_and_params(url_value)
-        return (
-            ptype,
-            payload.get("finding_type"),
-            payload.get("template_id")
-            or payload.get("template")
-            or payload.get("templateID"),
-            url_value,
-            path_fp,
-            query_param_fp,
-            payload.get("hostname"),
-            payload.get("description") or payload.get("title"),
-            _parameter_hint(payload),
-        )
+        if not fingerprint:
+            from recon_cli.utils.reporting import build_finding_fingerprint
+            fingerprint = build_finding_fingerprint(payload)
+        return (ptype, fingerprint)
     if ptype == "cms":
         return (
             ptype,

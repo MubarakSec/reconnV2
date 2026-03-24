@@ -61,9 +61,6 @@ from recon_cli.pipeline.stage_cms_scan import CMSScanStage
 from recon_cli.pipeline.stage_proto_pollution import ProtoPollutionStage
 from recon_cli.pipeline.stage_favicon_recon import FaviconReconStage
 from recon_cli.pipeline.stage_quic_discovery import QuicDiscoveryStage
-from recon_cli.pipeline.stage_advanced_idor import AdvancedIDORStage
-from recon_cli.pipeline.stage_second_order_injection import SecondOrderInjectionStage
-from recon_cli.pipeline.stage_timing_attacks import TimingAttackStage
 from recon_cli.pipeline.stage_trim_results import TrimResultsStage
 from recon_cli.pipeline.stage_rescore import RescoreStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
@@ -146,9 +143,6 @@ PIPELINE_STAGES: List[Stage] = [
     ProtoPollutionStage(),
     FaviconReconStage(),
     QuicDiscoveryStage(),
-    AdvancedIDORStage(),
-    SecondOrderInjectionStage(),
-    TimingAttackStage(),
     RescoreStage(),
     TrimResultsStage(),
     CorrelationStage(),

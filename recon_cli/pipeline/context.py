@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from collections import defaultdict
 from pathlib import Path
@@ -57,6 +58,7 @@ class PipelineContext:
     trace_recorder: Optional[object] = field(init=False, default=None)
     stealth_manager: Optional[object] = field(init=False, default=None)
     scope_manager: "ScopeManager" = field(init=False)
+    _lock: threading.Lock = field(init=False, default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
         from recon_cli.utils.pipeline_trace import current_trace_recorder
@@ -662,6 +664,19 @@ class PipelineContext:
 
     def mark_stage_failed(self) -> None:
         self._any_stage_failed = True
+
+    def update_stats(self, stage_name: str, **updates: Any) -> None:
+        """Thread-safe update of job statistics."""
+        if not self.record:
+            return
+        with self._lock:
+            stats = self.record.metadata.stats.setdefault(stage_name, {})
+            for key, value in updates.items():
+                if isinstance(value, int) and key in stats and isinstance(stats[key], int):
+                    stats[key] += value
+                else:
+                    stats[key] = value
+            self.manager.update_metadata(self.record)
 
     def mark_finished(self, status: str = "finished") -> None:
         if self._any_stage_failed and status == "finished":

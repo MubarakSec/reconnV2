@@ -51,35 +51,46 @@ class CTPivotStage(Stage):
         api_key = getattr(context.runtime_config, "viewdns_api_key", None)
         if not api_key: return
 
+        from recon_cli.utils.circuit_breaker import registry as circuit_registry
+        breaker = circuit_registry.get_or_create("viewdns-api", failure_threshold=5, recovery_timeout=60)
+
         roots = self._root_domains(context)
         for root in roots:
             url = f"https://viewdns.info/reversewhois/?q={root}&apikey={api_key}&output=json"
             try:
-                resp = await client.get(url)
-                if resp.status == 200: pass # Placeholder for future expansion
-            except Exception: pass
+                async with breaker:
+                    resp = await client.get(url)
+                    if resp.status == 200: pass # Placeholder for future expansion
+            except Exception as exc:
+                context.logger.warning("Reverse WHOIS failed for %s: %s", root, exc)
 
     async def _run_bulk_asn_lookup(self, context: PipelineContext) -> None:
         ips = {r.get("ip") for r in context.filter_results("hostname") if r.get("ip") and validation.is_ip(r["ip"])}
         if not ips: return
 
         context.logger.info("Performing bulk ASN lookup for %d IPs", len(ips))
+        
+        from recon_cli.utils.circuit_breaker import registry as circuit_registry
+        breaker = circuit_registry.get_or_create("cymru-whois", failure_threshold=5, recovery_timeout=60)
+        
         loop = asyncio.get_event_loop()
         try:
             # Run socket operation in thread to avoid blocking loop
-            response = await loop.run_in_executor(None, self._sync_socket_whois, list(ips))
-            if not response: return
+            async with breaker:
+                response = await loop.run_in_executor(None, self._sync_socket_whois, list(ips))
+                if not response: return
 
-            for line in response.splitlines():
-                if "|" not in line or line.startswith("AS"): continue
-                parts = [p.strip() for p in line.split("|")]
-                if len(parts) >= 3:
-                    context.results.append({
-                        "type": "asset_enrichment", "source": "team-cymru",
-                        "ip": parts[1], "asn": parts[0], "bgp_prefix": parts[2],
-                        "tags": ["asn", f"asn:{parts[0]}"],
-                    })
-        except Exception: pass
+                for line in response.splitlines():
+                    if "|" not in line or line.startswith("AS"): continue
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) >= 3:
+                        context.results.append({
+                            "type": "asset_enrichment", "source": "team-cymru",
+                            "ip": parts[1], "asn": parts[0], "bgp_prefix": parts[2],
+                            "tags": ["asn", f"asn:{parts[0]}"],
+                        })
+        except Exception as exc:
+            context.logger.warning("Bulk ASN lookup failed: %s", exc)
 
     def _sync_socket_whois(self, ips: List[str]) -> str:
         try:
@@ -102,25 +113,33 @@ class CTPivotStage(Stage):
         roots = self._root_domains(context)
         if not roots: return
 
+        from recon_cli.utils.circuit_breaker import registry as circuit_registry
+        breaker = circuit_registry.get_or_create("crt-sh", failure_threshold=5, recovery_timeout=60)
+
         discovered: Set[str] = set()
         for root in roots[:max_domains]:
             url = f"https://crt.sh/?q=%25.{root}&output=json"
             try:
-                resp = await client.get(url, headers={"User-Agent": "recon-cli ct-pivot"})
-                if resp.status >= 400: continue
-                entries = json.loads(resp.body)
-                if not isinstance(entries, list): continue
-                for entry in entries:
-                    nv = entry.get("name_value") if isinstance(entry, dict) else None
-                    if not isinstance(nv, str): continue
-                    for rn in nv.splitlines():
-                        cand = rn.strip().lstrip("*.").lower()
-                        if cand and cand.endswith(root):
-                            try:
-                                discovered.add(validation.normalize_hostname(cand))
-                            except ValueError: continue
-                    if len(discovered) >= max_names: break
-            except Exception: continue
+                async with breaker:
+                    resp = await client.get(url, headers={"User-Agent": "recon-cli ct-pivot"})
+                    if resp.status >= 400:
+                        context.logger.debug("crt.sh returned %d for %s", resp.status, root)
+                        continue
+                    entries = json.loads(resp.body)
+                    if not isinstance(entries, list): continue
+                    for entry in entries:
+                        nv = entry.get("name_value") if isinstance(entry, dict) else None
+                        if not isinstance(nv, str): continue
+                        for rn in nv.splitlines():
+                            cand = rn.strip().lstrip("*.").lower()
+                            if cand and cand.endswith(root):
+                                try:
+                                    discovered.add(validation.normalize_hostname(cand))
+                                except ValueError: continue
+                        if len(discovered) >= max_names: break
+            except Exception as exc:
+                context.logger.warning("crt.sh query failed for %s: %s", root, exc)
+                continue
             if len(discovered) >= max_names: break
 
         added = 0
@@ -129,8 +148,7 @@ class CTPivotStage(Stage):
             if context.results.append({"type": "hostname", "source": "ct", "hostname": host, "score": 20, "tags": ["ct"], "evidence_id": signal_id or None}):
                 added += 1
 
-        stats = context.record.metadata.stats.setdefault("ct_pivot", {})
-        stats.update({"roots": min(len(roots), max_domains), "discovered": len(discovered), "added": added})
+        context.update_stats("ct_pivot", roots=min(len(roots), max_domains), discovered=len(discovered), added=added)
 
     async def _run_asn_pivot(self, context: PipelineContext, client: AsyncHTTPClient) -> None:
         runtime = context.runtime_config
@@ -138,33 +156,40 @@ class CTPivotStage(Stage):
         asns = self._collect_asns(context)
         if not asns: return
 
+        from recon_cli.utils.circuit_breaker import registry as circuit_registry
+        breaker = circuit_registry.get_or_create("bgpview-api", failure_threshold=5, recovery_timeout=60)
+
         prefixes_added, prefixes_total = 0, 0
         for asn in asns[:max_asn]:
             url = f"https://api.bgpview.io/asn/{asn}/prefixes"
             try:
-                resp = await client.get(url, headers={"User-Agent": "recon-cli asn-pivot"})
-                if resp.status >= 400: continue
-                data = json.loads(resp.body)
-                prefixes = []
-                if isinstance(data, dict):
-                    pl = data.get("data") if isinstance(data.get("data"), dict) else {}
-                    v4, v6 = pl.get("ipv4_prefixes") or [], pl.get("ipv6_prefixes") or []
-                    prefixes.extend(v4 if isinstance(v4, list) else [])
-                    prefixes.extend(v6 if isinstance(v6, list) else [])
-                
-                for item in prefixes:
-                    prefix = item.get("prefix") if isinstance(item, dict) else None
-                    if not prefix: continue
-                    prefixes_total += 1
-                    signal_id = context.emit_signal("asn_prefix", "ip_prefix", prefix, confidence=0.3, source=self.name, tags=[f"asn:{asn}"])
-                    if context.results.append({"type": "ip_prefix", "source": "asn-pivot", "prefix": prefix, "asn": asn, "tags": ["asn", f"asn:{asn}"], "evidence_id": signal_id or None}):
-                        prefixes_added += 1
-                    if max_prefixes > 0 and prefixes_added >= max_prefixes: break
-            except Exception: continue
+                async with breaker:
+                    resp = await client.get(url, headers={"User-Agent": "recon-cli asn-pivot"})
+                    if resp.status >= 400:
+                        context.logger.debug("bgpview returned %d for ASN %s", resp.status, asn)
+                        continue
+                    data = json.loads(resp.body)
+                    prefixes = []
+                    if isinstance(data, dict):
+                        pl = data.get("data") if isinstance(data.get("data"), dict) else {}
+                        v4, v6 = pl.get("ipv4_prefixes") or [], pl.get("ipv6_prefixes") or []
+                        prefixes.extend(v4 if isinstance(v4, list) else [])
+                        prefixes.extend(v6 if isinstance(v6, list) else [])
+                    
+                    for item in prefixes:
+                        prefix = item.get("prefix") if isinstance(item, dict) else None
+                        if not prefix: continue
+                        prefixes_total += 1
+                        signal_id = context.emit_signal("asn_prefix", "ip_prefix", prefix, confidence=0.3, source=self.name, tags=[f"asn:{asn}"])
+                        if context.results.append({"type": "ip_prefix", "source": "asn-pivot", "prefix": prefix, "asn": asn, "tags": ["asn", f"asn:{asn}"], "evidence_id": signal_id or None}):
+                            prefixes_added += 1
+                        if max_prefixes > 0 and prefixes_added >= max_prefixes: break
+            except Exception as exc:
+                context.logger.warning("bgpview query failed for ASN %s: %s", asn, exc)
+                continue
             if max_prefixes > 0 and prefixes_added >= max_prefixes: break
 
-        stats = context.record.metadata.stats.setdefault("asn_pivot", {})
-        stats.update({"asns": min(len(asns), max_asn), "prefixes": prefixes_total, "added": prefixes_added})
+        context.update_stats("asn_pivot", asns=min(len(asns), max_asn), prefixes=prefixes_total, added=prefixes_added)
 
     def _root_domains(self, context: PipelineContext) -> List[str]:
         roots: Set[str] = set()

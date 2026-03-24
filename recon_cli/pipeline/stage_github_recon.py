@@ -20,27 +20,40 @@ class GitHubReconStage(Stage):
         return bool(getattr(context.runtime_config, "enable_github_recon", False))
 
     async def _search_github(
-        self, query: str, token: Optional[str] = None
+        self, context: PipelineContext, query: str, token: str
     ) -> List[Dict[str, Any]]:
-        if not token:
-            return []
-
         url = f"https://api.github.com/search/code?q={quote(query)}"
         headers = {
             "Accept": "application/vnd.github.v3+json",
             "Authorization": f"token {token}",
+            "User-Agent": "recon-cli github-recon",
         }
 
-        async with httpx.AsyncClient(timeout=15) as client:
-            try:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code == 200:
-                    return resp.json().get("items", [])
-                elif resp.status_code == 403:
-                    # Rate limited or invalid token
+        # Address Risk 2.6: Circuit Breaker for External APIs
+        from recon_cli.utils.circuit_breaker import registry as circuit_registry
+        breaker = circuit_registry.get_or_create("github-api", failure_threshold=3, recovery_timeout=120)
+
+        try:
+            async with breaker:
+                # Address Risk 3.2: Use shared AsyncHTTPClient
+                http = context.http_client
+                resp = await http.get(url, headers=headers, timeout=20.0)
+                
+                if resp.status == 200:
+                    try:
+                        data = json.loads(resp.body)
+                        return data.get("items", [])
+                    except json.JSONDecodeError:
+                        context.logger.warning("GitHub API returned invalid JSON for %s", query)
+                        return []
+                elif resp.status == 403:
+                    context.logger.warning("GitHub API rate limit hit or invalid token")
                     return []
-            except Exception:
-                pass
+                elif resp.status >= 400:
+                    context.logger.debug("GitHub API returned %d for %s", resp.status, query)
+                    return []
+        except Exception as exc:
+            context.logger.warning("GitHub search failed for %s: %s", query, exc)
         return []
 
     async def run_async(self, context: PipelineContext) -> None:
@@ -57,7 +70,7 @@ class GitHubReconStage(Stage):
 
         for target in targets:
             # Search for the domain in code
-            items = await self._search_github(target, token)
+            items = await self._search_github(context, target, token)
             for item in items:
                 repo = item.get("repository", {}).get("full_name")
                 file_url = item.get("html_url")
@@ -79,8 +92,6 @@ class GitHubReconStage(Stage):
                         "tags": ["github", "osint"],
                     }
                 )
-
-    def execute(self, context: PipelineContext) -> None:
-        import asyncio
-
-        asyncio.run(self.run_async(context))
+            
+            # Simple rate limit between queries to GitHub
+            await asyncio.sleep(2.0)

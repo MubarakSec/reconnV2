@@ -160,8 +160,8 @@ DEFAULT_PROFILES_CONTENT = """{
   "ultra-deep": {
     "base_profile": "full",
     "stages": [
-      "normalize", "passive", "permute", "ct_asn", "dedupe", "resolve", "enrichment", 
-      "cloud", "nmap_scan", "http_probe", "vhost_discovery", "origin_discovery", 
+      "normalize", "passive", "subdomain_permute", "ct_asn", "dedupe", "resolve", "enrichment", 
+      "cloud", "nmap", "http_probe", "vhost_discovery", "origin_discovery", 
       "github_recon", "takeover", "security_headers", "tls_hygiene", "auth_discovery", 
       "auth_bypass_tech", "active_auth", "waf_probe", "waf_bypass", "race_condition",
       "web_cache_vuln", "idor", "auth_matrix", "wordlist_miner", "fuzz", "active_intel", 
@@ -169,7 +169,7 @@ DEFAULT_PROFILES_CONTENT = """{
       "graphql_recon", "graphql_exploit", "api_schema_probe", "api_reconstructor",
       "api_logic_fuzzer", "oauth_discovery", "oauth_vuln", "ws_grpc_discovery", 
       "param_mining", "html_form_mining", "upload_probe", "vuln_scan", "cms_scan", 
-      "trim_results", "correlation", "learning", "scanner",
+      "trim_results", "correlation", "scanner",
       "verify_findings", "extended_validation", "idor_validator", "ssrf_validator", 
       "ssrf_pivot", "open_redirect_validator", "auth_bypass_validator", 
       "secret_exposure_validator", "exploit_validation", "screenshots", "finalize",
@@ -397,12 +397,36 @@ def load_profiles() -> Dict[str, Dict[str, Any]]:
     except json.JSONDecodeError:
         data = {}
     if isinstance(data, dict):
+        from recon_cli.pipeline.stages import PIPELINE_STAGES
+        valid_stage_names = {s.name for s in PIPELINE_STAGES}
+        
         validated: Dict[str, Dict[str, Any]] = {}
         for key, value in data.items():
             if not isinstance(value, dict):
                 _PROFILE_ERRORS.append(f"profile '{key}' invalid: expected object")
                 continue
             name = str(key).lower()
+            
+            # Validate stages if present
+            profile_stages = value.get("stages")
+            if profile_stages is not None:
+                if not isinstance(profile_stages, list):
+                    _PROFILE_ERRORS.append(f"profile '{name}' stages must be a list")
+                else:
+                    for stage_name in profile_stages:
+                        if stage_name not in valid_stage_names:
+                            _PROFILE_ERRORS.append(f"profile '{name}' references unknown stage '{stage_name}'")
+
+            # Validate skip_stages if present
+            skip_stages = value.get("skip_stages")
+            if skip_stages is not None:
+                if not isinstance(skip_stages, list):
+                    _PROFILE_ERRORS.append(f"profile '{name}' skip_stages must be a list")
+                else:
+                    for stage_name in skip_stages:
+                        if stage_name not in valid_stage_names:
+                            _PROFILE_ERRORS.append(f"profile '{name}' references unknown skip_stage '{stage_name}'")
+
             base_profile = value.get("base_profile")
             if base_profile is None or not isinstance(base_profile, str):
                 _PROFILE_ERRORS.append(f"profile '{name}' missing base_profile")

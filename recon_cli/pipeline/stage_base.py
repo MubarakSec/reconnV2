@@ -39,10 +39,13 @@ except Exception:
 
 
 def note_missing_tool(context: PipelineContext, tool: str) -> None:
-    missing = context.record.metadata.stats.setdefault("missing_tools", [])
-    if tool not in missing:
-        missing.append(tool)
-        context.manager.update_metadata(context.record)
+    if not context.record:
+        return
+    with context._lock:
+        missing = context.record.metadata.stats.setdefault("missing_tools", [])
+        if tool not in missing:
+            missing.append(tool)
+            context.manager.update_metadata(context.record)
 
 
 class Stage(ABC):
@@ -105,14 +108,16 @@ class Stage(ABC):
         sla_alerted = threading.Event()
         stop_alerted = threading.Event()
         sla_alert_elapsed = {"seconds": 0}
-        heartbeat_stats = context.record.metadata.stats.setdefault(
-            "stage_heartbeats", {}
-        )
-        stage_heartbeat = heartbeat_stats.setdefault(self.name, {})
-        stage_heartbeat["last_started_at"] = time_utils.iso_now()
-        stage_heartbeat["sla_seconds"] = sla_seconds
-        stage_heartbeat["count"] = int(stage_heartbeat.get("count", 0))
-        context.manager.update_metadata(context.record)
+        
+        with context._lock:
+            heartbeat_stats = context.record.metadata.stats.setdefault(
+                "stage_heartbeats", {}
+            )
+            stage_heartbeat = heartbeat_stats.setdefault(self.name, {})
+            stage_heartbeat["last_started_at"] = time_utils.iso_now()
+            stage_heartbeat["sla_seconds"] = sla_seconds
+            stage_heartbeat["count"] = int(stage_heartbeat.get("count", 0))
+            context.manager.update_metadata(context.record)
 
         def _heartbeat() -> None:
             check_interval = max(1, min(heartbeat_seconds, 2))
@@ -146,13 +151,14 @@ class Stage(ABC):
                     self.name,
                     elapsed,
                 )
-                heartbeat_entry = context.record.metadata.stats.setdefault(
-                    "stage_heartbeats", {}
-                ).setdefault(self.name, {})
-                heartbeat_entry["count"] = int(heartbeat_entry.get("count", 0)) + 1
-                heartbeat_entry["last_heartbeat_at"] = time_utils.iso_now()
-                heartbeat_entry["last_elapsed_seconds"] = elapsed
-                context.manager.update_metadata(context.record)
+                with context._lock:
+                    heartbeat_entry = context.record.metadata.stats.setdefault(
+                        "stage_heartbeats", {}
+                    ).setdefault(self.name, {})
+                    heartbeat_entry["count"] = int(heartbeat_entry.get("count", 0)) + 1
+                    heartbeat_entry["last_heartbeat_at"] = time_utils.iso_now()
+                    heartbeat_entry["last_elapsed_seconds"] = elapsed
+                    context.manager.update_metadata(context.record)
                 next_heartbeat = now + heartbeat_seconds
 
         thread = threading.Thread(
@@ -173,24 +179,25 @@ class Stage(ABC):
             done.set()
             thread.join()
             final_elapsed = int(time.monotonic() - started)
-            heartbeat_entry = context.record.metadata.stats.setdefault(
-                "stage_heartbeats", {}
-            ).setdefault(self.name, {})
-            heartbeat_entry["last_finished_at"] = time_utils.iso_now()
-            heartbeat_entry["last_elapsed_seconds"] = final_elapsed
-            if (
-                sla_alerted.is_set()
-                and getattr(context, "record", None)
-                and getattr(context, "manager", None)
-            ):
-                stats = context.record.metadata.stats.setdefault(
-                    "stage_runtime_alerts", {}
-                )
-                stats[self.name] = {
-                    "sla_seconds": sla_seconds,
-                    "alert_elapsed_seconds": int(sla_alert_elapsed["seconds"] or 0),
-                }
-            context.manager.update_metadata(context.record)
+            with context._lock:
+                heartbeat_entry = context.record.metadata.stats.setdefault(
+                    "stage_heartbeats", {}
+                ).setdefault(self.name, {})
+                heartbeat_entry["last_finished_at"] = time_utils.iso_now()
+                heartbeat_entry["last_elapsed_seconds"] = final_elapsed
+                if (
+                    sla_alerted.is_set()
+                    and getattr(context, "record", None)
+                    and getattr(context, "manager", None)
+                ):
+                    stats = context.record.metadata.stats.setdefault(
+                        "stage_runtime_alerts", {}
+                    )
+                    stats[self.name] = {
+                        "sla_seconds": sla_seconds,
+                        "alert_elapsed_seconds": int(sla_alert_elapsed["seconds"] or 0),
+                    }
+                context.manager.update_metadata(context.record)
             if stage_error is None and (
                 stop_alerted.is_set() or self._stop_requested(context)
             ):
@@ -199,12 +206,13 @@ class Stage(ABC):
                 )
 
     def _note_skip(self, context: PipelineContext, reason: str) -> None:
-        stats = context.record.metadata.stats.setdefault("stage_skips", {})
-        entry = stats.setdefault(self.name, {})
-        entry["reason"] = reason
-        entry["count"] = int(entry.get("count", 0)) + 1
-        entry["last_skipped_at"] = time_utils.iso_now()
-        context.manager.update_metadata(context.record)
+        with context._lock:
+            stats = context.record.metadata.stats.setdefault("stage_skips", {})
+            entry = stats.setdefault(self.name, {})
+            entry["reason"] = reason
+            entry["count"] = int(entry.get("count", 0)) + 1
+            entry["last_skipped_at"] = time_utils.iso_now()
+            context.manager.update_metadata(context.record)
 
     async def iter_events(
         self,

@@ -36,6 +36,7 @@ def get_connection():
     """Get database connection context manager."""
     conn = sqlite3.connect(str(get_db_path()))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
     try:
         yield conn
         conn.commit()
@@ -80,7 +81,7 @@ def init_db():
                 resolved BOOLEAN DEFAULT 0,
                 live BOOLEAN DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (job_id) REFERENCES jobs(id),
+                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
                 UNIQUE(job_id, hostname)
             )
         """)
@@ -98,7 +99,7 @@ def init_db():
                 content_type TEXT,
                 tls BOOLEAN DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (job_id) REFERENCES jobs(id),
+                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
                 UNIQUE(job_id, url)
             )
         """)
@@ -118,7 +119,7 @@ def init_db():
                 reference TEXT,
                 extracted TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (job_id) REFERENCES jobs(id)
+                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
             )
         """)
 
@@ -134,7 +135,7 @@ def init_db():
                 match TEXT,
                 entropy REAL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (job_id) REFERENCES jobs(id)
+                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
             )
         """)
 

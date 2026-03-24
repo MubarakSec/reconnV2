@@ -5,8 +5,6 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
-
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage, note_missing_tool
 from recon_cli.tools.executor import CommandError
@@ -24,7 +22,7 @@ class PassiveEnumerationStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return context.record.spec.profile in {"passive", "full"}
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         logger = context.logger
         targets = context.targets
         artifacts = context.record.paths
@@ -71,7 +69,7 @@ class PassiveEnumerationStage(Stage):
             logger.info("Skipping passive subdomain discovery (targets are all IPs)")
 
         # 4. Wayback URL discovery (includes fallback)
-        wayback_hosts = self._run_wayback(context, list(targets), tool_timeout, wayback_out) or set()
+        wayback_hosts = await self._run_wayback(context, list(targets), tool_timeout, wayback_out) or set()
 
         # 5. Result Collation & Tracking
         for hostname in sorted(subfinder_hosts):
@@ -114,8 +112,7 @@ class PassiveEnumerationStage(Stage):
                 "\n".join(passive_hosts) + "\n", encoding="utf-8"
             )
 
-        context.record.metadata.stats["passive_hostnames"] = len(passive_hosts)
-        context.manager.update_metadata(context.record)
+        context.update_stats(self.name, passive_hostnames=len(passive_hosts))
 
     def _run_subfinder(
         self, context: PipelineContext, targets_file: Any, tool_timeout: int
@@ -210,7 +207,7 @@ class PassiveEnumerationStage(Stage):
             note_missing_tool(context, "amass")
         return amass_hosts
 
-    def _run_wayback(
+    async def _run_wayback(
         self,
         context: PipelineContext,
         targets: list[str],
@@ -393,7 +390,7 @@ class PassiveEnumerationStage(Stage):
                     )
                     start = time.monotonic()
                     limit = target_budget if target_budget > 0 else 10000
-                    urls = self._run_wayback_api_fallback(context, target, limit)
+                    urls = await self._run_wayback_api_fallback(context, target, limit)
                     elapsed = time.monotonic() - start
 
                     url_added = 0
@@ -453,24 +450,21 @@ class PassiveEnumerationStage(Stage):
                     break
 
         # Stats update
-        stats = context.record.metadata.stats.setdefault("wayback", {})
-        stats.update(
-            {
-                "tool": wayback_cmd or "wayback_api",
-                "targets_total": len(wayback_targets),
-                "targets_processed": wayback_targets_processed,
-                "targets_skipped": wayback_targets_skipped,
-                "urls_ingested": wayback_total,
-                "max_urls": max_wayback_urls,
-                "max_per_target": max_wayback_per_target,
-                "fair_share": fair_share,
-                "global_cap_hit": bool(
-                    global_cap_hit
-                    or (max_wayback_urls and wayback_total >= max_wayback_urls)
-                ),
-            }
+        context.update_stats(
+            "wayback",
+            tool=wayback_cmd or "wayback_api",
+            targets_total=len(wayback_targets),
+            targets_processed=wayback_targets_processed,
+            targets_skipped=wayback_targets_skipped,
+            urls_ingested=wayback_total,
+            max_urls=max_wayback_urls,
+            max_per_target=max_wayback_per_target,
+            fair_share=fair_share,
+            global_cap_hit=bool(
+                global_cap_hit
+                or (max_wayback_urls and wayback_total >= max_wayback_urls)
+            ),
         )
-        context.manager.update_metadata(context.record)
 
         if not wrote_any and wayback_out.exists():
             wayback_out.unlink(missing_ok=True)
@@ -487,7 +481,7 @@ class PassiveEnumerationStage(Stage):
             )
         return found_hosts
 
-    def _run_wayback_api_fallback(
+    async def _run_wayback_api_fallback(
         self, context: PipelineContext, domain: str, limit: int
     ) -> list[str]:
         """
@@ -495,15 +489,30 @@ class PassiveEnumerationStage(Stage):
         """
         logger = context.logger
         url = f"https://web.archive.org/cdx/search/cdx?url=*.{domain}/*&output=json&collapse=urlkey&fl=original&limit={limit}"
+        
+        # Address Risk 2.6: Circuit Breaker for External APIs
+        from recon_cli.utils.circuit_breaker import registry as circuit_registry
+        breaker = circuit_registry.get_or_create("wayback-api", failure_threshold=5, recovery_timeout=60)
+        
         try:
             logger.debug("Querying Wayback CDX API for %s (limit=%d)", domain, limit)
-            resp = httpx.get(url, timeout=30.0)
-            resp.raise_for_status()
-            data = resp.json()
-            if not data or len(data) < 2:
-                return []
-            # CDX API returns a list of lists, first row is header ["original"]
-            return [row[0] for row in data[1:]]
+            async with breaker:
+                # Address Risk 3.2: Use shared AsyncHTTPClient
+                http = context.http_client
+                resp = await http.get(url, timeout=30.0)
+                if not resp.ok:
+                    logger.warning("Wayback CDX API fallback failed for %s: Status %s", domain, resp.status)
+                    return []
+                
+                try:
+                    data = json.loads(resp.body)
+                    if not data or len(data) < 2:
+                        return []
+                    # CDX API returns a list of lists, first row is header ["original"]
+                    return [row[0] for row in data[1:]]
+                except json.JSONDecodeError:
+                    logger.warning("Wayback CDX API returned invalid JSON for %s", domain)
+                    return []
         except Exception as exc:
-            logger.warning("Wayback CDX API fallback failed for %s: %s", domain, exc)
+            logger.warning("Wayback CDX API fallback error for %s: %s", domain, exc)
             return []
