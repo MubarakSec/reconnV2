@@ -116,6 +116,9 @@ class StealthManager:
         proxy = random.choice(self.config.proxies)
         return {"http": proxy, "https": proxy}
 
+    def get_random_ua(self) -> str:
+        return str(random.choice(self.UA_POOL)["ua"])
+
     def get_random_ua_data(self) -> Dict[str, Optional[str]]:
         return random.choice(self.UA_POOL)
 

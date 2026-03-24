@@ -24,8 +24,13 @@ class ApiLogicFuzzerStage(Stage):
     # Common ID patterns in paths (e.g. /api/v1/user/123 or /api/v1/order/uuid)
     ID_PATTERN = re.compile(r"/(?:[0-9]+|[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})(?=/|$)")
     
-    # Common administrative fields for Mass Assignment
-    ADMIN_FIELDS = ["is_admin", "admin", "role", "permissions", "privileges", "status", "verified"]
+    # Common administrative and sensitive fields for Mass Assignment
+    ADMIN_FIELDS = [
+        "is_admin", "admin", "role", "permissions", "privileges", 
+        "status", "verified", "is_verified", "credit_balance", "balance", 
+        "premium", "owner_id", "user_id", "email_verified", "subscription",
+        "plan", "points", "internal_id", "created_at", "updated_at"
+    ]
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_api_logic_fuzzer", True))
@@ -111,29 +116,73 @@ class ApiLogicFuzzerStage(Stage):
 
     async def _test_mass_assignment(self, context: PipelineContext, client: httpx.AsyncClient, url: str, method: str, session: Optional[Dict[str, Any]]) -> None:
         """
-        Mass Assignment Test.
-        Injects administrative fields into the request body.
+        Enhanced Mass Assignment Test.
+        Injects administrative and sensitive fields into the request body.
+        Uses diversified values and looks for reflection/persistence hints.
         """
         headers = self._get_headers(session) if session else {"User-Agent": "recon-cli"}
         headers["Content-Type"] = "application/json"
         
-        # Base payload (minimal)
-        payload = {"id": 1}
-        # Injected payload
-        injected_payload = dict(payload)
-        for field in self.ADMIN_FIELDS:
-            injected_payload[field] = True if "is_" in field else "admin"
-
+        # 1. Establish Baseline (Normal Request)
+        # Try to find a valid example payload from schema or use a dummy
+        base_payload = {"id": 1, "test": "recon"}
         try:
-            # Send injected request
-            resp = await client.request(method, url, json=injected_payload, headers=headers)
-            
-            # If the server accepts it (200/201/204) and reflects or doesn't error, it's worth flagging
-            if resp.status_code in [200, 201, 204]:
-                # Check if 'admin' or 'role' appears in the response (reflection)
-                if any(f in resp.text.lower() for f in self.ADMIN_FIELDS):
-                    self._report_logic_finding(context, url, "mass_assignment", f"Mass Assignment reflected in {method} response", "medium", {"payload": injected_payload})
-        except Exception: pass
+            baseline_resp = await client.request(method, url, json=base_payload, headers=headers)
+            baseline_text = baseline_resp.text.lower()
+        except Exception: 
+            baseline_text = ""
+
+        # 2. Test with different payload types
+        test_payloads = []
+        
+        # Boolean injections (is_admin: true)
+        bool_payload = dict(base_payload)
+        for f in self.ADMIN_FIELDS:
+            if f.startswith("is_") or "verified" in f:
+                bool_payload[f] = True
+        test_payloads.append(("boolean", bool_payload))
+
+        # String injections (role: admin)
+        str_payload = dict(base_payload)
+        for f in self.ADMIN_FIELDS:
+            if not f.startswith("is_") and "balance" not in f and "points" not in f:
+                str_payload[f] = "admin"
+        test_payloads.append(("string", str_payload))
+
+        # Numeric injections (balance: 99999)
+        num_payload = dict(base_payload)
+        for f in self.ADMIN_FIELDS:
+            if "balance" in f or "points" in f or "id" in f:
+                num_payload[f] = 99999
+        test_payloads.append(("numeric", num_payload))
+
+        for p_type, payload in test_payloads:
+            try:
+                resp = await client.request(method, url, json=payload, headers=headers)
+                
+                if resp.status_code in [200, 201, 204]:
+                    resp_text = resp.text.lower()
+                    
+                    # Detection Logic:
+                    # 1. Reflection check: Does the response contain fields NOT in the baseline?
+                    detected_fields = []
+                    for field in self.ADMIN_FIELDS:
+                        field_lower = field.lower()
+                        # If field appears in response but WAS NOT in baseline response
+                        if field_lower in resp_text and field_lower not in baseline_text:
+                            detected_fields.append(field)
+                    
+                    if detected_fields:
+                        self._report_logic_finding(
+                            context, url, "mass_assignment", 
+                            f"Mass Assignment ({p_type}) fields reflected in {method} response: {', '.join(detected_fields)}", 
+                            "high" if any(f in ["is_admin", "role", "admin"] for f in detected_fields) else "medium",
+                            {"payload": payload, "reflected_fields": detected_fields, "type": p_type}
+                        )
+                        # Avoid duplicate findings for same endpoint
+                        return 
+
+            except Exception: pass
 
     def _get_headers(self, session_data: Optional[Dict[str, Any]]) -> Dict[str, str]:
         headers = {"User-Agent": "Mozilla/5.0 (ReconnV2 API-Fuzzer)"}
