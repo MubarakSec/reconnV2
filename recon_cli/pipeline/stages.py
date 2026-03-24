@@ -44,6 +44,9 @@ from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
 from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
 from recon_cli.pipeline.stage_api_reconstructor import ApiSchemaReconstructorStage
 from recon_cli.pipeline.stage_api_logic_fuzzer import ApiLogicFuzzerStage
+from recon_cli.pipeline.stage_second_order_injection import SecondOrderInjectionStage
+from recon_cli.pipeline.stage_advanced_idor import AdvancedIDORStage
+from recon_cli.pipeline.stage_timing_attacks import TimingAttackStage
 from recon_cli.pipeline.stage_oauth_discovery import OAuthDiscoveryStage
 from recon_cli.pipeline.stage_oauth_vuln import OAuthVulnerabilityStage
 from recon_cli.pipeline.stage_jwt_vuln import JWTVulnerabilityStage
@@ -54,6 +57,12 @@ from recon_cli.pipeline.stage_auth_bypass_tech import AuthBypassTechniqueStage
 from recon_cli.pipeline.stage_upload_probe import UploadProbeStage
 from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
 from recon_cli.pipeline.stage_cms_scan import CMSScanStage
+from recon_cli.pipeline.stage_proto_pollution import ProtoPollutionStage
+from recon_cli.pipeline.stage_favicon_recon import FaviconReconStage
+from recon_cli.pipeline.stage_quic_discovery import QuicDiscoveryStage
+from recon_cli.pipeline.stage_advanced_idor import AdvancedIDORStage
+from recon_cli.pipeline.stage_second_order_injection import SecondOrderInjectionStage
+from recon_cli.pipeline.stage_timing_attacks import TimingAttackStage
 from recon_cli.pipeline.stage_trim_results import TrimResultsStage
 from recon_cli.pipeline.stage_rescore import RescoreStage
 from recon_cli.pipeline.stage_correlation import CorrelationStage
@@ -120,6 +129,9 @@ PIPELINE_STAGES: List[Stage] = [
     ApiSchemaProbeStage(),
     ApiSchemaReconstructorStage(),
     ApiLogicFuzzerStage(),
+    SecondOrderInjectionStage(),
+    AdvancedIDORStage(),
+    TimingAttackStage(),
     OAuthDiscoveryStage(),
     OAuthVulnerabilityStage(),
     JWTVulnerabilityStage(),
@@ -129,6 +141,12 @@ PIPELINE_STAGES: List[Stage] = [
     UploadProbeStage(),
     VulnScanStage(),
     CMSScanStage(),
+    ProtoPollutionStage(),
+    FaviconReconStage(),
+    QuicDiscoveryStage(),
+    AdvancedIDORStage(),
+    SecondOrderInjectionStage(),
+    TimingAttackStage(),
     RescoreStage(),
     TrimResultsStage(),
     CorrelationStage(),
