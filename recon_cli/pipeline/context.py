@@ -55,15 +55,23 @@ class PipelineContext:
     finished_stages: Set[str] = field(init=False, default_factory=set)
     trace_recorder: Optional[object] = field(init=False, default=None)
     stealth_manager: Optional[object] = field(init=False, default=None)
+    scope_manager: "ScopeManager" = field(init=False)
 
     def __post_init__(self) -> None:
         from recon_cli.utils.pipeline_trace import current_trace_recorder
         from recon_cli.utils.event_bus import PipelineEventBus
         from recon_cli.utils.stealth import StealthConfig, StealthManager
+        from recon_cli.utils.scope import ScopeManager
 
         self.trace_recorder = current_trace_recorder()
         self.event_bus = PipelineEventBus()
         
+        # Initialize Scope Manager
+        if self.record and self.record.spec.scope_file:
+            self.scope_manager = ScopeManager.from_file(Path(self.record.spec.scope_file))
+        else:
+            self.scope_manager = ScopeManager()
+
         # Initialize Stealth Manager
         proxies = getattr(self.runtime_config, "proxies", []) or []
         stealth_cfg = StealthConfig(
@@ -310,8 +318,15 @@ class PipelineContext:
     def url_allowed(self, url: str) -> bool:
         if not url:
             return False
+        
+        # Check scope manager (host-level and wildcard scope)
+        if not self.scope_manager.is_allowed(url):
+            return False
+
+        # If no path-level pattern is set, the host check is enough
         if not self._url_allow_pattern:
             return True
+        
         try:
             path = urlparse(url).path or ""
         except ValueError:

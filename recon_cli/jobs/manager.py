@@ -176,6 +176,7 @@ class JobManager:
         runtime_overrides: Optional[Dict[str, Any]] = None,
         insecure: bool = False,
         incremental_from: Optional[str] = None,
+        scope_file: Optional[str] = None,
         mode: str = "default",
     ) -> JobRecord:
         job_id = self.generate_job_id(target)
@@ -227,6 +228,26 @@ class JobManager:
                     pass
             prepared_wordlist = str(dest)
 
+        prepared_scope_file = scope_file
+        if scope_file:
+            source = Path(scope_file).expanduser()
+            try:
+                source = source.resolve(strict=True)
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(f"Scope file not found: {scope_file}") from exc
+            inputs_dir.mkdir(parents=True, exist_ok=True)
+            dest = inputs_dir / source.name
+            try:
+                dest_resolved = dest.resolve()
+            except FileNotFoundError:
+                dest_resolved = dest.absolute()
+            if source != dest_resolved:
+                try:
+                    shutil.copy2(source, dest)
+                except shutil.SameFileError:
+                    pass
+            prepared_scope_file = str(dest)
+
         prepared_overrides: Dict[str, Any] = dict(runtime_overrides or {})
 
         spec = JobSpec(
@@ -237,6 +258,7 @@ class JobManager:
             inline=inline,
             wordlist=prepared_wordlist,
             targets_file=prepared_targets_file,
+            scope_file=prepared_scope_file,
             max_screenshots=max_screenshots,
             force=force,
             allow_ip=allow_ip,

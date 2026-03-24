@@ -314,6 +314,15 @@ def scan(
         readable=True,
         help="File with multiple targets",
     ),
+    scope: Optional[Path] = typer.Option(
+        None,
+        "--scope",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Scope file (wildcards, exclusions, or HackerOne/Bugcrowd JSON)",
+    ),
     active_module: List[str] = typer.Option(
         [],
         "--active-module",
@@ -466,6 +475,7 @@ def scan(
                 runtime_overrides=runtime_overrides,
                 insecure=insecure,
                 incremental_from=incremental_from,
+                scope_file=str(scope) if scope else None,
                 mode=mode_input,
             )
             created.append(record.spec.job_id)
@@ -487,6 +497,7 @@ def scan(
         runtime_overrides=runtime_overrides,
         insecure=insecure,
         incremental_from=incremental_from,
+        scope_file=str(scope) if scope else None,
         mode=mode_input,
     )
     job_id = record.spec.job_id

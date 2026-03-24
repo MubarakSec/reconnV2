@@ -76,6 +76,7 @@ class JobSpec:
     execution_profile: Optional[str] = None
     runtime_overrides: Dict[str, Any] = field(default_factory=dict)
     incremental_from: Optional[str] = None
+    scope_file: Optional[str] = None
     mode: str = "default"
 
     def __post_init__(self) -> None:
@@ -109,6 +110,8 @@ class JobSpec:
             "execution_profile": self.execution_profile,
             "runtime_overrides": self.runtime_overrides,
             "incremental_from": self.incremental_from,
+            "scope_file": self.scope_file,
+            "mode": self.mode,
         }
 
     @classmethod
@@ -135,6 +138,8 @@ class JobSpec:
             execution_profile=payload.get("execution_profile"),
             runtime_overrides=dict(payload.get("runtime_overrides", {})),
             incremental_from=payload.get("incremental_from"),
+            scope_file=payload.get("scope_file"),
+            mode=payload.get("mode", "default"),
         )
 
 
