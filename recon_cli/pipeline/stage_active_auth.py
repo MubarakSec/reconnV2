@@ -14,6 +14,7 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
 from recon_cli.utils import time as time_utils, fs
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
+from recon_cli.utils.captcha import CaptchaDetector, CaptchaSolver
 
 
 class ActiveAuthStage(Stage):
@@ -109,19 +110,23 @@ class ActiveAuthStage(Stage):
         data[host] = credentials
         fs.write_json(self.ACCOUNTS_FILE, data)
 
-    async def _extract_csrf(self, context: PipelineContext, client: AsyncHTTPClient, url: str) -> Dict[str, str]:
+    async def _extract_form_context(self, context: PipelineContext, client: AsyncHTTPClient, url: str) -> Tuple[Dict[str, str], str]:
         tokens = {}
+        body = ""
         try:
             resp = await client.get(url)
             if resp.status == 200:
-                soup = BeautifulSoup(resp.body, 'html.parser')
+                body = resp.body
+                soup = BeautifulSoup(body, 'html.parser')
                 csrf_names = ['csrf', 'token', 'xsrf', 'authenticity_token', '_token', 'csrfmiddlewaretoken']
-                for input_tag in soup.find_all('input', type=['hidden', 'text']):
+                for input_tag in soup.find_all('input'):
+                    itype = input_tag.get('type', 'text').lower()
+                    if itype not in ['hidden', 'text', 'password', 'email']: continue
                     name = input_tag.get('name', '')
                     if any(cn in name.lower() for cn in csrf_names):
                         tokens[name] = input_tag.get('value', '')
         except Exception: pass
-        return tokens
+        return tokens, body
 
     def _map_form_fields(self, inputs: List[Dict[str, Any]], identity: Dict[str, str], current_payload: Dict[str, str]) -> Dict[str, str]:
         payload = dict(current_payload)
@@ -165,8 +170,33 @@ class ActiveAuthStage(Stage):
         }
         identity["email"] = f"{identity['email_prefix']}@{identity['email_domain']}"
 
-        csrf = await self._extract_csrf(context, client, url)
+        csrf, body = await self._extract_form_context(context, client, url)
         payload = self._map_form_fields(form.get("inputs", []), identity, csrf)
+
+        # CAPTCHA Bypass Logic
+        captcha_type = CaptchaDetector.detect(body)
+        if captcha_type:
+            api_key = getattr(context.runtime_config, "two_captcha_api_key", os.environ.get("TWO_CAPTCHA_API_KEY"))
+            if api_key:
+                context.logger.info("Solving %s CAPTCHA for signup at %s", captcha_type, url)
+                solver = CaptchaSolver(api_key)
+                site_key = CaptchaDetector.extract_site_key(body, captcha_type)
+                
+                token = None
+                if captcha_type == "recaptcha" and site_key:
+                    token = await asyncio.to_thread(solver.solve_recaptcha, site_key, url)
+                    if token: payload["g-recaptcha-response"] = token
+                elif captcha_type == "hcaptcha" and site_key:
+                    token = await asyncio.to_thread(solver.solve_hcaptcha, site_key, url)
+                    if token: payload["h-captcha-response"] = token
+                elif captcha_type == "turnstile" and site_key:
+                    token = await asyncio.to_thread(solver.solve_turnstile, site_key, url)
+                    if token: payload["cf-turnstile-response"] = token
+                
+                if not token:
+                    context.logger.warning("Failed to solve CAPTCHA at %s", url)
+            else:
+                context.logger.warning("CAPTCHA detected at %s but no 2Captcha API key provided.", url)
 
         context.logger.info("Attempting signup at %s with email %s", action, identity["email"])
         try:
@@ -212,8 +242,33 @@ class ActiveAuthStage(Stage):
         url = form.get("url")
         action = urljoin(url, form.get("action") or "")
         
-        csrf = await self._extract_csrf(context, client, url)
+        csrf, body = await self._extract_form_context(context, client, url)
         payload = self._map_form_fields(form.get("inputs", []), credentials, csrf)
+
+        # CAPTCHA Bypass Logic for login
+        captcha_type = CaptchaDetector.detect(body)
+        if captcha_type:
+            api_key = getattr(context.runtime_config, "two_captcha_api_key", os.environ.get("TWO_CAPTCHA_API_KEY"))
+            if api_key:
+                context.logger.info("Solving %s CAPTCHA for login at %s", captcha_type, url)
+                solver = CaptchaSolver(api_key)
+                site_key = CaptchaDetector.extract_site_key(body, captcha_type)
+                
+                token = None
+                if captcha_type == "recaptcha" and site_key:
+                    token = await asyncio.to_thread(solver.solve_recaptcha, site_key, url)
+                    if token: payload["g-recaptcha-response"] = token
+                elif captcha_type == "hcaptcha" and site_key:
+                    token = await asyncio.to_thread(solver.solve_hcaptcha, site_key, url)
+                    if token: payload["h-captcha-response"] = token
+                elif captcha_type == "turnstile" and site_key:
+                    token = await asyncio.to_thread(solver.solve_turnstile, site_key, url)
+                    if token: payload["cf-turnstile-response"] = token
+                
+                if not token:
+                    context.logger.warning("Failed to solve CAPTCHA for login at %s", url)
+            else:
+                context.logger.warning("CAPTCHA detected at %s but no 2Captcha API key provided.", url)
 
         try:
             resp = await client.post(action, data=payload)

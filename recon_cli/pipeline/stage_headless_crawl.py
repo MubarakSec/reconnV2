@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urljoin
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stage_base import Stage
-from recon_cli.utils.captcha import CaptchaDetector
+from recon_cli.utils.captcha import CaptchaDetector, CaptchaSolver
 
 
 class HeadlessCrawlStage(Stage):
@@ -79,6 +79,43 @@ class HeadlessCrawlStage(Stage):
             captcha_type = CaptchaDetector.detect(content)
             if captcha_type:
                 context.logger.warning("🚨 CAPTCHA (%s) detected on %s", captcha_type, url)
+                api_key = getattr(context.runtime_config, "two_captcha_api_key", os.environ.get("TWO_CAPTCHA_API_KEY"))
+                if api_key:
+                    context.logger.info("Attempting to solve %s CAPTCHA on %s", captcha_type, url)
+                    solver = CaptchaSolver(api_key)
+                    site_key = CaptchaDetector.extract_site_key(content, captcha_type)
+                    
+                    token = None
+                    if captcha_type == "recaptcha" and site_key:
+                        token = await asyncio.to_thread(solver.solve_recaptcha, site_key, url)
+                        if token:
+                            await page.evaluate(f'document.getElementById("g-recaptcha-response").innerHTML="{token}";')
+                    elif captcha_type == "hcaptcha" and site_key:
+                        token = await asyncio.to_thread(solver.solve_hcaptcha, site_key, url)
+                        if token:
+                            await page.evaluate(f'document.querySelector("[name=h-captcha-response]").innerHTML="{token}";')
+                    elif captcha_type == "turnstile" and site_key:
+                        token = await asyncio.to_thread(solver.solve_turnstile, site_key, url)
+                        if token:
+                            await page.evaluate(f'document.querySelector("[name=cf-turnstile-response]").value="{token}";')
+                    
+                    if token:
+                        context.logger.info("CAPTCHA solved and token injected into %s", url)
+                        # Try to trigger callback if it exists
+                        await page.evaluate("""() => {
+                            if (window.onReCaptchaSuccess) window.onReCaptchaSuccess();
+                            if (typeof grecaptcha !== 'undefined') {
+                                const forms = document.querySelectorAll('form');
+                                for (const form of forms) {
+                                    const submit = form.querySelector('[type=submit]');
+                                    if (submit) submit.click();
+                                }
+                            }
+                        }""")
+                        await asyncio.sleep(5)
+                else:
+                    context.logger.warning("CAPTCHA detected on %s but no 2Captcha API key provided.", url)
+                
                 context.results.append({
                     "type": "finding", "finding_type": "captcha_detected",
                     "url": url, "description": f"Page protected by {captcha_type} CAPTCHA",
@@ -100,7 +137,7 @@ class HeadlessCrawlStage(Stage):
                 if href and href.startswith("http"): captured_urls.add(href)
                     
         except Exception as e:
-            context.logger.debug("Headless crawl error for %s: %s", url, e)
+            context.logger.error("Headless crawl error for %s: %s", url, e)
         finally:
             await page.close()
             await page_context.close()
