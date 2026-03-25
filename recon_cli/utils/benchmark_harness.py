@@ -24,6 +24,7 @@ class BenchmarkTarget:
     url: str
     expected_findings: List[ExpectedFinding] = field(default_factory=list)
     profile: str = "full"
+    runtime_overrides: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class BenchmarkResult:
@@ -50,7 +51,11 @@ class BenchmarkHarness:
         start_time = time.monotonic()
         
         # 1. Create Job
-        record = self.manager.create_job(target=target.url, profile=target.profile)
+        record = self.manager.create_job(
+            target=target.url, 
+            profile=target.profile,
+            runtime_overrides=target.runtime_overrides
+        )
         job_id = record.spec.job_id
         
         # 2. Run Pipeline

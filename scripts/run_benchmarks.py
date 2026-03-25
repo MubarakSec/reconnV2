@@ -12,11 +12,21 @@ async def main():
     output_dir = Path("artifacts/benchmarks")
     harness = BenchmarkHarness(output_dir)
 
+    # Overrides to speed up tests by skipping heavy signature scanners
+    # and focusing on the autonomous logic engine
+    fast_overrides = {
+        "enable_scanner": False,
+        "enable_nuclei": False,
+        "enable_fuzz": False,
+        "enable_screenshots": False
+    }
+
     targets = [
         BenchmarkTarget(
             name="Juice Shop",
             url="http://localhost:3000",
             profile="full",
+            runtime_overrides=fast_overrides,
             expected_findings=[
                 ExpectedFinding(type="api_schema", pattern="swagger|api-docs"),
                 ExpectedFinding(type="sqli", pattern="login|search"),
@@ -27,6 +37,7 @@ async def main():
             name="DVWA",
             url="http://localhost:8001",
             profile="full",
+            runtime_overrides=fast_overrides,
             expected_findings=[
                 ExpectedFinding(type="sqli", pattern="vulnerabilities/sqli"),
                 ExpectedFinding(type="xss", pattern="vulnerabilities/xss_r"),
@@ -36,6 +47,7 @@ async def main():
             name="WebGoat",
             url="http://localhost:8081/WebGoat",
             profile="full",
+            runtime_overrides=fast_overrides,
             expected_findings=[
                 ExpectedFinding(type="auth_bypass", pattern="login"),
             ]
