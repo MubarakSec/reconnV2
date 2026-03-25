@@ -1,139 +1,107 @@
-# 🔍 ReconnV2 - Elite Bug Bounty Reconnaissance Pipeline
+# ReconnV2
 
-<div align="center">
+ReconnV2 is an autonomous, CLI-first web vulnerability discovery tool. It is designed to act like a junior analyst: it maps the target, holds multiple identities, formulates hypotheses, executes multi-step validation loops, and requires cryptographic or differential proof before declaring a bug.
 
-![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![Kali](https://img.shields.io/badge/Kali-Linux-557C94.svg)
-![Status](https://img.shields.io/badge/Status-Elite-gold.svg)
-![License](https://img.shields.io/badge/License-MIT-green.svg)
+It focuses heavily on logic flaws (IDOR, Auth Bypass, SSRF) rather than relying solely on static signature spraying.
 
-**The "God-Mode" Orchestrator for Professional Bug Hunters**
+## Core Architecture
 
-[Quickstart](#-quickstart) •
-[Interactive](#-interactive-wrapper) •
-[Elite Features](#-elite-god-mode-capabilities) •
-[Verification Standards](#-honest-recon-standards) •
-[Git-Ops Diffing](#-git-ops-monitoring)
+ReconnV2 operates on a decentralized pipeline architecture driven by an autonomous engine.
 
-</div>
+### 1. The Autonomous Engine (`recon_cli/engine/`)
+The system does not just run a list of payloads. It uses a separated planning and execution model:
+*   **Planner:** Analyzes the `TargetGraph` (see below) to formulate `Hypothesis` objects (e.g., "User B can access User A's object at this endpoint").
+*   **Executor:** Takes a `Hypothesis` and executes the necessary network requests, returning raw `Observation` data. It automatically handles identity rotation.
+*   **Judge:** Evaluates the `Observations`. It requires strict differential proof (e.g., matching response hashes across security boundaries) or out-of-band (OAST) correlation to confirm a bug.
 
----
+### 2. Target State Graph (`recon_cli/pipeline/context.py`)
+Instead of a flat list of URLs, ReconnV2 builds a relational map of the target.
+*   It tracks `hosts`, `api_endpoints`, `object_ids`, and `ssrf_sinks`.
+*   The Planner uses this graph to understand relationships. If it finds an ID `1001` belonging to Alice, it will attempt to substitute that ID into endpoints requested by Bob.
 
-## ⚡ Elite / God-Mode Capabilities (2026 Upgrades)
+### 3. Unified Auth & Identity (`recon_cli/utils/auth.py`)
+Authentication is durable and per-job.
+*   **Identities:** The system holds multiple `IdentityRecord` objects per scan (e.g., `admin`, `user`, `anonymous`).
+*   **Replay:** The `AsyncHTTPClient` allows stages and the Executor to request resources as specific identities simply by passing `identity_id="bob"`.
+*   **Boundary Testing:** The engine uses these identities to construct matrices of who can see what, automatically flagging cross-tenant leaks (IDOR) and unauthenticated data exposure.
 
-ReconnV2 has been upgraded with professional-grade features that bypass standard protections and find deep logic flaws.
+## Key Workflows & Validators
 
-| Feature | Description |
-|:--- |:--- |
-| 🌐 **Autonomous Auth** | Automatic Signup/Signin using **1secmail & GuerrillaMail** APIs for authenticated reconnaissance. |
-| 🧬 **API Reconstructor** | Automatically builds **OpenAPI/Swagger specs** from observed traffic and JS hints. |
-| 🎯 **Logic Fuzzer** | Intelligent **BOLA** and **Mass Assignment** detection using reconstructed schemas. |
-| 🕵️ **Stealth & Evasion** | **Proxy Rotation**, User-Agent randomization, and **Jitter** to bypass WAFs/Rate Limits. |
-| 🏁 **Race Condition** | Sync-burst request testing for state-changing endpoints (Turbo-Intruder style). |
-| 🕸️ **Headless Crawl** | Playwright-powered rendering (skips binary downloads) to fix the **"SPA Gap"**. |
-| 🛰️ **SSRF Pivot Pro** | Pivots confirmed SSRF to perform **Internal Port Scanning** (Redis, DBs, Localhost). |
-| 🧪 **Cache Destruction** | Tests for **Web Cache Deception** and **Cache Poisoning** via unkeyed headers. |
-| 🎯 **Wordlist Miner** | Generates **Target-Aware** dictionaries by scraping keywords from the target site. |
-| 🐍 **Auto-POC Gen** | Automatically generates standalone **Python exploit scripts** for confirmed bugs. |
-| ⚡ **QUIC Bypass** | Identifies **HTTP/3 (QUIC)** support and probes for **WAF Bypasses** over UDP. |
+*   **API Schema Reconstructor & Attacker:** Discovers or infers OpenAPI specs, extracts endpoints, and feeds the graph with structured attack surface data.
+*   **IDOR Validator:** Harvests real object IDs using a legitimate identity, then attempts to access them using lower-privileged or alternate identities. Uses semantic diffing to prevent soft-404 false positives.
+*   **SSRF Validator:** A sink classification engine. Identifies parameters, injects OAST and internal IPs (e.g., `169.254.169.254`), and correlates out-of-band DNS/HTTP interactions or differential internal responses.
+*   **Auth Bypass Validator:** Tests forced browsing and privilege boundaries. Compares responses from unauthenticated users against authenticated users to find publicly exposed restricted data.
 
----
-
-## 🛡️ "Honest Recon" Standards (Active Proof Only)
-
-ReconnV2 follows the **Honest Recon** standard: it prioritizes **Proof** over volume.
-
-- **SPA Soft-404 Destroyer**: Uses dynamic fingerprinting to eliminate false positives on modern Single Page Apps.
-- **Cross-Token Validation**: Confirms IDORs by comparing access between User A and User B sessions.
-- **Origin IP Discovery**: Bypasses Cloudflare/CDNs using **50+ Favicon Fingerprints**, **Censys SSL**, and **IPv6 Leaks**.
-- **OOB Integration**: Confirms Blind RCE, SQLi, and SSRF via **Interactsh** real-time interactions.
-- **Statistical Timing**: Detects **User Enumeration** via high-precision timing delta comparison (Valid vs Invalid).
-
----
-
-## 📁 Project Structure
-
-```
-reconnV2/
-├── 📜 recon.sh             # Ultimate Interactive Wrapper (Bug Bounty Edition)
-├── 📜 ROADMAP_ELITE.md     # Future goals (Distributed Celery, LLM Validation)
-├── 📜 objective.md         # The "Honest Recon" core standards
-├── 📁 recon_cli/           # The Engine
-│   ├── pipeline/           # 60+ Autonomous Stages (BOLA, Mass Assignment, QUIC, etc.)
-│   ├── utils/              # Stealth, OAST, and Captcha utilities
-│   └── ...
-├── 📁 config/              # Elite Profiles (ultra-deep, local-benchmark)
-├── 📁 data/                # Persistence (Accounts, Favicon Fingerprints)
-├── 📁 jobs/                # Job state (SQLite-backed for fault tolerance)
-└── 📁 tests/               # Elite Feature Test Suite (test_elite_features.py)
-```
-
----
-
-## 🚀 Quickstart
-
-### 1. The Interactive Experience (Recommended)
-```bash
-./recon.sh
-```
-Choose Option **[5] Ultra-Deep Hunter** for the full God-Mode experience on a BBP target.
-
-### 2. Manual CLI God-Mode
-```bash
-# Full pipeline with logic fuzzing, headless crawl, and hunter-mode scoring
-recon scan target.com --profile ultra-deep --mode hunter --inline
-```
-
-### 3. Local Benchmarking (Juice Shop / DVWA)
-```bash
-# Optimized for localhost: avoids public DNS starvation
-recon scan http://localhost:3000 --profile local-benchmark --inline
-```
-
----
-
-## 🗄️ Git-Ops Monitoring (`recon diff`)
-
-Professional hunters monitor targets daily. ReconnV2 supports continuous monitoring:
+## Installation
 
 ```bash
-# Compare yesterday's scan with today's to find the DELTA
-recon diff job_yesterday job_today
+# Requires Python 3.12+
+git clone https://github.com/MubarakSec/reconnV2.git
+cd reconnV2
+./install.sh
+source .venv/bin/activate
 ```
-*Outputs only new subdomains, new APIs, and new vulnerabilities.*
 
----
+## Usage
 
-## 🔄 The Pipeline (Execution Flow)
-
-1.  **Passive Discovery**: Subfinder, Amass, CRT.sh.
-2.  **Infrastructure**: IPv6 leak detection, Censys Origin Discovery, Nmap.
-3.  **Active Surface**: Headless rendering, JS Secret Harvesting, API Reconstruction.
-4.  **Logical Attack**: BOLA Fuzzing, **Mass Assignment**, Race Conditions, Auth Bypass, Cache Poisoning.
-5.  **Evidence**: POC Generation, Screenshotting (optimized for media), OAST Interaction collection.
-6.  **Reporting**: Git-Ops Diffing and Live War-Room Notifications.
-
----
-
-## 🔔 Live Notifications
-
-Configure your `.env` to get "shouted" at the second a High/Critical bug is confirmed:
+### Basic Scan
+Run the pipeline against a target.
 ```bash
-RECON_TELEGRAM_TOKEN="bot_token"
-RECON_TELEGRAM_CHAT_ID="chat_id"
-RECON_DISCORD_WEBHOOK="webhook_url"
+recon scan https://target.com --profile full
 ```
 
----
+### Providing Identities
+To utilize the autonomous IDOR and Auth Bypass engines, provide at least two session tokens. The engine will automatically map these to identities.
+```bash
+# Provide tokens in config/profiles.json or via overrides
+recon scan https://target.com --override '{"idor_token_a": "Bearer token1", "idor_token_b": "Bearer token2"}'
+```
 
-## 🤖 Reliability & Fault Tolerance
+### Continuous Monitoring (Git-Ops)
+Compare two jobs to find new attack surface.
+```bash
+recon diff job_id_yesterday job_id_today
+```
 
-- **SQLite State Sync**: Every finding is synced to a local database. If your machine crashes, your progress is saved.
-- **Smart Circuit Breaker**: Dynamically lowers request speed if WAF blocks are detected.
-- **Memory Efficient**: Streams results line-by-line; capable of scanning targets with 1,000,000+ assets.
+### Viewing Results
+View verified findings and their analyst-grade proofs.
+```bash
+recon report <job_id> --format html --verified-only
+```
+Or view the raw JSON line stream:
+```bash
+cat jobs/finished/<job_id>/results.jsonl | jq 'select(.type=="finding")'
+```
 
----
+## Output Format (Analyst-Grade Proof)
 
-<div align="center">
-  <b>Built for Professional Bug Hunters by Engineers who understand the "SPA Gap."</b>
-</div>
+When the Judge confirms a bug, it outputs a standardized proof artifact in `results.jsonl`:
+
+```json
+{
+  "finding_type": "idor",
+  "severity": "high",
+  "confidence_label": "verified",
+  "proof": {
+    "target": "https://api.example.com/users/1",
+    "role_or_identity_used": ["token-b"],
+    "exact_request_sequence": [
+      {"method": "GET", "url": "https://api.example.com/users/1", "identity": "token-a"},
+      {"method": "GET", "url": "https://api.example.com/users/1", "identity": "token-b"}
+    ],
+    "exact_differential_observation": {
+      "baseline_status": 200,
+      "test_status": 200,
+      "baseline_length": 1500,
+      "test_length": 1500
+    },
+    "replay_command": "reconn scan https://api.example.com/users/1 --identity token-b",
+    "confidence_rationale": "Identical successful response received across different identity boundaries."
+  }
+}
+```
+
+## Internal Tools
+
+*   `scripts/run_benchmarks.py`: Evaluates the engine against local docker instances (Juice Shop, DVWA).
+*   `recon.sh`: An interactive wrapper around the CLI.
