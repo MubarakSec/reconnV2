@@ -79,6 +79,9 @@ class ReportConfig:
     theme: str = "default"  # default, dark, corporate
     custom_css: Optional[str] = None
     page_size: str = "A4"  # For PDF
+    verified_only: bool = False
+    proof_required: bool = False
+    hunter_mode: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -197,11 +200,27 @@ class ReportGenerator:
             data = ReportData.from_job(data)
 
         # Filter findings if configured
+        if self.config.hunter_mode:
+            self.config.verified_only = True
+            self.config.proof_required = True
+
         if self.config.severity_filter:
             data.findings = [
                 f
                 for f in data.findings
                 if resolve_severity(f) in self.config.severity_filter
+            ]
+
+        if self.config.verified_only:
+            data.findings = [
+                f for f in data.findings
+                if f.get("confidence_label") == "verified" or "confirmed" in f.get("tags", [])
+            ]
+
+        if self.config.proof_required:
+            data.findings = [
+                f for f in data.findings
+                if f.get("proof") or f.get("poc") or f.get("details", {}).get("proof")
             ]
 
         if self.config.max_findings:

@@ -55,9 +55,20 @@ class Judge:
                 confidence=0.9 if len(confirmed_identities) > 2 else 0.7,
                 reasoning=reasons,
                 finding_data={
-                    "url": hypothesis.target_url,
-                    "type": "idor",
-                    "confirmed_identities": confirmed_identities
+                    "target": hypothesis.target_url,
+                    "role_or_identity_used": confirmed_identities[1:], # Exclude baseline
+                    "exact_request_sequence": [
+                        {"method": baseline.method, "url": baseline.url, "identity": baseline.identity_id},
+                        {"method": test_obs[0].method, "url": test_obs[0].url, "identity": test_obs[0].identity_id}
+                    ],
+                    "exact_differential_observation": {
+                        "baseline_status": baseline.status,
+                        "test_status": test_obs[0].status,
+                        "baseline_length": len(baseline.body),
+                        "test_length": len(test_obs[0].body)
+                    },
+                    "replay_command": f"reconn scan {hypothesis.target_url} --identity {test_obs[0].identity_id}",
+                    "confidence_rationale": "Identical successful response received across different identity boundaries."
                 }
             )
         

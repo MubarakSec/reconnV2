@@ -63,5 +63,4 @@ def test_judge_confirms_idor():
     
     assert result.level == EvidenceLevel.CONFIRMED
     assert result.confidence >= 0.7
-    assert "admin" in result.finding_data["confirmed_identities"]
-    assert "user" in result.finding_data["confirmed_identities"]
+    assert "user" in result.finding_data["role_or_identity_used"]

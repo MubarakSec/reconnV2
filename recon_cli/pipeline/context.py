@@ -219,18 +219,6 @@ class PipelineContext:
         self.executor = CommandExecutor(self.logger, cache=cache)
         pattern = self.runtime_config.url_path_allow_regex
         self._url_allow_pattern = re.compile(pattern) if pattern else None
-        try:
-            from recon_cli.utils.auth import build_auth_manager
-
-            self._auth_manager = build_auth_manager(
-                self.runtime_config,
-                logger=self.logger,
-                record=self.record,
-                manager=self.manager,
-                default_host=spec.target,
-            )
-        except Exception:
-            self._auth_manager = None
 
         def _allow_payload(payload: Dict[str, object]) -> bool:
             def _is_local(val: str) -> bool:

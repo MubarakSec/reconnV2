@@ -41,6 +41,9 @@ class DecisionEngineStage(Stage):
             if result.level == EvidenceLevel.CONFIRMED:
                 context.logger.warning("🚨 BUG CONFIRMED by Judge: %s on %s", hyp.type.value, hyp.target_url)
                 
+                # Standardize proof artifacts (Phase 6)
+                finding_data = result.finding_data or {}
+                
                 # Emit finding
                 finding = {
                     "type": "finding",
@@ -51,9 +54,23 @@ class DecisionEngineStage(Stage):
                     "details": {
                         "reasoning": result.reasoning,
                         "confidence": result.confidence,
-                        "finding_data": result.finding_data
+                        # Phase 6 Triage metadata
+                        "triage": {
+                            "exploit_preconditions": "Requires authenticated role" if hyp.identity_requirements else "None",
+                            "evidence_source_chain": ["planner", "executor", "judge"]
+                        }
+                    },
+                    # Phase 6 Core Proof Elements
+                    "proof": {
+                        "target": finding_data.get("target", hyp.target_url),
+                        "role_or_identity_used": finding_data.get("role_or_identity_used"),
+                        "exact_request_sequence": finding_data.get("exact_request_sequence"),
+                        "exact_differential_observation": finding_data.get("exact_differential_observation"),
+                        "replay_command": finding_data.get("replay_command"),
+                        "confidence_rationale": finding_data.get("confidence_rationale", result.reasoning[0] if result.reasoning else "")
                     },
                     "severity": "high",
+                    "confidence_label": "verified",
                     "tags": ["autonomous", "engine", "confirmed"]
                 }
                 context.results.append(finding)

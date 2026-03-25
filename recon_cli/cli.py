@@ -1552,82 +1552,6 @@ def export(
         typer.echo(str(archive_path))
 
 
-def _report_legacy(
-    job_id: str,
-    fmt: str = typer.Option(
-        "txt", "--format", case_sensitive=False, help="Report format: txt|md|json|html"
-    ),
-    verified_only: bool = typer.Option(
-        False, "--verified-only", help="Include only verified findings (html only)"
-    ),
-    proof_required: bool = typer.Option(
-        False, "--proof-required", help="Include only findings with proof (html only)"
-    ),
-    hunter_mode: bool = typer.Option(
-        False, "--hunter-mode", help="Hunter mode report preset (html only)"
-    ),
-) -> None:
-    """Emit a shareable report for a finished job."""
-    fmt = fmt.lower()
-    if fmt not in {"txt", "md", "json", "html"}:
-        typer.echo(f"Unsupported format: {fmt}", err=True)
-        raise typer.Exit(code=1)
-    manager = JobManager()
-    record = _load_job_or_exit(manager, job_id)
-    if fmt == "txt":
-        if verified_only or proof_required or hunter_mode:
-            typer.echo(
-                "verified-only/proof-required filters are only supported for html reports",
-                err=True,
-            )
-            raise typer.Exit(code=2)
-        payload = record.paths.results_txt.read_text(encoding="utf-8")
-        typer.echo(redact(payload) or payload)
-        return
-    if fmt == "md":
-        if verified_only or proof_required or hunter_mode:
-            typer.echo(
-                "verified-only/proof-required filters are only supported for html reports",
-                err=True,
-            )
-            raise typer.Exit(code=2)
-        content = redact(record.paths.results_txt.read_text(encoding="utf-8")) or ""
-        md_lines = [
-            "# recon-cli report",
-            f"Job: {job_id}",
-            "",
-            "```",
-            content.strip(),
-            "```",
-        ]
-        typer.echo("\n".join(md_lines))
-        return
-    if fmt == "html":
-        from recon_cli.utils.reporter import generate_html_report
-        from recon_cli.utils.reporter import ReportConfig
-
-        output_path = record.paths.root / "report.html"
-        if hunter_mode:
-            verified_only = True
-            proof_required = True
-        report_config = ReportConfig(
-            verified_only=verified_only,
-            proof_required=proof_required,
-            hunter_mode=hunter_mode,
-        )
-        generate_html_report(record.paths.root, output_path, report_config)
-        typer.secho(f"✅ HTML report generated: {output_path}", fg=typer.colors.GREEN)
-        return
-    payload = {  # type: ignore[assignment]
-        "job_id": job_id,
-        "spec": record.spec.to_dict(),
-        "metadata": record.metadata.to_dict(),
-        "stats": record.metadata.stats,
-    }
-    safe_payload = redact_json_value(payload)
-    typer.echo(json.dumps(safe_payload, indent=2, sort_keys=True))
-
-
 @app.command("verify-job")
 def verify_job(job_id: str) -> None:
     """Validate job files and surface corruption/errors."""
@@ -2091,27 +2015,12 @@ def generate_report(
         else:
             # Full report
             report_format = ReportFormat(format.lower())
-            if report_format == ReportFormat.HTML and (
-                verified_only or proof_required or hunter_mode
-            ):
-                from recon_cli.utils.reporter import ReportConfig as LegacyReportConfig
-                from recon_cli.utils.reporter import (
-                    generate_html_report as generate_legacy_html_report,
-                )
-
-                output_path = output or (record.paths.root / "report.html")
-                config = LegacyReportConfig(
-                    title=title or "ReconnV2 Scan Report",
-                    language="en",
-                    verified_only=verified_only,
-                    proof_required=proof_required,
-                    hunter_mode=hunter_mode,
-                )
-                generate_legacy_html_report(record.paths.root, output_path, config)
-                typer.secho(f"✅ Report saved to {output_path}", fg=typer.colors.GREEN)
-                return
+            
             config = ReportConfig(  # type: ignore[assignment]
                 title=title or f"Reconnaissance Report - {job_id}",
+                verified_only=verified_only,
+                proof_required=proof_required,
+                hunter_mode=hunter_mode,
             )
             generator = ReportGenerator(config)  # type: ignore[arg-type]
             import asyncio
