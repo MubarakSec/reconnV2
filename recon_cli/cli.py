@@ -1528,7 +1528,7 @@ def export(
         )
         typer.echo(redact(payload) or payload)
     elif fmt == "txt":
-        if verified_only or proof_required or hunter_mode or limit is not None:
+        if verified_only or proof_required or strict_mode or limit is not None:
             typer.echo(
                 "verified-only/proof-required filters are only supported for jsonl/triage exports",
                 err=True,
@@ -1537,7 +1537,7 @@ def export(
         payload = record.paths.results_txt.read_text(encoding="utf-8")
         typer.echo(redact(payload) or payload)
     else:
-        if verified_only or proof_required or hunter_mode or limit is not None:
+        if verified_only or proof_required or strict_mode or limit is not None:
             typer.echo(
                 "verified-only/proof-required filters are only supported for jsonl/triage exports",
                 err=True,
@@ -1943,8 +1943,8 @@ def generate_report(
     proof_required: bool = typer.Option(
         False, "--proof-required", help="Include only findings with proof in the report"
     ),
-    hunter_mode: bool = typer.Option(
-        False, "--hunter-mode", help="Hunter mode report preset (html only)"
+    strict_mode: bool = typer.Option(
+        False, "--strict-mode", help="Strict mode report preset (html only)"
     ),
 ) -> None:
     """Generate a report for a completed job."""
@@ -2020,7 +2020,7 @@ def generate_report(
                 title=title or f"Reconnaissance Report - {job_id}",
                 verified_only=verified_only,
                 proof_required=proof_required,
-                hunter_mode=hunter_mode,
+                strict_mode=strict_mode,
             )
             generator = ReportGenerator(config)  # type: ignore[arg-type]
             import asyncio

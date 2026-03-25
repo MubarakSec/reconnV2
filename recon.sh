@@ -643,9 +643,9 @@ scan_deep() {
     fi
 }
 
-scan_ultra_deep_hunter() {
-    print_info "Ultra-Deep Hunter: ultra-deep profile + hunter mode"
-    run_scan_flow "ultra-deep" --mode hunter
+scan_comprehensive_strict() {
+    print_info "Comprehensive Scan: ultra-deep profile + strict mode"
+    run_scan_flow "ultra-deep" --mode strict
 }
 
 scan_local_benchmark() {
@@ -867,8 +867,8 @@ export_results() {
         if ask_yes_no "Proof required?" "N"; then
             cmd+=(--proof-required)
         fi
-        if ask_yes_no "Hunter mode export?" "N"; then
-            cmd+=(--hunter-mode)
+        if ask_yes_no "Strict mode export (verified/proof only)?" "N"; then
+            cmd+=(--strict-mode)
         fi
         echo -ne "${CYAN}Limit findings (optional): ${NC}"
         local limit=""
@@ -922,8 +922,8 @@ generate_report() {
     if ask_yes_no "Proof required?" "N"; then
         cmd+=(--proof-required)
     fi
-    if [ "$format" = "html" ] && ask_yes_no "Hunter mode preset?" "N"; then
-        cmd+=(--hunter-mode)
+    if [ "$format" = "html" ] && ask_yes_no "Strict mode preset?" "N"; then
+        cmd+=(--strict-mode)
     fi
 
     run_scan_command "${cmd[@]}"
@@ -1103,7 +1103,7 @@ show_main_menu() {
     echo -e "${WHITE}[2]${NC} Passive scan"
     echo -e "${WHITE}[3]${NC} Full scan"
     echo -e "${WHITE}[4]${NC} Deep scan"
-    echo -e "${WHITE}[5]${NC} Ultra-Deep Hunter (ultra-deep + hunter mode)"
+    echo -e "${WHITE}[5]${NC} Comprehensive Logic Scan (ultra-deep profile + strict mode)"
     echo -e "${WHITE}[6]${NC} Local Benchmark (optimized for localhost)"
     echo -e "${WHITE}[7]${NC} API-only scan"
     echo -e "${WHITE}[8]${NC} Secure scan"
@@ -1161,7 +1161,7 @@ main() {
             2) scan_passive ;;
             3) scan_full ;;
             4) scan_deep ;;
-            5) scan_ultra_deep_hunter ;;
+            5) scan_comprehensive_strict ;;
             6) scan_local_benchmark ;;
             7) scan_api_only ;;
             8) scan_secure ;;

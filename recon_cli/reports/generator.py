@@ -81,7 +81,7 @@ class ReportConfig:
     page_size: str = "A4"  # For PDF
     verified_only: bool = False
     proof_required: bool = False
-    hunter_mode: bool = False
+    strict_mode: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -200,7 +200,7 @@ class ReportGenerator:
             data = ReportData.from_job(data)
 
         # Filter findings if configured
-        if self.config.hunter_mode:
+        if self.config.strict_mode:
             self.config.verified_only = True
             self.config.proof_required = True
 
