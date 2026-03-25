@@ -21,6 +21,9 @@ from recon_cli.utils import fs, time as time_utils, validation
 from recon_cli.utils.auth import UnifiedAuthManager
 from recon_cli.utils.jsonl import iter_jsonl
 from recon_cli.utils.logging import build_file_logger, silence_logger
+from recon_cli.engine.planner import Planner
+from recon_cli.engine.executor import Executor
+from recon_cli.engine.judge import Judge
 
 
 class TargetGraph:
@@ -100,6 +103,9 @@ class PipelineContext:
     _any_stage_failed: bool = field(init=False, default=False)
     _auth_manager: UnifiedAuthManager = field(init=False, default=None)
     target_graph: TargetGraph = field(init=False, default=None)
+    planner: Planner = field(init=False, default=None)
+    executor_engine: Executor = field(init=False, default=None)
+    judge: Judge = field(init=False, default=None)
     _stop_request_path: Optional[Path] = field(init=False, default=None)
     _global_limiter: Optional[object] = field(init=False, default=None)
     event_bus: "PipelineEventBus" = field(init=False)
@@ -178,10 +184,15 @@ class PipelineContext:
         # 6. Initialize Target Graph
         self.target_graph = TargetGraph()
 
+        # 7. Initialize Autonomy Engine (Phase 4)
+        self.planner = Planner(self)
+        self.executor_engine = Executor(self)
+        self.judge = Judge()
+
         if self.record is None:
             return
 
-        # 7. Rest of initialization
+        # 8. Rest of initialization
         raw_cache = fs.read_json(self._cache_path, default={})
         self._delta_cache = {}
         if isinstance(raw_cache, dict):

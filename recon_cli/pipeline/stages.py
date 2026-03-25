@@ -78,6 +78,7 @@ from recon_cli.pipeline.stage_auth_bypass_validator import AuthBypassValidatorSt
 from recon_cli.pipeline.stage_secret_exposure_validator import (
     SecretExposureValidatorStage,
 )
+from recon_cli.pipeline.stage_decision_engine import DecisionEngineStage
 from recon_cli.pipeline.stage_screenshots import ScreenshotStage
 from recon_cli.pipeline.stage_finalize import FinalizeStage
 from recon_cli.pipeline.stage_poc_generator import POCGeneratorStage
@@ -158,6 +159,7 @@ PIPELINE_STAGES: List[Stage] = [
     AuthBypassValidatorStage(),
     SecretExposureValidatorStage(),
     ExploitValidationStage(),
+    DecisionEngineStage(),
     ScreenshotStage(),
     FinalizeStage(),
     POCGeneratorStage(),
