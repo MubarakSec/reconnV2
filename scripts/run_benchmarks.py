@@ -15,8 +15,8 @@ async def main():
     # Overrides to speed up tests by skipping heavy signature scanners
     # and focusing on the autonomous logic engine
     fast_overrides = {
-        "enable_scanner": False,
-        "enable_nuclei": False,
+        "auto_scanners": False, # This disables ScannerStage
+        "enable_nuclei": False, # This disables NucleiStage
         "enable_fuzz": False,
         "enable_screenshots": False
     }
