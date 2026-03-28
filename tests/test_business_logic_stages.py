@@ -10,9 +10,9 @@ from unittest.mock import MagicMock, AsyncMock
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_second_order_injection import SecondOrderInjectionStage
-from recon_cli.pipeline.stage_advanced_idor import AdvancedIDORStage
-from recon_cli.pipeline.stage_timing_attacks import TimingAttackStage
+from recon_cli.pipeline.stages.vuln.stage_second_order_injection import SecondOrderInjectionStage
+from recon_cli.pipeline.stages.vuln.stage_advanced_idor import AdvancedIDORStage
+from recon_cli.pipeline.stages.vuln.stage_timing_attacks import TimingAttackStage
 from recon_cli.utils import fs
 from recon_cli.utils.async_http import HTTPResponse
 
@@ -55,7 +55,7 @@ async def test_second_order_injection_detection(monkeypatch, tmp_path: Path):
     mock_client.post.return_value = HTTPResponse(url="...", status=200, headers={}, body="saved", elapsed=0.1)
     mock_client.get.return_value = HTTPResponse(url="...", status=200, headers={}, body="Hello recon_canary_12345678", elapsed=0.1)
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_second_order_injection.AsyncHTTPClient", MagicMock(return_value=mock_client))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_second_order_injection.AsyncHTTPClient", MagicMock(return_value=mock_client))
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
     stage = SecondOrderInjectionStage()
@@ -77,7 +77,7 @@ async def test_advanced_idor_sequential_detection(monkeypatch, tmp_path: Path):
     mock_client.__aenter__.return_value = mock_client
     mock_client.get.return_value = HTTPResponse(url="https://example.com/api/orders/1000", status=200, headers={}, body='{"id": 1000}', elapsed=0.1)
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_advanced_idor.AsyncHTTPClient", MagicMock(return_value=mock_client))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_advanced_idor.AsyncHTTPClient", MagicMock(return_value=mock_client))
 
     stage = AdvancedIDORStage()
     await stage.run_async(context)
@@ -128,7 +128,7 @@ async def test_timing_attack_detection(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("time.perf_counter", mock_perf)
 
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
-    monkeypatch.setattr("recon_cli.pipeline.stage_timing_attacks.AsyncHTTPClient", MagicMock(return_value=mock_client))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_timing_attacks.AsyncHTTPClient", MagicMock(return_value=mock_client))
     
     stage = TimingAttackStage()
     stage.ACCOUNTS_FILE = accounts_file

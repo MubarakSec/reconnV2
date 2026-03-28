@@ -9,7 +9,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_jwt_vuln import JWTVulnerabilityStage
+from recon_cli.pipeline.stages.auth.stage_jwt_vuln import JWTVulnerabilityStage
 from recon_cli.utils import fs
 
 
@@ -86,7 +86,7 @@ async def test_jwt_vuln_stage_detects_weak_secret(tmp_path: Path, monkeypatch):
     mock_resp.body = '{"id": 1, "user": "admin"}'
     mock_client_instance.get.return_value = mock_resp
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_jwt_vuln.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
+    monkeypatch.setattr("recon_cli.pipeline.stages.auth.stage_jwt_vuln.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
     
     stage = JWTVulnerabilityStage()
     
@@ -130,7 +130,7 @@ async def test_jwt_vuln_stage_detects_alg_none(tmp_path: Path, monkeypatch):
 
     mock_client_instance.get.side_effect = side_effect
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_jwt_vuln.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
+    monkeypatch.setattr("recon_cli.pipeline.stages.auth.stage_jwt_vuln.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
     
     stage = JWTVulnerabilityStage()
     context.emit_signal = MagicMock()

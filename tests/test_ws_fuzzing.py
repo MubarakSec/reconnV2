@@ -9,7 +9,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
+from recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 from recon_cli.utils.ws_fuzzer import WSFuzzer
 
 
@@ -54,7 +54,7 @@ async def test_ws_discovery_and_fuzzing(tmp_path: Path, monkeypatch):
     mock_resp = MagicMock()
     mock_resp.status = 101
     mock_client_instance.get.return_value = mock_resp
-    monkeypatch.setattr("recon_cli.pipeline.stage_ws_grpc_discovery.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
     
     # Mock WSFuzzer
     mock_fuzzer = AsyncMock()
@@ -64,7 +64,7 @@ async def test_ws_discovery_and_fuzzing(tmp_path: Path, monkeypatch):
         "description": "Unauth WS access",
         "evidence": {"status": "ok"}
     }]
-    monkeypatch.setattr("recon_cli.pipeline.stage_ws_grpc_discovery.WSFuzzer", MagicMock(return_value=mock_fuzzer))
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery.WSFuzzer", MagicMock(return_value=mock_fuzzer))
     
     stage = WsGrpcDiscoveryStage()
     await stage.run_async(context)

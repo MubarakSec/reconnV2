@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_idor_validator import IDORValidatorStage
+from recon_cli.pipeline.stages.validation.stage_idor_validator import IDORValidatorStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.async_http import HTTPResponse

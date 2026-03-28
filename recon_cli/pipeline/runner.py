@@ -9,7 +9,7 @@ from pathlib import Path
 from recon_cli.jobs import summary
 from recon_cli.jobs.manager import JobManager
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_base import Stage, StageResult
+from recon_cli.pipeline.stages.core.stage_base import Stage, StageResult
 from recon_cli.pipeline.stages import PIPELINE_STAGES
 from recon_cli.pipeline.parallel import DependencyResolver
 from recon_cli.utils.notify import send_pipeline_notification

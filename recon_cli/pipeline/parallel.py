@@ -16,6 +16,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import gc
+from recon_cli.utils.error_recovery import error_recovery_context, RecoveryStrategy
+from recon_cli.pipeline.context import PipelineContext
 from recon_cli.utils.pipeline_trace import (
     current_trace_recorder,
     current_parent_span_id,
@@ -25,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from recon_cli.pipeline.stage_base import Stage as PipelineStage
+    from recon_cli.pipeline.stages.core.stage_base import Stage as PipelineStage
 
 logger = logging.getLogger(__name__)
 
@@ -277,19 +280,44 @@ class ParallelStageExecutor:
     async def _run_stage(self, name: str, stage: "PipelineStage") -> dict:
         """تنفيذ مرحلة واحدة"""
         start = time.time()
-        try:
-            # Most stages have a run() method
-            if hasattr(stage, "run_async"):
-                result = await stage.run_async(self.context)
-            elif hasattr(stage, "run"):
-                # Run sync stage in executor
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, stage.run, self.context)  # type: ignore[arg-type]
-            else:
-                result = {"status": "skipped", "reason": "no run method"}
+        
+        # Determine job_id and work_dir for error recovery
+        job_id = ""
+        work_dir = None
+        timeout = 3600
+        if isinstance(self.context, PipelineContext):
+            job_id = self.context.job_id or ""
+            work_dir = self.context.work_dir
+            if self.context.runtime_config:
+                timeout = getattr(self.context.runtime_config, "stage_timeout", 3600)
+        elif isinstance(self.context, dict):
+            job_id = str(self.context.get("job_id", ""))
+            work_dir = self.context.get("work_dir")
+            timeout = self.context.get("stage_timeout", 3600)
 
-            self._timings[name] = time.time() - start
-            return result or {}
+        try:
+            with error_recovery_context(
+                stage_name=name,
+                job_id=job_id,
+                output_dir=work_dir,
+            ) as recovery_ctx:
+                async with asyncio.timeout(timeout):
+                    # Most stages have a run() method
+                    if hasattr(stage, "run_async"):
+                        result = await stage.run_async(self.context)
+                    elif hasattr(stage, "run"):
+                        # Run sync stage in executor
+                        loop = asyncio.get_event_loop()
+                        result = await loop.run_in_executor(None, stage.run, self.context)  # type: ignore[arg-type]
+                    else:
+                        result = {"status": "skipped", "reason": "no run method"}
+
+                if result and isinstance(result, dict):
+                    recovery_ctx.record_result(result)
+                recovery_ctx.mark_success()
+                
+                self._timings[name] = time.time() - start
+                return result or {}
 
         except Exception as e:
             self._timings[name] = time.time() - start
@@ -312,57 +340,61 @@ class ParallelStageExecutor:
             plan.parallel_groups,
         )
 
-        for group_idx, group in enumerate(plan.execution_order):
-            # Limit parallelism within group
-            for i in range(0, len(group), self.max_parallel):
-                batch = group[i : i + self.max_parallel]
+        semaphore = asyncio.Semaphore(self.max_parallel)
 
-                logger.info(
-                    "Executing group %d batch: %s", group_idx + 1, ", ".join(batch)
-                )
-
+        async def _run_stage_with_sem(name: str) -> tuple:
+            async with semaphore:
                 recorder = current_trace_recorder()
                 parent_span_id = current_parent_span_id()
                 if recorder is not None:
-                    recorder.emit(
-                        "parallel.batch.started",
-                        {
-                            "group": group_idx + 1,
-                            "stages": batch,
-                            "parent_span_id": parent_span_id,
-                        },
-                    )
+                    recorder.emit("parallel.stage.started", {"stage": name, "parent_span_id": parent_span_id})
+                
+                try:
+                    res = await self._run_stage(name, self.stages[name])
+                    if recorder is not None:
+                        recorder.emit("parallel.stage.finished", {"stage": name, "parent_span_id": parent_span_id})
+                    return name, res
+                except Exception as e:
+                    if recorder is not None:
+                        recorder.emit("parallel.stage.error", {"stage": name, "error": str(e), "parent_span_id": parent_span_id})
+                    return name, e
 
-                # Run batch in parallel
-                tasks = []
-                for name in batch:
-                    stage = self.stages[name]
-                    tasks.append(self._run_stage(name, stage))
+        for group_idx, group in enumerate(plan.execution_order):
+            logger.info(
+                "Executing group %d: %s", group_idx + 1, ", ".join(group)
+            )
 
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+            tasks = [_run_stage_with_sem(name) for name in group]
+            group_results = await asyncio.gather(*tasks)
 
-                if recorder is not None:
-                    recorder.emit(
-                        "parallel.batch.finished",
-                        {
-                            "group": group_idx + 1,
-                            "stages": batch,
-                            "parent_span_id": parent_span_id,
-                        },
-                    )
+            # Store results
+            for name, result in group_results:
+                if isinstance(result, Exception):
+                    self._results[name] = {
+                        "status": "error",
+                        "error": str(result),
+                    }
+                    # Resilience: Track broken stages in metadata
+                    if isinstance(self.context, PipelineContext) and self.context.record:
+                        stats = self.context.record.metadata.stats
+                        if "broken_stages" not in stats:
+                            stats["broken_stages"] = {}
+                        stats["broken_stages"][name] = str(result)
+                else:
+                    self._results[name] = result  # type: ignore[assignment]
 
-                # Store results
-                for name, result in zip(batch, results):
-                    if isinstance(result, Exception):
-                        self._results[name] = {
-                            "status": "error",
-                            "error": str(result),
-                        }
-                    else:
-                        self._results[name] = result  # type: ignore[assignment]
-
-                    # Mark as completed in plan
-                    plan.stages[name].completed = True
+                # Mark as completed in plan
+                plan.stages[name].completed = True
+                
+                # Resilience: Perform GC if configured
+                should_gc = False
+                if isinstance(self.context, PipelineContext) and self.context.runtime_config:
+                    # In real code, this might be under a 'pipeline' sub-attr in runtime_config
+                    # For safety, we check common locations
+                    should_gc = getattr(self.context.runtime_config, "gc_between_stages", True)
+                
+                if should_gc:
+                    gc.collect()
 
         return self._results
 

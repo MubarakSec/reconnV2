@@ -8,19 +8,19 @@ from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
-from recon_cli.pipeline.stage_api_reconstructor import ApiSchemaReconstructorStage
-from recon_cli.pipeline.stage_api_logic_fuzzer import ApiLogicFuzzerStage
-from recon_cli.pipeline.stage_correlation import CorrelationStage
-from recon_cli.pipeline.stage_poc_generator import POCGeneratorStage
-from recon_cli.pipeline.stage_headless_crawl import HeadlessCrawlStage
-from recon_cli.pipeline.stage_ssrf_pivot import SSRFPivotStage
-from recon_cli.pipeline.stage_cache_vuln import WebCacheVulnStage
-from recon_cli.pipeline.stage_cloud_looter import CloudBucketLooterStage
-from recon_cli.pipeline.stage_wordlist_miner import WordlistMinerStage
-from recon_cli.pipeline.stage_idor import IDORStage
-from recon_cli.pipeline.stage_idor_validator import IDORValidatorStage
-from recon_cli.pipeline.stage_secrets import SecretsDetectionStage
+from recon_cli.pipeline.stages.auth.stage_active_auth import ActiveAuthStage
+from recon_cli.pipeline.stages.discovery.stage_api_reconstructor import ApiSchemaReconstructorStage
+from recon_cli.pipeline.stages.vuln.stage_api_logic_fuzzer import ApiLogicFuzzerStage
+from recon_cli.pipeline.stages.core.stage_correlation import CorrelationStage
+from recon_cli.pipeline.stages.core.stage_poc_generator import POCGeneratorStage
+from recon_cli.pipeline.stages.discovery.stage_headless_crawl import HeadlessCrawlStage
+from recon_cli.pipeline.stages.vuln.stage_ssrf_pivot import SSRFPivotStage
+from recon_cli.pipeline.stages.vuln.stage_cache_vuln import WebCacheVulnStage
+from recon_cli.pipeline.stages.discovery.stage_cloud_looter import CloudBucketLooterStage
+from recon_cli.pipeline.stages.discovery.stage_wordlist_miner import WordlistMinerStage
+from recon_cli.pipeline.stages.vuln.stage_idor import IDORStage
+from recon_cli.pipeline.stages.validation.stage_idor_validator import IDORValidatorStage
+from recon_cli.pipeline.stages.vuln.stage_secrets import SecretsDetectionStage
 from recon_cli.utils.stealth import StealthManager, StealthConfig
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPResponse
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_takeover import TakeoverStage
+from recon_cli.pipeline.stages.vuln.stage_takeover import TakeoverStage
 from recon_cli.takeover.detector import TakeoverFinding
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl

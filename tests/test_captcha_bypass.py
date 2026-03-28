@@ -5,8 +5,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 from recon_cli.utils.captcha import CaptchaDetector, CaptchaSolver
-from recon_cli.pipeline.stage_active_auth import ActiveAuthStage
-from recon_cli.pipeline.stage_headless_crawl import HeadlessCrawlStage
+from recon_cli.pipeline.stages.auth.stage_active_auth import ActiveAuthStage
+from recon_cli.pipeline.stages.discovery.stage_headless_crawl import HeadlessCrawlStage
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.utils.async_http import HTTPResponse
 

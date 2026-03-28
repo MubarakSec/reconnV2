@@ -6,7 +6,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.runner import PipelineRunner
-from recon_cli.pipeline.stage_base import Stage, StageError
+from recon_cli.pipeline.stages.core.stage_base import Stage, StageError
 from recon_cli.utils import fs
 
 

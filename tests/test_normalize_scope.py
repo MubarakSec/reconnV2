@@ -34,7 +34,7 @@ def test_normalize_stage_uses_inputs_after_move(
     from recon_cli.jobs.lifecycle import JobLifecycle
     from recon_cli.jobs.manager import JobManager
     from recon_cli.pipeline.context import PipelineContext
-    from recon_cli.pipeline.stage_normalize import NormalizeStage
+    from recon_cli.pipeline.stages.core.stage_normalize import NormalizeStage
 
     targets_file = tmp_path / "targets.txt"
     targets_file.write_text("example.com\n", encoding="utf-8")

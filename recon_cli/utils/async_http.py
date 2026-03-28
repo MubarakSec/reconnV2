@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
 import logging
+from recon_cli.utils.circuit_breaker import registry as cb_registry, CircuitOpenError
 
 if TYPE_CHECKING:
     from recon_cli.pipeline.context import PipelineContext
@@ -299,14 +300,20 @@ class AsyncHTTPClient:
                 else:
                     final_headers["Cookie"] = cookie_header
 
-        async with self._semaphore:
-            async with host_sem:
-                if hasattr(self._rate_limiter, "wait_for_slot"):
-                    await self._rate_limiter.wait_for_slot(url)
-                else:
-                    await self._rate_limiter.acquire(host)
+        async with host_sem:
+            if hasattr(self._rate_limiter, "wait_for_slot"):
+                await self._rate_limiter.wait_for_slot(url)
+            else:
+                await self._rate_limiter.acquire(host)
 
-                resp = await self._request_with_retry(method=method, url=url, headers=final_headers, follow_redirects=follow_redirects, **kwargs)
+            async with self._semaphore:
+                breaker = cb_registry.get_or_create(f"http_{host}")
+                try:
+                    async with breaker:
+                        resp = await self._request_with_retry(method=method, url=url, headers=final_headers, follow_redirects=follow_redirects, **kwargs)
+                except CircuitOpenError as e:
+                    self._stats["failures"] += 1
+                    return HTTPResponse(url=url, status=0, headers={}, body="", elapsed=0, error=str(e))
                 
                 if hasattr(self._rate_limiter, "on_response"):
                     self._rate_limiter.on_response(url, resp.status)
@@ -365,7 +372,10 @@ class AsyncHTTPClient:
         try:
             request_method = getattr(self._session, method.lower(), self._session.request)
             async with request_method(url, headers=headers, allow_redirects=follow_redirects, **kwargs) as response:
-                body = await response.text()
+                # Read up to 5MB to prevent OOM/slowdown on massive responses
+                body_bytes = await response.content.read(5 * 1024 * 1024)
+                body = body_bytes.decode('utf-8', errors='replace')
+                
                 elapsed = time.monotonic() - start_time
                 self._stats["total_time"] += elapsed
                 self._stats["successes"] += 1

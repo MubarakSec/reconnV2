@@ -7,7 +7,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_cms_scan import CMSScanStage
+from recon_cli.pipeline.stages.discovery.stage_cms_scan import CMSScanStage
 from recon_cli.utils import fs
 
 

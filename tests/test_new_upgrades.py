@@ -9,9 +9,9 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_favicon_recon import FaviconReconStage
-from recon_cli.pipeline.stage_quic_discovery import QuicDiscoveryStage
-from recon_cli.pipeline.stage_proto_pollution import ProtoPollutionStage
+from recon_cli.pipeline.stages.discovery.stage_favicon_recon import FaviconReconStage
+from recon_cli.pipeline.stages.discovery.stage_quic_discovery import QuicDiscoveryStage
+from recon_cli.pipeline.stages.vuln.stage_proto_pollution import ProtoPollutionStage
 
 
 class DummyManager:
@@ -40,9 +40,9 @@ async def test_favicon_recon_stage(tmp_path: Path, monkeypatch):
     context.emit_signal = MagicMock()
     
     # Mock AsyncHTTPClient and fetch_favicon_hash
-    monkeypatch.setattr("recon_cli.pipeline.stage_favicon_recon.AsyncHTTPClient", MagicMock())
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_favicon_recon.AsyncHTTPClient", MagicMock())
     # Django hash: -1253869855
-    monkeypatch.setattr("recon_cli.pipeline.stage_favicon_recon.fetch_favicon_hash", AsyncMock(return_value=-1253869855))
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_favicon_recon.fetch_favicon_hash", AsyncMock(return_value=-1253869855))
     
     stage = FaviconReconStage()
     await stage.run_async(context)
@@ -62,7 +62,7 @@ async def test_quic_discovery_stage(tmp_path: Path, monkeypatch):
     # Mock QUICDetector
     mock_detector = AsyncMock()
     mock_detector.check_quic.return_value = (True, "Found Alt-Svc")
-    monkeypatch.setattr("recon_cli.pipeline.stage_quic_discovery.QUICDetector", MagicMock(return_value=mock_detector))
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_quic_discovery.QUICDetector", MagicMock(return_value=mock_detector))
     
     stage = QuicDiscoveryStage()
     await stage.run_async(context)
@@ -85,10 +85,10 @@ async def test_proto_pollution_stage_server_side(tmp_path: Path, monkeypatch):
     mock_resp = MagicMock()
     mock_resp.body = '{"status": "ok", "reconn_pp": "polluted"}'
     mock_client_instance.post.return_value = mock_resp
-    monkeypatch.setattr("recon_cli.pipeline.stage_proto_pollution.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_proto_pollution.AsyncHTTPClient", MagicMock(return_value=mock_client_instance))
     
     # Disable playwright for this test
-    monkeypatch.setattr("recon_cli.pipeline.stage_proto_pollution.ProtoPollutionStage._test_client_side", AsyncMock())
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_proto_pollution.ProtoPollutionStage._test_client_side", AsyncMock())
     
     stage = ProtoPollutionStage()
     await stage.run_async(context)

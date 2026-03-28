@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 
 def test_nmap_parser_coverage():
-    from recon_cli.pipeline.stage_nmap import NmapStage
+    from recon_cli.pipeline.stages.discovery.stage_nmap import NmapStage
     stage = NmapStage()
     
     xml = """<?xml version="1.0"?>
@@ -31,7 +31,7 @@ def test_nmap_parser_coverage():
         pass
 
 def test_graphql_exploit_coverage():
-    from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
+    from recon_cli.pipeline.stages.vuln.stage_graphql_exploit import GraphQLExploitStage
     stage = GraphQLExploitStage()
     ctx = MagicMock()
     
@@ -48,7 +48,7 @@ def test_graphql_exploit_coverage():
     except Exception: pass
 
 def test_extended_validation_coverage():
-    from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
+    from recon_cli.pipeline.stages.validation.stage_extended_validation import ExtendedValidationStage
     stage = ExtendedValidationStage()
     ctx = MagicMock()
     
@@ -65,7 +65,7 @@ def test_extended_validation_coverage():
     except Exception: pass
 
 def test_js_intel_coverage():
-    from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
+    from recon_cli.pipeline.stages.discovery.stage_js_intel import JSIntelligenceStage
     stage = JSIntelligenceStage()
     ctx = MagicMock()
     
@@ -77,7 +77,7 @@ def test_js_intel_coverage():
     except Exception: pass
 
 def test_http_probe_coverage():
-    from recon_cli.pipeline.stage_http_probe import HttpProbeStage
+    from recon_cli.pipeline.stages.discovery.stage_http_probe import HttpProbeStage
     stage = HttpProbeStage()
     ctx = MagicMock()
     
@@ -85,7 +85,7 @@ def test_http_probe_coverage():
     except Exception: pass
 
 def test_verify_findings_coverage():
-    from recon_cli.pipeline.stage_verify_findings import VerifyFindingsStage
+    from recon_cli.pipeline.stages.core.stage_verify_findings import VerifyFindingsStage
     stage = VerifyFindingsStage()
     ctx = MagicMock()
     
@@ -101,7 +101,7 @@ def test_templates_coverage():
     except Exception: pass
 
 def test_ct_asn_coverage():
-    from recon_cli.pipeline.stage_ct_asn import CTPivotStage
+    from recon_cli.pipeline.stages.discovery.stage_ct_asn import CTPivotStage
     stage = CTPivotStage()
     ctx = MagicMock()
     ctx.get_results.return_value = [{"type": "domain", "value": "example.com"}]

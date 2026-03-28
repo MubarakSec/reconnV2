@@ -7,12 +7,12 @@ from recon_cli.crawl.runtime import CrawlResult
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_api_recon import APIReconStage
-from recon_cli.pipeline.stage_correlation import CorrelationStage
-from recon_cli.pipeline.stage_graphql import GraphQLReconStage
-from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
-from recon_cli.pipeline.stage_param_mining import ParamMiningStage
-from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
+from recon_cli.pipeline.stages.discovery.stage_api_recon import APIReconStage
+from recon_cli.pipeline.stages.core.stage_correlation import CorrelationStage
+from recon_cli.pipeline.stages.discovery.stage_graphql import GraphQLReconStage
+from recon_cli.pipeline.stages.discovery.stage_js_intel import JSIntelligenceStage
+from recon_cli.pipeline.stages.discovery.stage_param_mining import ParamMiningStage
+from recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 from recon_cli.pipeline.stages import RuntimeCrawlStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
@@ -355,7 +355,7 @@ def test_runtime_crawl_role_aware_profiles_emit_profile_records(
         handle.write("\n")
     context = PipelineContext(record=record, manager=DummyManager())
 
-    import recon_cli.pipeline.stage_runtime_crawl as stages_module
+    import recon_cli.pipeline.stages.discovery.stage_runtime_crawl as stages_module
 
     monkeypatch.setattr(stages_module, "PLAYWRIGHT_AVAILABLE", True)
 

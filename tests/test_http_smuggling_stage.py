@@ -9,7 +9,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_http_smuggling import HttpSmugglingStage
+from recon_cli.pipeline.stages.vuln.stage_http_smuggling import HttpSmugglingStage
 
 
 class DummyManager:
@@ -46,12 +46,12 @@ async def test_http_smuggling_stage_detects_h1_clte(tmp_path: Path, monkeypatch)
         resp.status = 200
         return resp, None
 
-    monkeypatch.setattr("recon_cli.pipeline.stage_http_smuggling.send_raw_http", mock_send_raw)
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_http_smuggling.send_raw_http", mock_send_raw)
     
     # Disable H2 for this test
     mock_h2_detector = AsyncMock()
     mock_h2_detector.check_h2_support.return_value = False
-    monkeypatch.setattr("recon_cli.pipeline.stage_http_smuggling.H2SmugglingDetector", MagicMock(return_value=mock_h2_detector))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_http_smuggling.H2SmugglingDetector", MagicMock(return_value=mock_h2_detector))
     
     stage = HttpSmugglingStage()
     await stage.run_async(context)
@@ -76,7 +76,7 @@ async def test_http_smuggling_stage_detects_h2_cl(tmp_path: Path, monkeypatch):
         resp = MagicMock()
         resp.status = 200
         return resp, None
-    monkeypatch.setattr("recon_cli.pipeline.stage_http_smuggling.send_raw_http", mock_send_raw)
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_http_smuggling.send_raw_http", mock_send_raw)
     
     # Mock H2 detector to return H2.CL vuln
     mock_h2_detector = AsyncMock()
@@ -84,7 +84,7 @@ async def test_http_smuggling_stage_detects_h2_cl(tmp_path: Path, monkeypatch):
     mock_h2_detector.detect_h2_cl.return_value = (True, "H2.CL desync: Timeout")
     mock_h2_detector.detect_h2_te.return_value = (False, "")
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_http_smuggling.H2SmugglingDetector", MagicMock(return_value=mock_h2_detector))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_http_smuggling.H2SmugglingDetector", MagicMock(return_value=mock_h2_detector))
     
     stage = HttpSmugglingStage()
     await stage.run_async(context)

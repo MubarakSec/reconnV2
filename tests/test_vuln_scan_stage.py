@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
+from recon_cli.pipeline.stages.vuln.stage_vuln_scan import VulnScanStage
 
 
 def test_dalfox_confirmed_from_json_pocs():

@@ -318,6 +318,14 @@ def generate_summary(context) -> None:
         if wall_clock >= 0:
             lines.append(f"Wall Clock   : {wall_clock:.1f}s")
 
+    # Resilience: Report broken stages
+    broken_stages = metadata.stats.get("broken_stages", {})
+    if broken_stages:
+        lines.append("")
+        lines.append(f"== ⚠️  BROKEN STAGES ({len(broken_stages)}) ==")
+        for stage, error in broken_stages.items():
+            lines.append(f"[!] {stage:25}: {error}")
+
     top_findings = data["top_findings"]
     confirmed_findings = [entry for entry in top_findings if _is_confirmed(entry)]
     if confirmed_findings:

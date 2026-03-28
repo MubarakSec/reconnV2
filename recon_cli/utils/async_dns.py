@@ -87,15 +87,26 @@ class DNSCache:
     يخزن النتائج مع TTL.
     """
 
-    def __init__(self, default_ttl: int = 300):
+    def __init__(self, default_ttl: int = 300, negative_ttl: int = 60):
         self.default_ttl = default_ttl
+        self.negative_ttl = negative_ttl
         self._cache: Dict[Tuple[str, str], DNSRecord] = {}
+        self._negative_cache: Dict[Tuple[str, str], float] = {}
         self._hits = 0
         self._misses = 0
 
     def get(self, domain: str, record_type: str = "A") -> Optional[DNSRecord]:
         """الحصول على سجل من الـ cache"""
         key = (domain.lower(), record_type)
+        
+        # Check negative cache
+        if key in self._negative_cache:
+            if time.time() < self._negative_cache[key]:
+                self._hits += 1
+                return DNSRecord(domain, record_type, "", ttl=0) # Marker for negative hit
+            else:
+                del self._negative_cache[key]
+
         record = self._cache.get(key)
 
         if record and not record.is_expired:
@@ -112,10 +123,14 @@ class DNSCache:
         key = (record.domain.lower(), record.record_type)
         self._cache[key] = record
 
-    def set_many(self, records: List[DNSRecord]) -> None:
-        """تخزين سجلات متعددة"""
-        for record in records:
-            self.set(record)
+    def set_negative(self, domain: str, record_type: str = "A") -> None:
+        """تخزين نتيجة سلبية"""
+        key = (domain.lower(), record_type)
+        self._negative_cache[key] = time.time() + self.negative_ttl
+
+    def is_negative(self, record: DNSRecord) -> bool:
+        """هل هو سجل سلبي؟"""
+        return record.ttl == 0 and record.value == ""
 
     def clear_expired(self) -> int:
         """مسح السجلات المنتهية"""
@@ -221,6 +236,8 @@ class AsyncDNSResolver:
         if self._cache:
             cached = self._cache.get(domain, record_type)
             if cached:
+                if self._cache.is_negative(cached):
+                    return DNSResult(domain=domain, error="NXDOMAIN (cached)", query_time=0)
                 self._stats["cached"] += 1
                 return DNSResult(
                     domain=domain,
@@ -313,6 +330,7 @@ class AsyncDNSResolver:
 
                 except socket.gaierror as e:
                     if attempt == self.retries:
+                        if self._cache: self._cache.set_negative(domain, record_type)
                         self._stats["failed"] += 1
                         return DNSResult(
                             domain=domain,

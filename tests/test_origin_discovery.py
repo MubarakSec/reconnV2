@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 from pathlib import Path
-from recon_cli.pipeline.stage_origin_discovery import OriginDiscoveryStage
+from recon_cli.pipeline.stages.discovery.stage_origin_discovery import OriginDiscoveryStage
 
 
 def test_origin_discovery_stage_no_hosts(tmp_path: Path):

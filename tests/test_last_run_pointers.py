@@ -11,7 +11,7 @@ from recon_cli.jobs.manager import JobManager, JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.runner import PipelineRunner
-from recon_cli.pipeline.stage_base import Stage
+from recon_cli.pipeline.stages.core.stage_base import Stage
 from recon_cli.reports.generator import ReportFormat, ReportGenerator
 from recon_cli.utils import fs
 from recon_cli.utils.last_run import refresh_job_pointers

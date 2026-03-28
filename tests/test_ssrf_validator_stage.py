@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlparse
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_ssrf_validator import SSRFValidatorStage
+from recon_cli.pipeline.stages.validation.stage_ssrf_validator import SSRFValidatorStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 from recon_cli.utils.oast import InteractshInteraction

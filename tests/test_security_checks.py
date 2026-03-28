@@ -6,8 +6,8 @@ from pathlib import Path
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_security_headers import SecurityHeadersStage
-from recon_cli.pipeline.stage_tls_hygiene import TLSHygieneStage
+from recon_cli.pipeline.stages.vuln.stage_security_headers import SecurityHeadersStage
+from recon_cli.pipeline.stages.vuln.stage_tls_hygiene import TLSHygieneStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 

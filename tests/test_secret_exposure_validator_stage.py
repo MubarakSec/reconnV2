@@ -7,7 +7,7 @@ from pathlib import Path
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_secret_exposure_validator import (
+from recon_cli.pipeline.stages.validation.stage_secret_exposure_validator import (
     SecretExposureValidatorStage,
 )
 from recon_cli.utils import fs

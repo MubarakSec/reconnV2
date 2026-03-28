@@ -6,16 +6,16 @@ from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline import stage_scanner as stage_scanner_module
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_api_schema_probe import ApiSchemaProbeStage
-from recon_cli.pipeline.stage_auth_matrix import AuthMatrixStage, AuthRecord
-from recon_cli.pipeline.stage_cloud_assets import CloudAssetDiscoveryStage
-from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
-from recon_cli.pipeline.stage_graphql_exploit import GraphQLExploitStage
-from recon_cli.pipeline.stage_idor import IDORStage
-from recon_cli.pipeline.stage_js_intel import JSIntelligenceStage
-from recon_cli.pipeline.stage_scanner import ScannerStage
-from recon_cli.pipeline.stage_scoring import ScoringStage
-from recon_cli.pipeline.stage_vuln_scan import VulnScanStage
+from recon_cli.pipeline.stages.discovery.stage_api_schema_probe import ApiSchemaProbeStage
+from recon_cli.pipeline.stages.auth.stage_auth_matrix import AuthMatrixStage, AuthRecord
+from recon_cli.pipeline.stages.discovery.stage_cloud_assets import CloudAssetDiscoveryStage
+from recon_cli.pipeline.stages.validation.stage_extended_validation import ExtendedValidationStage
+from recon_cli.pipeline.stages.vuln.stage_graphql_exploit import GraphQLExploitStage
+from recon_cli.pipeline.stages.vuln.stage_idor import IDORStage
+from recon_cli.pipeline.stages.discovery.stage_js_intel import JSIntelligenceStage
+from recon_cli.pipeline.stages.vuln.stage_scanner import ScannerStage
+from recon_cli.pipeline.stages.core.stage_scoring import ScoringStage
+from recon_cli.pipeline.stages.vuln.stage_vuln_scan import VulnScanStage
 from recon_cli.utils import fs
 from recon_cli.utils.jsonl import read_jsonl
 

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, AsyncMock
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_race_condition import RaceConditionStage
+from recon_cli.pipeline.stages.vuln.stage_race_condition import RaceConditionStage
 from recon_cli.utils import fs
 
 
@@ -52,7 +52,7 @@ async def test_race_condition_stage_detects_multiple_success(tmp_path: Path, mon
         
     mock_client_instance.sync_burst.return_value = mock_results
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_race_condition.RaceBurstClient", MagicMock(return_value=mock_client_instance))
+    monkeypatch.setattr("recon_cli.pipeline.stages.vuln.stage_race_condition.RaceBurstClient", MagicMock(return_value=mock_client_instance))
     
     stage = RaceConditionStage()
     await stage.run_async(context)

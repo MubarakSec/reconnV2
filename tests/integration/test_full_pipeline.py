@@ -18,7 +18,7 @@ import pytest
 try:
     from recon_cli.pipeline.runner import PipelineRunner
     from recon_cli.pipeline.stages import Stage
-    from recon_cli.pipeline.stage_base import StageResult
+    from recon_cli.pipeline.stages.core.stage_base import StageResult
     from recon_cli.pipeline.context import PipelineContext
     from recon_cli.jobs.lifecycle import JobLifecycle
     from recon_cli.jobs.manager import JobManager, JobRecord

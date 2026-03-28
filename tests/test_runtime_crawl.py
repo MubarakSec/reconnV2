@@ -53,7 +53,7 @@ def test_runtime_crawl_skips_when_playwright_browsers_missing(
         handle.write("\n")
     context = PipelineContext(record=record, manager=DummyManager())
 
-    import recon_cli.pipeline.stage_runtime_crawl as stages_module
+    import recon_cli.pipeline.stages.discovery.stage_runtime_crawl as stages_module
 
     monkeypatch.setattr(stages_module, "PLAYWRIGHT_AVAILABLE", True)
 

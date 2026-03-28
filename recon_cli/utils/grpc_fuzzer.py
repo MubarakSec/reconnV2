@@ -83,6 +83,11 @@ class GRPCFuzzer:
                              "status": g_status,
                              "description": f"Service {svc} responded with gRPC-Status {g_status} (potentially exposed)"
                          })
-                except Exception: pass
+                except Exception as e:
+                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                try:
+                    from recon_cli.utils.metrics import metrics
+                    metrics.stage_errors.labels(stage="unknown", error_type=type(e).__name__).inc()
+                except: pass
         
         return findings

@@ -1,7 +1,7 @@
 
 import unittest
 from unittest.mock import MagicMock, patch
-from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
+from recon_cli.pipeline.stages.validation.stage_extended_validation import ExtendedValidationStage
 from recon_cli.pipeline.context import PipelineContext
 from urllib.parse import urlparse
 
@@ -31,7 +31,7 @@ class TestRepro(unittest.TestCase):
         # which is truthy, so ExtendedValidationStage uses session.request instead of requests.request
         # context.auth_session.return_value = None 
 
-        from recon_cli.pipeline.stage_extended_validation import ExtendedValidationStage
+        from recon_cli.pipeline.stages.validation.stage_extended_validation import ExtendedValidationStage
         
         # Monkeypatch to add logging
         original_execute = ExtendedValidationStage.execute

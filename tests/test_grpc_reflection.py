@@ -9,7 +9,7 @@ import pytest
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
+from recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery import WsGrpcDiscoveryStage
 
 
 class DummyManager:
@@ -43,10 +43,10 @@ async def test_grpc_reflection_detection(tmp_path: Path, monkeypatch):
     mock_grpc_fuzzer.check_reflection.return_value = (True, "Reflection enabled", [])
     mock_grpc_fuzzer.fuzz_methods.return_value = [{"service": "test.Service", "status": "0"}]
     
-    monkeypatch.setattr("recon_cli.pipeline.stage_ws_grpc_discovery.GRPCFuzzer", MagicMock(return_value=mock_grpc_fuzzer))
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery.GRPCFuzzer", MagicMock(return_value=mock_grpc_fuzzer))
     
     # Mock WS part to avoid errors
-    monkeypatch.setattr("recon_cli.pipeline.stage_ws_grpc_discovery.AsyncHTTPClient", MagicMock())
+    monkeypatch.setattr("recon_cli.pipeline.stages.discovery.stage_ws_grpc_discovery.AsyncHTTPClient", MagicMock())
     
     stage = WsGrpcDiscoveryStage()
     await stage.run_async(context)

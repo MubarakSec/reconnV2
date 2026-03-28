@@ -226,7 +226,12 @@ class TakeoverDetector:
                 resp = await client.get(url)
                 if "NoSuchBucket" in resp.text:
                     return True
-        except Exception: pass
+        except Exception as e:
+                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                try:
+                    from recon_cli.utils.metrics import metrics
+                    metrics.stage_errors.labels(stage="unknown", error_type=type(e).__name__).inc()
+                except: pass
         return False
 
     async def _verify_github_pages(self, hostname: str) -> bool:
@@ -237,5 +242,10 @@ class TakeoverDetector:
                 resp = await client.get(f"http://{hostname}")
                 if resp.status_code == 404 and "There isn't a GitHub Pages site here" in resp.text:
                     return True
-        except Exception: pass
+        except Exception as e:
+                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                try:
+                    from recon_cli.utils.metrics import metrics
+                    metrics.stage_errors.labels(stage="unknown", error_type=type(e).__name__).inc()
+                except: pass
         return False

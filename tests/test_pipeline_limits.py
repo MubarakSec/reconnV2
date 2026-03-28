@@ -6,7 +6,7 @@ from pathlib import Path
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
 from recon_cli.pipeline.context import PipelineContext
-from recon_cli.pipeline.stage_http_probe import HttpProbeStage
+from recon_cli.pipeline.stages.discovery.stage_http_probe import HttpProbeStage
 from recon_cli.pipeline.stages import CorrelationStage, PassiveEnumerationStage
 from recon_cli.utils.jsonl import read_jsonl
 

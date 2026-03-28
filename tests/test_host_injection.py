@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from recon_cli.pipeline.stage_host_injection import HostInjectionStage
+from recon_cli.pipeline.stages.vuln.stage_host_injection import HostInjectionStage
 from recon_cli.utils.async_http import HTTPResponse
 from recon_cli.utils.oast import InteractshInteraction
 
@@ -48,7 +48,7 @@ class TestHostInjection:
             }
         ]
         
-        with patch("recon_cli.pipeline.stage_host_injection.InteractshSession") as mock_oast_cls, \
+        with patch("recon_cli.pipeline.stages.vuln.stage_host_injection.InteractshSession") as mock_oast_cls, \
              patch("recon_cli.utils.async_http.AsyncHTTPClient.get", new_callable=AsyncMock) as mock_get, \
              patch("recon_cli.utils.async_http.AsyncHTTPClient.post", new_callable=AsyncMock) as mock_post, \
              patch("asyncio.sleep", new_callable=AsyncMock): # Skip the 30s wait
