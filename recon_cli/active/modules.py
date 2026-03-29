@@ -82,6 +82,10 @@ def run_backup_hunt(
     candidates = _top_urls(url_entries, limit=40)
     hits: List[Dict[str, object]] = []
     findings: List[Dict[str, object]] = []
+    
+    # Cache for baseline hashes to avoid redundant requests
+    baseline_hashes: Dict[str, str] = {}
+    
     for entry in candidates:
         url = entry.get("url")
         if not isinstance(url, str):
@@ -90,16 +94,41 @@ def run_backup_hunt(
         path = parsed.path or "/"
         if path.endswith("/"):
             continue
+            
+        # Get baseline for soft-404 detection
+        # 1. Random non-existent URL baseline for this host
+        host_origin = f"{parsed.scheme}://{parsed.netloc}"
+        if host_origin not in baseline_hashes:
+            random_url = urljoin(host_origin, f"/nonexistent_{random.randint(1000, 9999)}")
+            try:
+                r_base = session.get(random_url, timeout=5, allow_redirects=True)
+                baseline_hashes[host_origin] = hashlib.md5(r_base.text[:8192].encode()).hexdigest()
+            except:
+                baseline_hashes[host_origin] = "error"
+
+        # 2. Original URL baseline
+        if url not in baseline_hashes:
+            try:
+                r_orig = session.get(url, timeout=5, allow_redirects=True)
+                baseline_hashes[url] = hashlib.md5(r_orig.text[:8192].encode()).hexdigest()
+            except:
+                baseline_hashes[url] = "error"
+
         for suffix in BACKUP_SUFFIXES:
             variant_path = f"{path}{suffix}"
-            variant_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", variant_path)
+            variant_url = urljoin(host_origin, variant_path)
             try:
                 resp = session.get(
                     variant_url, timeout=6, allow_redirects=True, stream=True
                 )
             except requests.RequestException:
                 continue
+            
             status = resp.status_code
+            if status != 200:
+                resp.close()
+                continue
+
             headers = resp.headers
             encoding = resp.encoding or "utf-8"
             content_length = headers.get("Content-Length")
@@ -109,33 +138,55 @@ def run_backup_hunt(
                     declared_size = int(content_length)
                 except ValueError:
                     declared_size = None
+            
             preview = bytearray()
             try:
                 for chunk in resp.iter_content(chunk_size=8192):
                     if not chunk:
                         break
                     preview.extend(chunk)
-                    if len(preview) >= MIN_BACKUP_BYTES:
+                    if len(preview) >= 8192: # Read enough for a good hash
                         break
             finally:
                 resp.close()
-            if declared_size is not None:
-                meets_size = declared_size > MIN_BACKUP_BYTES
-            else:
-                meets_size = len(preview) >= MIN_BACKUP_BYTES
-            if status != 200 or not meets_size:
+
+            length_value = declared_size if declared_size is not None else len(preview)
+            if length_value < MIN_BACKUP_BYTES:
                 continue
+
+            # Soft-404 Detection
+            variant_hash = hashlib.md5(preview[:8192]).hexdigest()
+            if variant_hash == baseline_hashes.get(host_origin):
+                continue # Matches catch-all/404 page
+            if variant_hash == baseline_hashes.get(url):
+                continue # Matches original page (no new content)
+            
+            # Additional heuristic: if it's HTML, it's likely not a real backup file (which are usually binary or plain text)
+            # unless the original was also HTML. But usually .bak/.zip aren't HTML.
             snippet = None
-            content_type = headers.get("Content-Type", "")
+            content_type = headers.get("Content-Type", "").lower()
+            is_html = "text/html" in content_type
+            
+            if is_html and suffix in {".zip", ".tar.gz", ".tgz", ".rar"}:
+                continue # Binary suffixes returning HTML are definitely false positives
+
             if content_type.startswith("text") and preview:
                 snippet = preview.decode(encoding, errors="replace")[:MIN_BACKUP_BYTES]
-            length_value = declared_size if declared_size is not None else len(preview)
+                if snippet and "<!doctype html" in snippet.lower():
+                    # If we got HTML for a binary suffix, skip
+                    if suffix in {".zip", ".tar.gz", ".tgz", ".rar"}:
+                        continue
+                    # If it looks like a generic error page in HTML
+                    if any(h in snippet.lower() for h in ["not found", "404", "error page"]):
+                        continue
+
             hits.append(
                 {
                     "base_url": url,
                     "variant_url": variant_url,
                     "status": status,
                     "length": length_value,
+                    "hash": variant_hash
                 }
             )
             findings.append(
