@@ -222,6 +222,37 @@ def generate_summary_data(record, prev_record=None) -> Dict[str, Any]:
     }
 
 
+def _group_results(results: List[dict]) -> Dict[str, List[dict]]:
+    groups = {
+        "Authentication & Identity": [],
+        "Leaked Secrets & Tokens": [],
+        "Sensitive Files & Backups": [],
+        "API Surface & Documentation": [],
+        "Administrative & Internal": [],
+        "Other Interesting Targets": [],
+    }
+    
+    for entry in results:
+        tags = {str(t).lower() for t in entry.get("tags", [])}
+        # Findings have 'finding_type', URLs have 'type' == 'url'
+        f_type = entry.get("finding_type", "")
+        
+        if any(t in tags for t in ["surface:login", "surface:register", "surface:password-reset", "auth:challenge", "signin", "signup"]) or "auth" in f_type:
+            groups["Authentication & Identity"].append(entry)
+        elif any(t in tags for t in ["secret", "token", "key", "apikey"]) or "secret" in f_type:
+            groups["Leaked Secrets & Tokens"].append(entry)
+        elif any(t in tags for t in ["backup", "bak", "zip", "old", "tgz"]):
+            groups["Sensitive Files & Backups"].append(entry)
+        elif any(t in tags for t in ["surface:admin", "admin", "internal", "panel"]):
+            groups["Administrative & Internal"].append(entry)
+        elif any(t in tags for t in ["service:api", "graphql", "ws", "openapi", "swagger", "api"]):
+            groups["API Surface & Documentation"].append(entry)
+        else:
+            groups["Other Interesting Targets"].append(entry)
+            
+    return {k: v for k, v in groups.items() if v}
+
+
 def generate_summary(context) -> None:
     record = context.record
     prev_job_id = getattr(record.spec, "incremental_from", None)
@@ -360,21 +391,28 @@ def generate_summary(context) -> None:
                 lines.append(f"    EVIDENCE: {proof_str}")
             lines.append("")
 
-    high_priority_candidates = [
-        entry
-        for entry in top_findings
-        if not _is_confirmed(entry) and int(entry.get("score", 0)) >= 70
-    ]
-    if high_priority_candidates:
+    # Categorized results grouping
+    all_unconfirmed = [e for e in data["top_findings"] if not _is_confirmed(e)]
+    all_unconfirmed.extend(data["top_urls"])
+    # Sort by score before grouping to maintain internal order
+    all_unconfirmed.sort(key=lambda x: int(x.get("score", 0)), reverse=True)
+    
+    result_groups = _group_results(all_unconfirmed)
+    
+    for group_name, items in result_groups.items():
         lines.append("")
-        lines.append(
-            f"== HIGH PRIORITY CANDIDATES ({len(high_priority_candidates)}) =="
-        )
-        for entry in high_priority_candidates[:SUMMARY_TOP]:
-            label = _format_finding_label(entry)
+        lines.append(f"== {group_name.upper()} ({len(items)}) ==")
+        for entry in items[:SUMMARY_TOP]:
             score = entry.get("score", 0)
             priority = (entry.get("priority") or "med").upper()
-            lines.append(f"[?] [{score:3}] ({priority:8}) {label}")
+            
+            if entry.get("type") == "url":
+                label = _format_url_label(entry)
+                tags = ",".join(entry.get("tags", []))
+                lines.append(f"[-] [{score:3}] ({priority:8}) {label} {tags}")
+            else:
+                label = _format_finding_label(entry)
+                lines.append(f"[?] [{score:3}] ({priority:8}) {label}")
 
     lines.append("")
     lines.append("== STATS ==")
@@ -419,23 +457,10 @@ def generate_summary(context) -> None:
         f"Verified ratio  : {verified_ratio:.2%} (verified {verified_count} / findings {findings_total})"
     )
 
-    top_urls = data["top_urls"]
-    if top_urls:
-        lines.append("")
-        lines.append(
-            f"== RELEVANT URLS (score >= 75, top {min(len(top_urls), SUMMARY_TOP)}) =="
-        )
-        for entry in top_urls[:SUMMARY_TOP]:
-            label = _format_url_label(entry)
-            score = entry.get("score", 0)
-            priority = (entry.get("priority") or "med").upper()
-            tags = ",".join(entry.get("tags", []))
-            lines.append(f"[-] [{score:3}] ({priority:8}) {label} {tags}")
-
     next_actions: list[str] = []
     if confirmed_findings:
         next_actions.append("Manually verify and report the confirmed vulnerabilities.")
-    if high_priority_candidates:
+    if all_unconfirmed:
         next_actions.append(
             "Perform deeper manual analysis on high-priority candidates."
         )
