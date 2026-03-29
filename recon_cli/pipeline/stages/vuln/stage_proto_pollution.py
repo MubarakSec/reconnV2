@@ -49,17 +49,17 @@ class ProtoPollutionStage(Stage):
                     test_url = url + payload
                     page = await browser.new_page()
                     try:
-                        await page.goto(test_url, wait_until="networkidle", timeout=15000)
+                        await page.goto(test_url, wait_until="domcontentloaded", timeout=15000)
                         res = await page.evaluate(ProtoPollutionPayloads.CLIENT_VERIFY_SCRIPT)
                         if res and res.get("status") == "confirmed":
                             self._report_vuln(context, url, "Client-side Prototype Pollution", payload)
                             break
                     except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="proto_pollution", error_type=type(e).__name__).inc()
-                except: pass
+                        logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        try:
+                            from recon_cli.utils.metrics import metrics
+                            metrics.stage_errors.labels(stage="proto_pollution", error_type=type(e).__name__).inc()
+                        except: pass
                     finally: await page.close()
             await browser.close()
 
@@ -80,11 +80,11 @@ class ProtoPollutionStage(Stage):
                             self._report_vuln(context, url, "Server-side Prototype Pollution (Reflection)", str(payload))
                             break
                     except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="proto_pollution", error_type=type(e).__name__).inc()
-                except: pass
+                        logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        try:
+                            from recon_cli.utils.metrics import metrics
+                            metrics.stage_errors.labels(stage="proto_pollution", error_type=type(e).__name__).inc()
+                        except: pass
 
     def _report_vuln(self, context: PipelineContext, url: str, vtype: str, evidence: str):
         context.logger.warning("🚨 %s FOUND on %s", vtype.upper(), url)

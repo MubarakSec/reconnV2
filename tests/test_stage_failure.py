@@ -48,7 +48,15 @@ def test_pipeline_records_failure(tmp_path: Path):
     ctx.record = record
     ctx.manager = manager
     ctx.mark_started = lambda *_, **__: None
-    ctx.mark_finished = lambda *_, **__: None
+    def mock_mark_finished(status="finished"):
+        if ctx._any_stage_failed and status == "finished":
+            if not record.metadata.error:
+                record.metadata.error = "Scan completed with partial failures in some stages"
+        record.metadata.status = status
+
+    ctx.mark_finished = mock_mark_finished
+    ctx.mark_stage_failed = lambda: setattr(ctx, "_any_stage_failed", True)
+    ctx._any_stage_failed = False
     ctx.mark_error = lambda msg: setattr(record.metadata, "error", msg)
     ctx.close = lambda *_, **__: None
     ctx.logger = type(

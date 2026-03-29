@@ -367,22 +367,7 @@ class PipelineRunner:
         with bind_trace_scope(trace, span.span_id if span else None):
             try:
                 async with asyncio.timeout(timeout):
-                    if hasattr(stage, "run_async"):
-                        result = await stage.run_async(context)
-                    else:
-                        # Offload sync stage to thread pool to keep loop responsive
-                        loop = asyncio.get_running_loop()
-                        from recon_cli.utils.pipeline_trace import (
-                            CURRENT_TRACE_SCOPE,
-                            run_in_scope,
-                        )
-
-                        trace_scope = CURRENT_TRACE_SCOPE.get()
-                        result = await loop.run_in_executor(
-                            None, run_in_scope, trace_scope, stage.run, context
-                        )
-                        if asyncio.iscoroutine(result):
-                            result = await result
+                    result = await stage.run_async_wrapped(context)
                 return StageExecutionOutcome(result=result, span=span)
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 context.logger.error(

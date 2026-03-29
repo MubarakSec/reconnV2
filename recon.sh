@@ -17,6 +17,9 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
+# Ensure common tool directories are in PATH
+export PATH="$PATH:/root/.local/bin:/root/go/bin:/usr/local/go/bin"
+
 if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
     PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
 elif command -v python3 >/dev/null 2>&1; then
@@ -691,13 +694,13 @@ list_jobs() {
     read -r project_filter
 
     if [ -n "$status_filter" ] && [ -n "$project_filter" ]; then
-        run_recon list-jobs "$status_filter" --project "$project_filter"
+        run_recon job list "$status_filter" --project "$project_filter"
     elif [ -n "$status_filter" ]; then
-        run_recon list-jobs "$status_filter"
+        run_recon job list "$status_filter"
     elif [ -n "$project_filter" ]; then
-        run_recon list-jobs --project "$project_filter"
+        run_recon job list --project "$project_filter"
     else
-        run_recon list-jobs
+        run_recon job list
     fi
     pause_screen
 }
@@ -712,7 +715,7 @@ job_status() {
         pause_screen
         return
     fi
-    run_recon status "$job_id"
+    run_recon job status "$job_id"
     pause_screen
 }
 
@@ -726,7 +729,7 @@ tail_logs() {
         pause_screen
         return
     fi
-    run_recon tail-logs "$job_id"
+    run_recon job tail "$job_id"
     pause_screen
 }
 
@@ -751,7 +754,7 @@ rerun_job() {
     read -r mode
     mode="${mode:-1}"
 
-    local -a cmd=("$PYTHON_BIN" -m recon_cli rerun "$job_id")
+    local -a cmd=("$PYTHON_BIN" -m recon_cli job rerun "$job_id")
 
     case "$mode" in
         2)
@@ -789,7 +792,7 @@ requeue_job() {
         pause_screen
         return
     fi
-    run_recon requeue "$job_id"
+    run_recon job requeue "$job_id"
     pause_screen
 }
 
@@ -812,7 +815,7 @@ cancel_job() {
         wait_seconds="30"
     fi
 
-    local -a cmd=("$PYTHON_BIN" -m recon_cli cancel "$job_id" --wait "$wait_seconds")
+    local -a cmd=("$PYTHON_BIN" -m recon_cli job cancel "$job_id" --wait "$wait_seconds")
 
     if ask_yes_no "Requeue after cancel?" "Y"; then
         cmd+=(--requeue)
@@ -838,7 +841,7 @@ verify_job() {
         pause_screen
         return
     fi
-    run_recon verify-job "$job_id"
+    run_recon job verify "$job_id"
     pause_screen
 }
 
@@ -1084,13 +1087,13 @@ show_trace() {
 }
 
 cache_stats() {
-    run_recon cache-stats
+    run_recon config cache-stats
     pause_screen
 }
 
 cache_clear() {
     if ask_yes_no "Clear all cached data?" "N"; then
-        run_recon cache-clear
+        run_recon config cache-clear
     else
         print_warn "Cache clear cancelled"
     fi

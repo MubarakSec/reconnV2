@@ -113,6 +113,7 @@ class PipelineContext:
     trace_recorder: Optional[object] = field(init=False, default=None)
     stealth_manager: Optional[object] = field(init=False, default=None)
     scope_manager: "ScopeManager" = field(init=False)
+    http_client: "AsyncHTTPClient" = field(init=False, default=None)
     _lock: threading.Lock = field(init=False, default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
@@ -120,9 +121,11 @@ class PipelineContext:
         from recon_cli.utils.event_bus import PipelineEventBus
         from recon_cli.utils.stealth import StealthConfig, StealthManager
         from recon_cli.utils.scope import ScopeManager
+        from recon_cli.utils.async_http import AsyncHTTPClient
 
         self.trace_recorder = current_trace_recorder()
         self.event_bus = PipelineEventBus()
+        self.http_client = AsyncHTTPClient(context=self)
         
         # 1. Initialize Runtime Config FIRST (critical for overrides)
         if self.record is not None:
@@ -154,7 +157,8 @@ class PipelineContext:
         if self.record and self.record.spec.scope_file:
             self.scope_manager = ScopeManager.from_file(Path(self.record.spec.scope_file))
         else:
-            self.scope_manager = ScopeManager()
+            include_patterns = self.scope_targets()
+            self.scope_manager = ScopeManager(include_patterns=include_patterns)
 
         # 3. Initialize Stealth Manager (now uses correct runtime_config)
         proxies = getattr(self.runtime_config, "proxies", []) or []
@@ -249,7 +253,8 @@ class PipelineContext:
             on_finding=self.notify_finding
         )
         self.stage_attempts: Dict[str, int] = dict(self.record.metadata.attempts)
-        self.targets = [spec.target]
+        if not self.targets:
+            self.targets = [spec.target]
         self.execution_profile = getattr(spec, "execution_profile", None)
         profile_stats = self.record.metadata.stats.setdefault("profiles", {})
         base_profile = spec.profile

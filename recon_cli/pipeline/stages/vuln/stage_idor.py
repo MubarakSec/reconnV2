@@ -410,6 +410,13 @@ class IDORStage(Stage):
             reasons.append("auth_bypass_status_change")
         if variant.get("sensitive") and not baseline.get("sensitive"):
             reasons.append("new_sensitive_fields")
+        
+        # Subject identifier change check
+        b_subs = set(baseline.get("subject_ids") or [])
+        v_subs = set(variant.get("subject_ids") or [])
+        if v_subs and v_subs != b_subs:
+            reasons.append("subject_identifier_changed")
+
         if (v_status in {200, 201, 202, 204, 206} and v_status == b_status and 
             variant.get("body_md5") != baseline.get("body_md5") and not self._looks_like_validation_error(variant)):
             reasons.append("successful_response_changed")

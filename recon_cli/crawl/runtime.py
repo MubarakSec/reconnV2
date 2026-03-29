@@ -106,7 +106,7 @@ async def _crawl_single(context, url: str, timeout_ms: int) -> CrawlResult:
 
     dom = None
     try:
-        await page.goto(url, timeout=timeout_ms, wait_until="networkidle")
+        await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
         dom = await page.content()
     except PlaywrightTimeoutError:
         errors.append("timeout")

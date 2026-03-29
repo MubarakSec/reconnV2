@@ -59,10 +59,10 @@ class PassiveEnumerationStage(Stage):
 
         if hostname_targets:
             # 1. Subfinder
-            subfinder_hosts = self._run_subfinder(context, targets_file, tool_timeout)
+            subfinder_hosts = await self._run_subfinder(context, targets_file, tool_timeout)
 
             # 3. Amass
-            amass_hosts = self._run_amass(
+            amass_hosts = await self._run_amass(
                 context, targets_file, tool_timeout, amass_out
             )
         else:
@@ -114,7 +114,7 @@ class PassiveEnumerationStage(Stage):
 
         context.update_stats(self.name, passive_hostnames=len(passive_hosts))
 
-    def _run_subfinder(
+    async def _run_subfinder(
         self, context: PipelineContext, targets_file: Any, tool_timeout: int
     ) -> set[str]:
         logger = context.logger
@@ -125,7 +125,7 @@ class PassiveEnumerationStage(Stage):
         if executor.available("subfinder"):
             logger.info("Running subfinder...")
             try:
-                completed = executor.run(
+                completed = await executor.run_async(
                     ["subfinder", "-dL", str(targets_file), "-silent"],
                     capture_output=True,
                     check=False,
@@ -152,7 +152,7 @@ class PassiveEnumerationStage(Stage):
             note_missing_tool(context, "subfinder")
         return subfinder_hosts
 
-    def _run_amass(
+    async def _run_amass(
         self,
         context: PipelineContext,
         targets_file: Any,
@@ -166,7 +166,7 @@ class PassiveEnumerationStage(Stage):
         if executor.available("amass"):
             logger.info("Running amass passive enum...")
             try:
-                executor.run(
+                await executor.run_async(
                     [
                         "amass",
                         "enum",

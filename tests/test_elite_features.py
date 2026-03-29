@@ -27,11 +27,22 @@ from recon_cli.utils.async_http import AsyncHTTPClient, HTTPResponse
 
 @pytest.fixture
 def mock_context(temp_dir):
-    mock = MagicMock()
-    mock.record = MagicMock()
-    mock.record.paths.results_jsonl = temp_dir / "results.jsonl"
-    mock.record.paths.artifact = lambda x: temp_dir / x
-    mock.record.paths.ensure_subdir = lambda x: (temp_dir / x).mkdir(exist_ok=True) or (temp_dir / x)
+    from recon_cli.jobs.models import JobPaths, JobMetadata, JobSpec
+    from recon_cli.jobs.manager import JobRecord
+    from recon_cli.utils.auth import UnifiedAuthManager
+    
+    paths = JobPaths(temp_dir)
+    # Ensure artifacts directory exists
+    paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    
+    spec = JobSpec(job_id="test-job", target="example.com")
+    metadata = JobMetadata(job_id="test-job", queued_at="2026-03-29T00:00:00Z")
+    record = JobRecord(spec=spec, metadata=metadata, paths=paths)
+    
+    mock = MagicMock(spec=PipelineContext)
+    mock.record = record
+    mock.manager = MagicMock()
+    mock.logger = MagicMock()
     mock.runtime_config = MagicMock()
     mock.runtime_config.verify_tls = False
     mock.runtime_config.enable_secrets = True
@@ -40,9 +51,16 @@ def mock_context(temp_dir):
     mock.runtime_config.idor_rps = 0
     mock.runtime_config.idor_timeout = 5
     mock.runtime_config.idor_validator_rps = 0
+    mock.runtime_config.tool_timeout = 30
+    mock.runtime_config.auth_email_domain = "1secmail.com"
+    mock.max_retries = 0
+    
+    # Real Auth Manager to avoid MagicMock serialization issues
+    mock._auth_manager = UnifiedAuthManager(mock)
     
     # Store results in a list we can actually inspect
     mock._results_list = []
+    mock.results = MagicMock()
     def mock_append(item):
         mock._results_list.append(item)
         return True
@@ -60,11 +78,15 @@ def mock_context(temp_dir):
         return [r for r in mock._results_list if r.get("type") == res_type]
     mock.filter_results.side_effect = mock_filter
     
-    mock.auth_headers = MagicMock(side_effect=lambda x: x)
+    mock.auth_headers.side_effect = lambda x=None, **k: x or {}
     def mock_url_allowed(url):
         return True
     mock.url_allowed.side_effect = mock_url_allowed
-    mock.logger = MagicMock()
+    mock.is_host_blocked.return_value = False
+    
+    # Add signal_index
+    mock.signal_index.return_value = MagicMock()
+    
     return mock
 
 
@@ -94,7 +116,7 @@ class TestEliteFeatures:
             {"type": "url", "url": "https://api.example.com/v1/users?id=123", "method": "get"}
         ]
         stage.execute(mock_context)
-        artifact = temp_dir / "openapi_reconstructed_api.example.com.json"
+        artifact = mock_context.record.paths.artifact("openapi_reconstructed_api.example.com.json")
         assert artifact.exists()
         schema = json.loads(artifact.read_text())
         assert "/v1/users" in schema["paths"]
@@ -199,7 +221,7 @@ class TestEliteFeatures:
             mock_get.return_value = HTTPResponse(url="https://example.com/", status=200, headers={}, body="<html><body>Welcome to Internal-Portal-Mubarak</body></html>", elapsed=0.1)
             await stage.run_async(mock_context)
             assert mock_context.set_data.called
-            artifact = temp_dir / "custom_wordlist.txt"
+            artifact = mock_context.record.paths.artifact("custom_wordlist.txt")
             assert artifact.exists()
             assert "internal-portal-mubarak" in artifact.read_text().lower()
 

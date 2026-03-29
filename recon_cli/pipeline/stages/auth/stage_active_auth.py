@@ -329,11 +329,11 @@ class ActiveAuthStage(Stage):
                         if key in data:
                             token_data[key] = data[key]
                 except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                except: pass
+                    logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                    try:
+                        from recon_cli.utils.metrics import metrics
+                        metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
+                    except: pass
 
             if resp.status < 400:
                 cookies = resp.cookies

@@ -130,7 +130,7 @@ class HeadlessCrawlStage(Stage):
             
             # Wait for network idle after stealth/interactions
             try:
-                await page.wait_for_load_state("networkidle", timeout=5000)
+                await page.wait_for_load_state("domcontentloaded", timeout=5000)
             except Exception as e:
                 logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:

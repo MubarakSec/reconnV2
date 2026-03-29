@@ -11,7 +11,18 @@ from typing import Any, Dict, Generator, List, Optional
 
 from recon_cli.utils import fs, time as time_utils
 from recon_cli.utils.jsonl import JsonlWriter
-from recon_cli.utils.last_run import update_last_trace_pointers
+from recon_cli.utils.last_run import update_last_trace_pointers, artifacts_last_trace_path
+
+
+def get_last_trace() -> Optional[Dict[str, Any]]:
+    """الحصول على بيانات آخر trace"""
+    path = artifacts_last_trace_path()
+    if not path.exists():
+        return None
+    try:
+        return fs.read_json(path)
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True)

@@ -503,7 +503,7 @@ class RuntimeConfig:
     )
     nmap_top_ports: int = int(os.environ.get("RECON_NMAP_TOP_PORTS", 1000))
     nmap_ports: Optional[str] = os.environ.get("RECON_NMAP_PORTS")
-    nmap_args: Optional[str] = os.environ.get("RECON_NMAP_ARGS")
+    nmap_args: Optional[str] = os.environ.get("RECON_NMAP_ARGS", "--max-rtt-timeout 100ms --max-retries 1 --host-timeout 15m")
     nmap_timeout: int = int(os.environ.get("RECON_NMAP_TIMEOUT", 900))
     nmap_batch_size: int = int(os.environ.get("RECON_NMAP_BATCH_SIZE", 25))
     nmap_max_hosts: int = int(os.environ.get("RECON_NMAP_MAX_HOSTS", 200))

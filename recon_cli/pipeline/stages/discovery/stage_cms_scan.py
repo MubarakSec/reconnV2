@@ -146,34 +146,32 @@ class CMSScanStage(Stage):
 
     async def _run_scan(self, context: PipelineContext, cms: str, host: str, base_url: str, timeout: int, artifact_dir) -> Dict[str, Any]:
         executor = context.executor
-        if CommandExecutor.available("droopescan"):
-            cmd = ["droopescan", "scan", cms, "-u", base_url]
-            try:
-                result = await executor.run_async(cmd, check=False, timeout=timeout, capture_output=True)
-                output = (result.stdout or "") + "\n" + (result.stderr or "")
-                return {"tool": "droopescan", "output": output.strip(), "findings": []}
-            except Exception: return {}
-        
-        # Fallback to nuclei if droopescan is missing
-        if scanner_integrations is not None and CommandExecutor.available("nuclei"):
-            try:
-                # Map CMS to nuclei tags
-                tags = [cms]
-                if cms == "wordpress": tags.append("wp-plugin")
-                
-                result = scanner_integrations.run_nuclei(
-                    host,
-                    base_url,
-                    artifact_dir,
-                    executor,
-                    tags=tags,
-                    request_timeout=timeout
-                )
-                return {
-                    "tool": "nuclei",
-                    "output": f"nuclei found {len(result.findings)} items",
-                    "findings": result.findings
-                }
-            except Exception: return {}
 
-        return {}
+        # We prefer Nuclei for CMS scanning as droopescan is outdated/broken on Python 3.12+
+        if CommandExecutor.available("nuclei"):
+            self.logger.info("Running nuclei CMS scan for %s on %s", cms, base_url)
+            try:
+                # Use specific CMS tags in nuclei
+                tags = [cms]
+                if cms == "wordpress": tags.extend(["wp-plugin", "wp-theme"])
+
+                completed = await executor.run_async(
+                    [
+                        "nuclei",
+                        "-u", base_url,
+                        "-tags", ",".join(tags),
+                        "-severity", "info,low,medium,high,critical",
+                        "-silent",
+                        "-jsonl"
+                    ],
+                    capture_output=True,
+                    check=False,
+                    timeout=timeout
+                )
+                return {"tool": "nuclei", "output": completed.stdout.strip(), "findings": []}
+            except Exception as e:
+                self.logger.error("Nuclei CMS scan failed: %s", e)
+                return {}
+
+        return {"tool": "none", "error": "No suitable CMS scanner available"}
+

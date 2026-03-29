@@ -37,6 +37,10 @@ class ExtendedValidationStage(Stage):
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_extended_validation", False))
 
+    async def _request_with_retries(self, client: AsyncHTTPClient, method: str, url: str, **kwargs) -> HTTPResponse:
+        """Wrapper for testing and specialized retries."""
+        return await client._request(method=method, url=url, **kwargs)
+
     async def run_async(self, context: PipelineContext) -> None:
         runtime = context.runtime_config
         enable_oast = bool(getattr(runtime, "enable_oast_validation", True))
@@ -51,6 +55,9 @@ class ExtendedValidationStage(Stage):
         oast_max_per_host = int(getattr(runtime, "oast_max_per_host", 8))
         header_max_urls = int(getattr(runtime, "header_validation_max_urls", 30))
         timeout = int(getattr(runtime, "oast_timeout", 10))
+        
+        # Hard Probe Cap (Phase 3 Requirement)
+        max_total_probes = int(getattr(runtime, "extended_validation_max_probes", 500))
         
         candidates = self._collect_candidates(context, context.signal_index())
         if not candidates:
@@ -71,10 +78,16 @@ class ExtendedValidationStage(Stage):
             requests_per_second=float(getattr(runtime, "oast_rps", 25.0))
         )
 
+        probe_cap_hit = False
+
         async with AsyncHTTPClient(client_config, context=context) as client:
             # 1. Redirect Validation
             if enable_redirect:
                 for entry in candidates["redirect"][:redirect_max_urls]:
+                    if len(probes) >= max_total_probes:
+                        probe_cap_hit = True
+                        break
+                    
                     url = entry["url"]
                     token = self._token()
                     payload = f"https://example.com/{token}"
@@ -82,7 +95,7 @@ class ExtendedValidationStage(Stage):
                     if not context.url_allowed(test_url): continue
                     
                     try:
-                        resp = await client._request(method=method, url=test_url, headers=context.auth_headers({"User-Agent": "recon-cli redirect-validate"}), data=data, json=json_body, follow_redirects=False)
+                        resp = await self._request_with_retries(client, method=method, url=test_url, headers=context.auth_headers({"User-Agent": "recon-cli redirect-validate"}), data=data, json=json_body, follow_redirects=False)
                         location = str(resp.headers.get("Location", ""))
                         probes.append({"type": "redirect_probe", "url": test_url, "param": entry["param"], "payload": payload, "status": resp.status, "location": location})
                         
@@ -99,8 +112,12 @@ class ExtendedValidationStage(Stage):
                     except Exception: continue
 
             # 2. LFI Validation
-            if enable_lfi:
+            if enable_lfi and not probe_cap_hit:
                 for entry in candidates["lfi"][:lfi_max_urls]:
+                    if len(probes) >= max_total_probes:
+                        probe_cap_hit = True
+                        break
+                    
                     url = entry["url"]
                     b_key = (url, str(entry.get("param")), str(entry.get("location")), str(entry.get("method")))
                     if b_key not in baseline_cache:
@@ -110,11 +127,15 @@ class ExtendedValidationStage(Stage):
                     b_has_sig = bool(b_body and self._looks_like_lfi(b_body))
                     
                     for payload in ("../../../../etc/passwd", "..\\..\\..\\windows\\win.ini"):
+                        if len(probes) >= max_total_probes:
+                            probe_cap_hit = True
+                            break
+                        
                         test_url, method, data, json_body = self._prepare_payload_request(entry, payload)
                         if not context.url_allowed(test_url): continue
                         
                         try:
-                            resp = await client._request(method=method, url=test_url, headers=context.auth_headers({"User-Agent": "recon-cli lfi-validate"}), data=data, json=json_body)
+                            resp = await self._request_with_retries(client, method=method, url=test_url, headers=context.auth_headers({"User-Agent": "recon-cli lfi-validate"}), data=data, json=json_body)
                             body = resp.body[:4000]
                             probes.append({"type": "lfi_probe", "url": test_url, "param": entry["param"], "payload": payload, "status": resp.status})
                             
@@ -134,37 +155,50 @@ class ExtendedValidationStage(Stage):
             # 3. OAST Validation (SSRF / XXE)
             oast_tokens = {}
             interactions = []
-            if enable_oast and oast_backend == "interactsh":
+            if enable_oast and oast_backend == "interactsh" and not probe_cap_hit:
                 session = InteractshSession(artifacts_dir / "interactsh.json", logger=context.logger, domain_override=getattr(runtime, "oast_domain", None))
                 if session.start():
                     try:
                         # SSRF
                         for entry in candidates["ssrf"][:oast_max_targets]:
+                            if len(probes) >= max_total_probes:
+                                probe_cap_hit = True
+                                break
+                            
                             token = self._token()
                             oast_url = session.make_url(token)
                             test_url, method, data, json_body = self._prepare_payload_request(entry, oast_url)
                             if not context.url_allowed(test_url): continue
                             
                             try:
-                                resp = await client._request(method=method, url=test_url, headers=context.auth_headers({"User-Agent": "recon-cli ssrf-validate"}), data=data, json=json_body)
+                                resp = await self._request_with_retries(client, method=method, url=test_url, headers=context.auth_headers({"User-Agent": "recon-cli ssrf-validate"}), data=data, json=json_body)
                                 oast_tokens[token] = {"type": "ssrf", "url": entry["url"], "param": entry["param"], "probe": test_url}
                                 probes.append({"type": "ssrf_probe", "url": test_url, "param": entry["param"], "oast_url": oast_url, "status": resp.status})
                             except Exception: continue
 
                         # XXE
-                        for entry in candidates["xxe"][:oast_max_targets]:
-                            token = self._token()
-                            oast_url = session.make_url(token)
-                            test_url = entry["url"]
-                            try:
-                                resp = await client.post(test_url, headers=context.auth_headers({"Content-Type": "application/xml"}), data=self._xxe_payload(oast_url))
-                                oast_tokens[token] = {"type": "xxe", "url": test_url, "probe": test_url}
-                                probes.append({"type": "xxe_probe", "url": test_url, "oast_url": oast_url, "status": resp.status})
-                            except Exception: continue
+                        if not probe_cap_hit:
+                            for entry in candidates["xxe"][:oast_max_targets]:
+                                if len(probes) >= max_total_probes:
+                                    probe_cap_hit = True
+                                    break
+                                
+                                token = self._token()
+                                oast_url = session.make_url(token)
+                                test_url = entry["url"]
+                                try:
+                                    resp = await client.post(test_url, headers=context.auth_headers({"Content-Type": "application/xml"}), data=self._xxe_payload(oast_url))
+                                    oast_tokens[token] = {"type": "xxe", "url": test_url, "probe": test_url}
+                                    probes.append({"type": "xxe_probe", "url": test_url, "oast_url": oast_url, "status": resp.status})
+                                except Exception: continue
 
                         # Header SSRF
-                        if enable_header:
+                        if enable_header and not probe_cap_hit:
                             for url in self._select_header_candidates(candidates, header_max_urls):
+                                if len(probes) >= max_total_probes:
+                                    probe_cap_hit = True
+                                    break
+                                
                                 token = self._token()
                                 oast_url = session.make_url(token)
                                 oast_host = urlparse(oast_url).hostname or oast_url
@@ -199,7 +233,13 @@ class ExtendedValidationStage(Stage):
         # Finalize
         artifact_path = artifacts_dir / "extended_validation.json"
         artifact_path.write_text(json.dumps({"probes": probes, "interactions": interactions, "findings": findings}, indent=2, sort_keys=True), encoding="utf-8")
-        stats.update({"probes": len(probes), "findings": findings, "artifact": str(artifact_path.relative_to(context.record.paths.root))})
+        stats.update({
+            "probes": len(probes), 
+            "findings": findings, 
+            "artifact": str(artifact_path.relative_to(context.record.paths.root)),
+            "probe_cap_hit": probe_cap_hit,
+            "max_total_probes": max_total_probes
+        })
         context.manager.update_metadata(context.record)
 
     def _collect_candidates(self, context: PipelineContext, signals: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:

@@ -50,6 +50,8 @@ class ApiSchemaProbeStage(Stage):
         max_specs = int(getattr(runtime, "api_schema_max_specs", 25))
         max_endpoints = int(getattr(runtime, "api_schema_max_endpoints", 200))
         timeout = int(getattr(runtime, "api_schema_timeout", 10))
+        enable_probing = bool(getattr(runtime, "enable_api_schema_probe", False))
+        safe_writes = bool(getattr(runtime, "api_schema_probe_safe_writes", False))
         
         spec_urls = self._collect_specs(context)
         if not spec_urls:
@@ -65,8 +67,14 @@ class ApiSchemaProbeStage(Stage):
             requests_per_second=float(getattr(runtime, "api_schema_rps", 20.0))
         )
 
+        endpoints_probed = 0
+        mutating_probed = 0
+        budget_exhausted = False
+
         async with AsyncHTTPClient(client_config, context=context) as client:
             for spec_url in spec_urls:
+                if budget_exhausted: break
+                
                 # 1. Fetch and Parse Spec
                 headers = context.auth_headers({"User-Agent": "recon-cli api-schema"})
                 try:
@@ -78,9 +86,13 @@ class ApiSchemaProbeStage(Stage):
 
                 base_url = self._resolve_base_url(spec_data, spec_url)
                 endpoints = self._extract_endpoints(spec_data)
+                prioritized = self._prioritize_endpoints(endpoints)
                 
-                # Phase 3 Improvement: Infer Auth Expectations and Model Target
-                for endpoint in endpoints:
+                for endpoint in prioritized:
+                    if endpoints_probed >= max_endpoints:
+                        budget_exhausted = True
+                        break
+                    
                     url = self._build_url(base_url, endpoint)
                     method = str(endpoint.get("method") or "get").lower()
                     
@@ -89,8 +101,54 @@ class ApiSchemaProbeStage(Stage):
                                                    url=url, method=method, 
                                                    requires_auth=endpoint.get("requires_auth"))
                     
+                    # Active Probing
+                    if enable_probing:
+                        is_mutating = method in self.SAFE_WRITE_METHODS
+                        if is_mutating and not safe_writes:
+                            continue
+                            
+                        endpoints_probed += 1
+                        if is_mutating: mutating_probed += 1
+                        
+                        try:
+                            json_body, form_data = self._build_safe_body(endpoint)
+                            probe_headers = context.auth_headers({"User-Agent": "recon-cli api-probe"})
+                            
+                            p_resp = await client._request(
+                                method=method.upper(),
+                                url=url,
+                                headers=probe_headers,
+                                json=json_body,
+                                data=form_data,
+                                follow_redirects=True
+                            )
+                            
+                            if p_resp.status < 500:
+                                meta = self._response_meta(p_resp)
+                                if self._looks_like_login(p_resp.body, meta):
+                                    context.emit_signal("api_login_endpoint", "url", url, confidence=0.9, source=self.name)
+                                
+                                context.results.append({
+                                    "type": "api_probe",
+                                    "url": url,
+                                    "method": method.upper(),
+                                    "status_code": p_resp.status,
+                                    "length": len(p_resp.body),
+                                    "meta": meta
+                                })
+                        except Exception:
+                            continue
+
                     # Generate Attack Sequences (Adaptive)
                     await self._generate_attack_sequences(context, client, base_url, endpoint)
+
+        context.update_stats(self.name,
+            specs_found=len(spec_urls),
+            endpoints_budget_used=endpoints_probed,
+            mutating_probed=mutating_probed,
+            budget_exhausted=budget_exhausted,
+            status="completed"
+        )
 
     async def _generate_attack_sequences(self, context: PipelineContext, client: AsyncHTTPClient, 
                                         base_url: str, endpoint: Dict[str, Any]) -> None:

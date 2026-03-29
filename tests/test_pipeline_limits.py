@@ -47,7 +47,8 @@ def test_passive_stage_seeds_input(monkeypatch, tmp_path):
         staticmethod(lambda *_: False),
     )
     # Mock wayback to avoid real network requests
-    monkeypatch.setattr(PassiveEnumerationStage, "_run_wayback", lambda *_: None)
+    async def mock_wayback(*_): return set()
+    monkeypatch.setattr(PassiveEnumerationStage, "_run_wayback", mock_wayback)
 
     stage = PassiveEnumerationStage()
     stage.run(context)
@@ -160,10 +161,11 @@ def test_passive_wayback_fair_share_prevents_target_starvation(monkeypatch, tmp_
         "wayback_max_per_target": 0,
         "wayback_fair_share": True,
     }
+    targets = ["a.example.com", "b.example.com", "c.example.com"]
     record = make_record(tmp_path, runtime_overrides=overrides, target="a.example.com")
+    record.spec.targets = targets
     manager = DummyManager()
-    context = PipelineContext(record=record, manager=manager)
-    context.targets = ["a.example.com", "b.example.com", "c.example.com"]
+    context = PipelineContext(record=record, manager=manager, targets=targets)
 
     monkeypatch.setattr(
         "recon_cli.tools.executor.CommandExecutor.available",

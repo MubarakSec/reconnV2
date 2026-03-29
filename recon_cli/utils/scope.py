@@ -29,13 +29,18 @@ class ScopeManager:
                 continue
             # Convert wildcard *.example.com to regex
             # We want to match example.com and anything ending in .example.com
-            regex_str = re.escape(p).replace(r"\*", ".*")
             if p.startswith("*."):
-                # Special case for *.domain.com to also match domain.com
                 base_domain = re.escape(p[2:])
                 regex_str = rf"^(.*\.)?{base_domain}$"
             else:
-                regex_str = f"^{regex_str}$"
+                # Default to recursive match for domains (e.g., example.com matches *.example.com)
+                # unless it looks like an IP or has other special chars
+                from recon_cli.utils import validation
+                if not validation.is_ip(p) and not any(ch in p for ch in ("/", "?", "#", ":")):
+                    base_domain = re.escape(p)
+                    regex_str = rf"^(.*\.)?{base_domain}$"
+                else:
+                    regex_str = f"^{re.escape(p)}$"
             rules.append(re.compile(regex_str, re.IGNORECASE))
         return rules
 

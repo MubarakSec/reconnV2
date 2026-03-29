@@ -418,12 +418,14 @@ class CircuitBreakerRegistry:
         self,
         name: str,
         config: Optional[CircuitBreakerConfig] = None,
+        **kwargs,
     ) -> CircuitBreaker:
         """الحصول أو إنشاء circuit"""
         if name not in self._breakers:
             self._breakers[name] = CircuitBreaker(
                 name,
                 config or self.default_config,
+                **kwargs,
             )
         return self._breakers[name]
 

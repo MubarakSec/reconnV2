@@ -108,11 +108,11 @@ class GraphQLReconStage(Stage):
                                         evidence={"query": guess, "status": g_resp.status}
                                     )
                             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="graphql_recon", error_type=type(e).__name__).inc()
-                except: pass
+                                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                                try:
+                                    from recon_cli.utils.metrics import metrics
+                                    metrics.stage_errors.labels(stage="graphql_recon", error_type=type(e).__name__).inc()
+                                except: pass
                 except Exception: continue
 
         if checked:

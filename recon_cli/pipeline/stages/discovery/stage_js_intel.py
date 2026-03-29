@@ -177,15 +177,15 @@ class JSIntelligenceStage(Stage):
                             sm_extraction = self._extract_surface_from_blob(sm_resp.body, base_url=surface_base_url, include_dynamic=True)
                             extraction.merge(sm_extraction)
                     except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="js_intelligence", error_type=type(e).__name__).inc()
-                except: pass
+                        logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        try:
+                            from recon_cli.utils.metrics import metrics
+                            metrics.stage_errors.labels(stage="js_intelligence", error_type=type(e).__name__).inc()
+                        except: pass
 
-                combined_candidates = sorted(list(extraction.endpoints))
-                graphql_candidates = extraction.graphql_endpoints
-                ws_candidates = extraction.ws_endpoints
+                combined_candidates = sorted([u for u in extraction.endpoints if context.url_allowed(u)])
+                graphql_candidates = sorted([u for u in extraction.graphql_endpoints if context.url_allowed(u)])
+                ws_candidates = sorted([u for u in extraction.ws_endpoints if context.url_allowed(u)])
 
                 artifacts.append({
                     "js_url": js_url, "surface_base_url": surface_base_url,
@@ -207,23 +207,35 @@ class JSIntelligenceStage(Stage):
 
         if artifacts:
             context.record.paths.artifact("js_intelligence.json").write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
-            stats = context.record.metadata.stats.setdefault("js_intel", {})
-            stats.update({"files_analyzed": len(artifacts), "endpoints_found": len(discovered_urls)})
-            context.manager.update_metadata(context.record)
+        
+        context.update_stats(self.name,
+            files=len(js_urls),
+            files_analyzed=len(artifacts),
+            endpoints=len(discovered_urls),
+            endpoints_found=len(discovered_urls),
+            status="completed"
+        )
         return True
 
     def _collect_js_urls(self, context: PipelineContext) -> Set[str]:
         js_urls = set()
         for entry in context.iter_results():
             url = entry.get("url")
+            if entry.get("type") == "runtime_crawl":
+                for js_file in entry.get("javascript_files", []):
+                    if isinstance(js_file, str) and context.url_allowed(js_file):
+                        js_urls.add(js_file)
+                continue
+
             if not isinstance(url, str) or not url: continue
-            if url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower():
+            if context.url_allowed(url) and (url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower()):
                 js_urls.add(url)
         
         runtime_js = context.get_data("runtime_discovered_js", [])
         if isinstance(runtime_js, list):
             for url in runtime_js:
-                if isinstance(url, str): js_urls.add(url)
+                if isinstance(url, str) and context.url_allowed(url):
+                    js_urls.add(url)
         return js_urls
 
     def _extract_surface_from_blob(self, content: str, *, base_url: str, include_dynamic: bool) -> _JSSurfaceExtraction:

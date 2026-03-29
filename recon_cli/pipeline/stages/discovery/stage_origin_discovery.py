@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import socket
 import asyncio
+import logging
 import dns.resolver
 import httpx
 import hashlib
@@ -11,6 +12,8 @@ import base64
 import os
 from typing import List, Set, Dict, Any, Optional
 from urllib.parse import urljoin, urlparse
+
+logger = logging.getLogger(__name__)
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
@@ -167,11 +170,11 @@ class OriginDiscoveryStage(Stage):
                     ips = [str(i) for i in resolver.resolve(mx_host, "A")]
                     for ip in ips: potential_ips[ip] = f"MX Record ({mx_host})"
                 except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                    logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                    try:
+                        from recon_cli.utils.metrics import metrics
+                        metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
+                    except: pass
         except Exception as e:
                 logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:

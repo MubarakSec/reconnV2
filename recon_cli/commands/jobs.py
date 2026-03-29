@@ -128,6 +128,66 @@ def cancel(
         JobLifecycle(manager).requeue(job_id)
         typer.echo(f"Job {job_id} moved to queue")
 
+@app.command()
+def verify(job_id: str) -> None:
+    """Verify the integrity of a job's artifacts and metadata."""
+    manager = JobManager()
+    record = _load_job_or_exit(manager, job_id)
+    
+    from recon_cli.jobs.validator import verify_job_artifacts
+    results = verify_job_artifacts(record)
+    
+    if results.get("valid"):
+        typer.echo(f"✅ Job {job_id} is valid")
+    else:
+        typer.echo(f"❌ Job {job_id} has issues:", err=True)
+        for issue in results.get("issues", []):
+            typer.echo(f"  - {issue}", err=True)
+        raise typer.Exit(code=1)
+
+@app.command()
+def prune(
+    days: int = typer.Option(7, help="Prune jobs older than N days"),
+    archive: bool = typer.Option(False, "--archive", help="Archive instead of delete"),
+) -> None:
+    """Remove or archive old job records."""
+    manager = JobManager()
+    lifecycle = JobLifecycle(manager)
+    
+    count = lifecycle.prune_finished(days=days, archive=archive)
+    action = "Archived" if archive else "Deleted"
+    typer.echo(f"✅ {action} {count} jobs older than {days} days")
+
+@app.command()
+def export(
+    job_id: str,
+    format: str = typer.Option("jsonl", help="Export format (jsonl/txt/csv/triage)"),
+    output: Optional[Path] = typer.Option(None, help="Output file path"),
+    verified_only: bool = typer.Option(False, "--verified-only", help="Only export verified findings"),
+    proof_required: bool = typer.Option(False, "--proof-required", help="Only export findings with proof"),
+    strict_mode: bool = typer.Option(False, "--strict-mode", help="Export only High/Critical findings"),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Limit number of findings"),
+) -> None:
+    """Export findings from a job to a specific format."""
+    manager = JobManager()
+    record = _load_job_or_exit(manager, job_id)
+    
+    from recon_cli.jobs.results import export_results
+    try:
+        path = export_results(
+            record, 
+            format=format, 
+            output_path=output,
+            verified_only=verified_only,
+            proof_required=proof_required,
+            strict_mode=strict_mode,
+            limit=limit
+        )
+        typer.echo(f"✅ Results exported to: {path}")
+    except Exception as e:
+        typer.echo(f"❌ Export failed: {e}", err=True)
+        raise typer.Exit(code=1)
+
 @app.command("tail")
 def tail_logs(job_id: str) -> None:
     """Stream the pipeline log."""

@@ -103,3 +103,40 @@ def _reset_job_state(record: JobRecord, *, clear_results: bool) -> None:
     for path in (record.paths.results_jsonl, record.paths.results_txt, record.paths.trimmed_results_jsonl):
         if path.exists(): path.write_text("", encoding="utf-8")
     (record.paths.root / "report.html").unlink(missing_ok=True)
+
+def quickstart_guide() -> None:
+    """Show quick start guide for new users."""
+    rich_print("""
+[bold cyan]🚀 ReconnV2 Quick Start Guide[/bold cyan]
+
+[bold]1. Basic Scan[/bold]
+   recon scan example.com --profile passive
+
+[bold]2. Full Scan with Vulnerability Detection[/bold]
+   recon scan example.com --profile full --scanner nuclei
+
+[bold]3. Interactive Mode (Recommended for Beginners)[/bold]
+   recon interactive
+
+[bold]4. Step-by-Step Wizard[/bold]
+   recon wizard
+
+[bold]5. View Job Results[/bold]
+   recon report <job_id>
+   recon report <job_id> --type json
+
+[bold]6. Tailing Logs[/bold]
+   recon job tail <job_id>
+""")
+
+def telegram_bot_start(token: str, chat_id: str) -> None:
+    """Start the Telegram bot."""
+    import asyncio
+    from recon_cli.utils.telegram_bot import TelegramBot
+    
+    bot = TelegramBot(token=token, allowed_chat_id=chat_id)
+    try:
+        asyncio.run(bot.start())
+    except KeyboardInterrupt:
+        bot.stop()
+        typer.echo("Bot stopped")

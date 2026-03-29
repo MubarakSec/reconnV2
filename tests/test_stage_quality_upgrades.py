@@ -4,7 +4,7 @@ from pathlib import Path
 from recon_cli.jobs import summary as jobs_summary
 from recon_cli.jobs.manager import JobRecord
 from recon_cli.jobs.models import JobMetadata, JobPaths, JobSpec
-from recon_cli.pipeline import stage_scanner as stage_scanner_module
+from recon_cli.pipeline.stages.vuln import stage_scanner as stage_scanner_module
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.discovery.stage_api_schema_probe import ApiSchemaProbeStage
 from recon_cli.pipeline.stages.auth.stage_auth_matrix import AuthMatrixStage, AuthRecord
@@ -28,7 +28,7 @@ class DummyManager:
         return None
 
 
-def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
+def _make_record(tmp_path: Path, runtime_overrides: dict, targets: list[str] = None) -> JobRecord:
     root = tmp_path / "job-quality"
     (root / "artifacts").mkdir(parents=True, exist_ok=True)
     (root / "logs").mkdir(parents=True, exist_ok=True)
@@ -38,6 +38,7 @@ def _make_record(tmp_path: Path, runtime_overrides: dict) -> JobRecord:
     spec = JobSpec(
         job_id="job-quality",
         target="example.com",
+        targets=targets or ["example.com"],
         profile="full",
         runtime_overrides=runtime_overrides,
     )
@@ -74,7 +75,7 @@ def test_idor_candidate_selection_prioritizes_and_limits_per_host(tmp_path: Path
         "idor_max_targets": 2,
         "idor_max_per_host": 1,
     }
-    record = _make_record(tmp_path, runtime_overrides)
+    record = _make_record(tmp_path, runtime_overrides, targets=["example.com", "billing.example.net"])
     context = PipelineContext(record=record, manager=DummyManager())
     stage = IDORStage()
 
@@ -151,7 +152,7 @@ def test_auth_matrix_collect_urls_prioritizes_sensitive_and_spreads_hosts(
         "auth_matrix_max_targets": 2,
         "auth_matrix_max_per_host": 1,
     }
-    record = _make_record(tmp_path, runtime_overrides)
+    record = _make_record(tmp_path, runtime_overrides, targets=["example.com", "shop.example.org"])
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         for payload in [
             {
@@ -229,7 +230,7 @@ def test_graphql_collect_endpoints_prioritizes_and_enforces_host_cap(tmp_path: P
     runtime_overrides = {
         "graphql_exploit_max_per_host": 1,
     }
-    record = _make_record(tmp_path, runtime_overrides)
+    record = _make_record(tmp_path, runtime_overrides, targets=["example.com", "billing.example.net"])
     with record.paths.results_jsonl.open("w", encoding="utf-8") as handle:
         for payload in [
             {
@@ -420,30 +421,22 @@ def test_api_schema_probe_global_budget_and_safe_writes(monkeypatch, tmp_path: P
     }
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str, headers: dict | None = None):
-            self.status_code = status_code
-            self.text = text
+        def __init__(self, status: int, body: str, headers: dict | None = None):
+            self.status = status
+            self.body = body
             self.headers = headers or {}
+            self.url = "https://example.com"
+            self.elapsed = 0.1
+            self.cookies = {}
 
     called_methods: list[str] = []
 
-    def fake_get(url, timeout=None, allow_redirects=None, headers=None, verify=None):
+    async def fake_do_request(self, method, url, headers=None, **kwargs):
         if url.startswith("https://spec.example.com/openapi-"):
             return _FakeResponse(
                 200, json.dumps(spec_payload), {"Content-Type": "application/json"}
             )
-        return _FakeResponse(404, "", {"Content-Type": "application/json"})
-
-    def fake_request(
-        method,
-        url,
-        timeout=None,
-        allow_redirects=None,
-        headers=None,
-        verify=None,
-        json=None,
-        data=None,
-    ):
+        
         called_methods.append(str(method).upper())
         status_code = 200 if str(method).upper() in {"GET", "HEAD", "OPTIONS"} else 401
         return _FakeResponse(
@@ -452,10 +445,8 @@ def test_api_schema_probe_global_budget_and_safe_writes(monkeypatch, tmp_path: P
             {"Content-Type": "application/json", "Content-Length": "2"},
         )
 
-    import requests
-
-    monkeypatch.setattr(requests, "get", fake_get)
-    monkeypatch.setattr(requests, "request", fake_request)
+    from recon_cli.utils.async_http import AsyncHTTPClient
+    monkeypatch.setattr(AsyncHTTPClient, "_do_request", fake_do_request)
 
     stage.run(context)
 
@@ -497,13 +488,14 @@ def test_extended_validation_hard_probe_cap(monkeypatch, tmp_path: Path):
     stage = ExtendedValidationStage()
 
     class _FakeResponse:
-        status_code = 302
-        text = ""
+        status = 302
+        body = ""
         headers = {"Location": "https://example.com/recon"}
 
-    monkeypatch.setattr(
-        stage, "_request_with_retries", lambda *args, **kwargs: _FakeResponse()
-    )
+    async def fake_request(*args, **kwargs):
+        return _FakeResponse()
+
+    monkeypatch.setattr(stage, "_request_with_retries", fake_request)
 
     stage.run(context)
 
@@ -534,12 +526,12 @@ def test_cloud_discovery_enforces_max_checks_when_no_assets(
 
     class _FakeResponse:
         def __init__(self) -> None:
-            self.status_code = 404
-            self.text = ""
+            self.status = 404
+            self.body = ""
+            self.headers = {}
 
-    import requests
-
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _FakeResponse())
+    from recon_cli.utils.async_http import AsyncHTTPClient
+    monkeypatch.setattr(AsyncHTTPClient, "_do_request", lambda *args, **kwargs: asyncio.sleep(0, _FakeResponse()))
 
     stage.run(context)
 
@@ -577,23 +569,24 @@ def test_js_intel_uses_runtime_crawl_javascript_files(monkeypatch, tmp_path: Pat
     stage = JSIntelligenceStage()
 
     class _FakeResponse:
-        def __init__(self, text: str) -> None:
-            self.status_code = 200
-            self.text = text
+        def __init__(self, body: str) -> None:
+            self.status = 200
+            self.body = body
+            self.headers = {}
+            self.url = "https://example.com"
+            self.elapsed = 0.1
+            self.cookies = {}
 
-    import requests
+    from recon_cli.utils.async_http import AsyncHTTPClient
+    
+    async def fake_do_request(*args, **kwargs):
+        return _FakeResponse("const a='https://api.example.com/v1/users';")
 
-    monkeypatch.setattr(
-        requests,
-        "get",
-        lambda *args, **kwargs: _FakeResponse(
-            "const a='https://api.example.com/v1/users';"
-        ),
-    )
+    monkeypatch.setattr(AsyncHTTPClient, "_do_request", fake_do_request)
 
     stage.run(context)
 
-    stats = record.metadata.stats.get("js_intel", {})
+    stats = record.metadata.stats.get("js_intelligence", {})
     assert stats.get("files") == 1
     assert stats.get("endpoints", 0) >= 1
 
@@ -640,11 +633,15 @@ def test_js_intel_skips_out_of_scope_javascript_and_endpoints(
     requested: list[str] = []
 
     class _FakeResponse:
-        def __init__(self, text: str) -> None:
-            self.status_code = 200
-            self.text = text
+        def __init__(self, body: str) -> None:
+            self.status = 200
+            self.body = body
+            self.headers = {}
+            self.url = "https://example.com"
+            self.elapsed = 0.1
+            self.cookies = {}
 
-    def fake_get(url, *args, **kwargs):
+    async def fake_do_request(self, method, url, **kwargs):
         requested.append(url)
         if url == "https://cdn.example.com/app.js":
             return _FakeResponse(
@@ -653,15 +650,14 @@ def test_js_intel_skips_out_of_scope_javascript_and_endpoints(
             )
         raise AssertionError(f"unexpected out-of-scope fetch: {url}")
 
-    import requests
-
-    monkeypatch.setattr(requests, "get", fake_get)
+    from recon_cli.utils.async_http import AsyncHTTPClient
+    monkeypatch.setattr(AsyncHTTPClient, "_do_request", fake_do_request)
 
     stage.run(context)
 
     assert requested == ["https://cdn.example.com/app.js"]
     artifact_rows = json.loads(
-        record.paths.artifact("js_intel.json").read_text(encoding="utf-8")
+        record.paths.artifact("js_intelligence.json").read_text(encoding="utf-8")
     )
     assert any(
         "api.example.com" in endpoint for endpoint in artifact_rows[0]["endpoints"]
@@ -870,7 +866,7 @@ def test_summary_prefers_confirmed_findings_in_top_section(tmp_path: Path):
     jobs_summary.generate_summary(context)
 
     text = record.paths.results_txt.read_text(encoding="utf-8")
-    marker = "== CONFIRMED FINDINGS"
+    marker = "CONFIRMED FINDINGS"
     idx = text.find(marker)
     assert idx != -1
     section = text[idx:].splitlines()

@@ -1191,12 +1191,10 @@ class CommandExecutor:
                 raise
 
         async def _run_async_wrapper():
-            if trace_scope:
-                CURRENT_TRACE_SCOPE.set(trace_scope)
-            
+            from recon_cli.utils.pipeline_trace import run_in_scope
             # Use run_in_executor to avoid blocking the loop during the actual subprocess call
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, _run_sync_logic)
+            return await loop.run_in_executor(None, run_in_scope, trace_scope, _run_sync_logic)
 
         try:
             try:
@@ -1411,14 +1409,61 @@ class CommandExecutor:
         if resolved:
             cmd_list[0] = resolved
 
-        # Simplified async run for now
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.run(
-                cmd_list, cwd, env, timeout, check, capture_output, redact, context
-            ),
+        message = _command_preview(cmd_list, redact=redact)
+        policy = _resolve_policy(cmd_list, timeout_override=timeout)
+        self.logger.info("Executing (Async): %s", message)
+
+        parent_span_id = current_parent_span_id()
+        trace_span = _start_command_trace_span(
+            cmd_list,
+            policy=policy,
+            redact=redact,
+            check=check,
+            capture_output=capture_output,
+            cwd=cwd,
+            context=context,
+            parent_span_id=parent_span_id,
         )
+
+        try:
+            # Note: create_subprocess_exec doesn't take 'check' or 'capture_output' directly in the same way.
+            # We handle stdout/stderr piping ourselves.
+            process = await asyncio.create_subprocess_exec(
+                cmd_list[0],
+                *cmd_list[1:],
+                stdout=asyncio.subprocess.PIPE if capture_output else asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE if capture_output else asyncio.subprocess.DEVNULL,
+                cwd=str(cwd) if cwd else None,
+                env=dict(env) if env else None,
+            )
+
+            try:
+                stdout_data, stderr_data = await asyncio.wait_for(process.communicate(), timeout=policy.timeout)
+                returncode = process.returncode
+            except (TimeoutError, asyncio.TimeoutError):
+                process.kill()
+                await process.wait()
+                raise CommandError(f"Timeout after {policy.timeout}s")
+
+            stdout = stdout_data.decode("utf-8", errors="replace") if stdout_data else ""
+            stderr = stderr_data.decode("utf-8", errors="replace") if stderr_data else ""
+
+            if check and returncode != 0:
+                raise CommandError(f"Command failed with exit code {returncode}", returncode)
+
+            completed = subprocess.CompletedProcess(
+                args=cmd_list,
+                returncode=returncode or 0,
+                stdout=stdout,
+                stderr=stderr,
+            )
+            
+            _finish_command_trace_span(trace_span, status="completed" if returncode == 0 else "failed", returncode=returncode)
+            return completed
+
+        except Exception as e:
+            _finish_command_trace_span(trace_span, status="failed", error=str(e))
+            raise
 
     def start_session(
         self,

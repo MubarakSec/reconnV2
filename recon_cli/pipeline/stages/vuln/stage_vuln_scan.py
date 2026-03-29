@@ -151,5 +151,7 @@ class VulnScanStage(Stage):
         results = [r for r in context.filter_results("url")]
         urls = []
         for r in results:
-            if "?" in r.get("url", ""): urls.append(r["url"])
+            url = r.get("url", "")
+            if "?" in url and context.url_allowed(url):
+                urls.append(url)
         return sorted(list(set(urls)), key=lambda x: len(x), reverse=True)
