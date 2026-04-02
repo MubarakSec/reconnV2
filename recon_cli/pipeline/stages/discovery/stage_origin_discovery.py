@@ -4,6 +4,7 @@ import re
 import socket
 import asyncio
 import logging
+import ipaddress
 import dns.resolver
 import httpx
 import hashlib
@@ -30,6 +31,22 @@ class OriginDiscoveryStage(Stage):
     4. Pro Verification: Body Hash Matching & Host Header Testing.
     """
     name = "origin_discovery"
+    _KNOWN_MULTI_LABEL_SUFFIXES = {
+        "ac.uk",
+        "co.uk",
+        "gov.uk",
+        "org.uk",
+        "com.au",
+        "net.au",
+        "org.au",
+        "co.jp",
+        "co.kr",
+        "com.br",
+        "com.mx",
+        "com.sa",
+        "com.sg",
+        "com.tr",
+    }
 
     def execute(self, context: PipelineContext) -> None:
         import asyncio
@@ -64,21 +81,103 @@ class OriginDiscoveryStage(Stage):
             await self._verify_origins(context, domain, potential_ips, baseline_hash)
 
     def _collect_root_domains(self, context: PipelineContext) -> Set[str]:
-        results = context.get_results()
+        results: List[Dict[str, Any]] = []
+        get_results = getattr(context, "get_results", None)
+        if callable(get_results):
+            try:
+                fetched = get_results()
+                if isinstance(fetched, list):
+                    results = [entry for entry in fetched if isinstance(entry, dict)]
+            except Exception:
+                results = []
+
+        if not results:
+            fallback_results = getattr(context, "results", None)
+            if isinstance(fallback_results, list):
+                results = [entry for entry in fallback_results if isinstance(entry, dict)]
+
         domains = set()
         for r in results:
-            host = r.get("hostname")
-            if host:
-                parts = host.split(".")
-                if len(parts) >= 2:
-                    domains.add(".".join(parts[-2:]))
+            host = str(r.get("hostname") or r.get("host") or "").strip().lower()
+            if not host:
+                url = str(r.get("url") or "").strip()
+                if url:
+                    try:
+                        host = str(urlparse(url).hostname or "").strip().lower()
+                    except ValueError:
+                        host = ""
+            domain = self._registrable_domain(host)
+            if domain:
+                domains.add(domain)
+
+        if domains:
+            return domains
+
+        domains.update(self._collect_domains_from_legacy_artifact(context))
         return domains
+
+    def _collect_domains_from_legacy_artifact(self, context: PipelineContext) -> Set[str]:
+        """Fallback for older pipelines/tests that seed deduped hosts on disk."""
+        record = getattr(context, "record", None)
+        if record is None or not hasattr(record, "paths"):
+            return set()
+
+        try:
+            hosts_path = record.paths.artifact("dedupe_hosts.txt")
+        except Exception:
+            return set()
+
+        if not hosts_path.exists():
+            return set()
+
+        domains: Set[str] = set()
+        try:
+            for raw_line in hosts_path.read_text(encoding="utf-8").splitlines():
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                host = raw_line.split()[0].strip().lower()
+                domain = self._registrable_domain(host)
+                if domain:
+                    domains.add(domain)
+        except OSError:
+            return set()
+        return domains
+
+    def _registrable_domain(self, host: str) -> Optional[str]:
+        if not host:
+            return None
+
+        normalized = host.strip().strip(".").lower()
+        if not normalized:
+            return None
+
+        # Ignore direct IPs: origin discovery expects a domain seed.
+        try:
+            ipaddress.ip_address(normalized)
+            return None
+        except ValueError:
+            pass
+
+        parts = normalized.split(".")
+        if len(parts) < 2:
+            return None
+
+        suffix_two = ".".join(parts[-2:])
+        if len(parts) >= 3 and suffix_two in self._KNOWN_MULTI_LABEL_SUFFIXES:
+            return ".".join(parts[-3:])
+        return suffix_two
+
+    @staticmethod
+    def _tls_verify(context: PipelineContext) -> bool:
+        runtime_config = getattr(context, "runtime_config", None)
+        return bool(getattr(runtime_config, "verify_tls", True))
 
     async def _get_baseline_asset_hash(self, context: PipelineContext, domain: str) -> Optional[str]:
         """Fetch favicon from public target and return its MD5 hash."""
         url = f"https://{domain}/favicon.ico"
         try:
-            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+            async with httpx.AsyncClient(verify=self._tls_verify(context), timeout=10) as client:
                 resp = await client.get(url)
                 if resp.status_code == 200 and resp.content:
                     return hashlib.md5(resp.content).hexdigest()
@@ -87,7 +186,8 @@ class OriginDiscoveryStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
         return None
 
     async def _probe_censys(self, context: PipelineContext, domain: str, potential_ips: Dict[str, str]) -> None:
@@ -110,7 +210,8 @@ class OriginDiscoveryStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
 
     async def _probe_favicon_hash(self, context: PipelineContext, domain: str, potential_ips: Dict[str, str]) -> None:
         shodan_key = os.environ.get("SHODAN_API_KEY")
@@ -118,7 +219,7 @@ class OriginDiscoveryStage(Stage):
 
         try:
             target_url = f"https://{domain}/favicon.ico"
-            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+            async with httpx.AsyncClient(verify=self._tls_verify(context), timeout=10) as client:
                 resp = await client.get(target_url)
                 if resp.status_code == 200:
                     favicon_b64 = base64.encodebytes(resp.content).decode()
@@ -134,7 +235,8 @@ class OriginDiscoveryStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
 
     def _probe_dns_records(self, domain: str, resolver: dns.resolver.Resolver, potential_ips: Dict[str, str]) -> None:
         # 1. SPF/TXT
@@ -149,7 +251,28 @@ class OriginDiscoveryStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
+
+        # 4. Common direct-origin hostnames
+        for candidate in (f"direct.{domain}", f"origin.{domain}"):
+            resolved = False
+            try:
+                for rdata in resolver.resolve(candidate, "A"):
+                    potential_ips[str(rdata)] = f"A Record ({candidate})"
+                    resolved = True
+            except Exception:
+                resolved = False
+
+            if resolved:
+                continue
+
+            try:
+                _, _, ips = socket.gethostbyname_ex(candidate)
+                for ip in ips:
+                    potential_ips[ip] = f"DNS Lookup ({candidate})"
+            except Exception:
+                continue
 
         # 2. IPv6 (AAAA) - Common misconfig
         try:
@@ -160,7 +283,8 @@ class OriginDiscoveryStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
 
         # 3. MX Records
         try:
@@ -174,13 +298,15 @@ class OriginDiscoveryStage(Stage):
                     try:
                         from recon_cli.utils.metrics import metrics
                         metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                    except: pass
+                    except Exception:
+                        pass
         except Exception as e:
                 logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
 
     async def _verify_origins(self, context: PipelineContext, domain: str, potential_ips: Dict[str, str], baseline_hash: Optional[str]) -> None:
         for ip, method in potential_ips.items():
@@ -189,7 +315,7 @@ class OriginDiscoveryStage(Stage):
             if is_cdn: continue
 
             # Elite Verification: Check Host Header AND Body Hash
-            verification_results = await self._probe_origin_elite(ip, domain, baseline_hash)
+            verification_results = await self._probe_origin_elite(context, ip, domain, baseline_hash)
             
             if verification_results["verified"]:
                 conf = 1.0 if verification_results["hash_match"] else 0.8
@@ -206,11 +332,17 @@ class OriginDiscoveryStage(Stage):
                 context.results.append(finding)
                 context.emit_signal("origin_found", "host", domain, confidence=conf, source=self.name, evidence=verification_results)
 
-    async def _probe_origin_elite(self, ip: str, domain: str, baseline_hash: Optional[str]) -> Dict[str, Any]:
+    async def _probe_origin_elite(
+        self,
+        context: PipelineContext,
+        ip: str,
+        domain: str,
+        baseline_hash: Optional[str],
+    ) -> Dict[str, Any]:
         """Pro-grade verification: Connect to IP, send Host header, compare Body Hash."""
         results = {"verified": False, "hash_match": False, "ip": ip}
         try:
-            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+            async with httpx.AsyncClient(verify=self._tls_verify(context), timeout=10) as client:
                 # 1. Host Header Test
                 resp = await client.get(f"https://{ip}/", headers={"Host": domain})
                 if resp.status_code < 400 or resp.status_code == 404:
@@ -229,5 +361,6 @@ class OriginDiscoveryStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="origin_discovery", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
         return results

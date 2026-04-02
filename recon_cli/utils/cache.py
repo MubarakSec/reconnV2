@@ -6,7 +6,7 @@ Cache System - نظام تخزين مؤقت للنتائج
 from __future__ import annotations
 
 import hashlib
-import pickle
+import json
 import sqlite3
 from contextlib import contextmanager
 import threading
@@ -217,12 +217,13 @@ class DiskCache:
             conn.close()
 
     def _serialize(self, value: Any) -> bytes:
-        """تحويل القيمة إلى bytes"""
-        return pickle.dumps(value)
+        """تحويل القيمة إلى bytes (JSON only)."""
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return text.encode("utf-8")
 
     def _deserialize(self, data: bytes) -> Any:
-        """تحويل bytes إلى قيمة"""
-        return pickle.loads(data)  # nosec B301
+        """تحويل bytes إلى قيمة (JSON only)."""
+        return json.loads(data.decode("utf-8"))
 
     def get(self, key: str) -> Optional[Any]:
         """الحصول على قيمة"""
@@ -244,15 +245,26 @@ class DiskCache:
                     conn.execute("DELETE FROM cache WHERE key = ?", (key,))
                     return None
 
+                try:
+                    value = self._deserialize(value_bytes)
+                except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+                    # Drop unreadable or legacy cache entries instead of unsafe deserialization.
+                    conn.execute("DELETE FROM cache WHERE key = ?", (key,))
+                    return None
+
                 # تحديث hits
                 conn.execute("UPDATE cache SET hits = hits + 1 WHERE key = ?", (key,))
 
-                return self._deserialize(value_bytes)
+                return value
 
     def set(self, key: str, value: Any, ttl: int = 3600) -> None:
         """تخزين قيمة"""
         now = time.time()
-        value_bytes = self._serialize(value)
+        try:
+            value_bytes = self._serialize(value)
+        except (TypeError, ValueError):
+            # Keep disk cache JSON-only; unsupported values are ignored.
+            return
 
         with self._lock:
             with self._get_connection() as conn:  # type: sqlite3.Connection

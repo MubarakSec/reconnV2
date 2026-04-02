@@ -50,15 +50,15 @@ check_python() {
         PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
         echo -e "${GREEN}[✓] Python $PY_VERSION found${NC}"
         
-        # Check if version >= 3.10
-        if python3 -c 'import sys; exit(0 if sys.version_info >= (3, 10) else 1)'; then
+        # Keep installer aligned with pyproject requires-python.
+        if python3 -c 'import sys; exit(0 if sys.version_info >= (3, 12) else 1)'; then
             echo -e "${GREEN}[✓] Python version is compatible${NC}"
         else
-            echo -e "${RED}[✗] Python 3.10+ required. Current: $PY_VERSION${NC}"
+            echo -e "${RED}[✗] Python 3.12+ required. Current: $PY_VERSION${NC}"
             exit 1
         fi
     else
-        echo -e "${RED}[✗] Python3 not found. Please install Python 3.10+${NC}"
+        echo -e "${RED}[✗] Python3 not found. Please install Python 3.12+${NC}"
         exit 1
     fi
 }
@@ -145,7 +145,7 @@ install_python_deps() {
     
     # Install package
     echo -e "${YELLOW}[*] Installing ReconnV2...${NC}"
-    pip install -e ".[api]" -q
+    pip install -e "." -q
 
     # Install optional dependencies
     pip install dnspython playwright -q 2>/dev/null || true

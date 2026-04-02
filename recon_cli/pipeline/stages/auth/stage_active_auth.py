@@ -5,6 +5,7 @@ import uuid
 import re
 import os
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urljoin, urlparse
@@ -37,6 +38,51 @@ class ActiveAuthStage(Stage):
         "guerrillamail.com", "sharklasers.com", "guerrillamail.info",
         "grr.la", "guerrillamail.biz", "mailnull.com"
     ]
+
+    @staticmethod
+    def _email_hash(email: Optional[str]) -> Optional[str]:
+        if not email:
+            return None
+        normalized = str(email).strip().lower()
+        if not normalized:
+            return None
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _has_usable_password(credentials: Any) -> bool:
+        if not isinstance(credentials, dict):
+            return False
+        password = credentials.get("password")
+        return isinstance(password, str) and bool(password) and password != "***"
+
+    def _safe_credentials_snapshot(self, credentials: Dict[str, str]) -> Dict[str, Any]:
+        return {
+            "username": credentials.get("username", ""),
+            "email": credentials.get("email", ""),
+            "password": "***",
+            "email_hash": self._email_hash(credentials.get("email")),
+            "captured_at": time_utils.iso_now(),
+        }
+
+    def _safe_session_snapshot(
+        self,
+        url: str,
+        cookies: Dict[str, str],
+        tokens: Dict[str, str],
+        credentials: Dict[str, str],
+    ) -> Dict[str, Any]:
+        return {
+            "url": url,
+            "captured_at": time_utils.iso_now(),
+            "session_id": uuid.uuid4().hex[:8],
+            "cookies_present": bool(cookies),
+            "cookie_names": sorted([str(name) for name in cookies.keys()])[:32],
+            "tokens_present": bool(tokens),
+            "token_keys": sorted([str(name) for name in tokens.keys()])[:32],
+            "credentials_present": bool(credentials),
+            "credential_username": credentials.get("username", ""),
+            "credential_email_hash": self._email_hash(credentials.get("email")),
+        }
 
     def is_enabled(self, context: PipelineContext) -> bool:
         return bool(getattr(context.runtime_config, "enable_active_auth", True))
@@ -102,13 +148,21 @@ class ActiveAuthStage(Stage):
         if os.path.exists(self.ACCOUNTS_FILE):
             try:
                 data = fs.read_json(self.ACCOUNTS_FILE)
-                return data.get(host)
+                if isinstance(data, dict):
+                    from_file = data.get(host)
+                    if self._has_usable_password(from_file):
+                        return from_file
+                    if isinstance(from_file, dict):
+                        context.logger.debug(
+                            "Ignoring redacted legacy credentials for %s", host
+                        )
             except Exception as e:
                 context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
         return None
 
     def _save_credentials(self, context: PipelineContext, host: str, credentials: Dict[str, str]) -> None:
@@ -132,9 +186,12 @@ class ActiveAuthStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                except: pass
-        data[host] = credentials
-        fs.write_json(self.ACCOUNTS_FILE, data, redacted=False)
+                except Exception:
+                    pass
+        if not isinstance(data, dict):
+            data = {}
+        data[host] = self._safe_credentials_snapshot(credentials)
+        fs.write_json(self.ACCOUNTS_FILE, data, redacted=True)
 
     async def _extract_form_context(self, context: PipelineContext, client: AsyncHTTPClient, url: str) -> Tuple[Dict[str, str], str]:
         tokens = {}
@@ -156,7 +213,8 @@ class ActiveAuthStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
         return tokens, body
 
     def _map_form_fields(self, inputs: List[Dict[str, Any]], identity: Dict[str, str], current_payload: Dict[str, str]) -> Dict[str, str]:
@@ -333,7 +391,8 @@ class ActiveAuthStage(Stage):
                     try:
                         from recon_cli.utils.metrics import metrics
                         metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                    except: pass
+                    except Exception:
+                        pass
 
             if resp.status < 400:
                 cookies = resp.cookies
@@ -363,7 +422,8 @@ class ActiveAuthStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
         return False
 
     async def _extract_identity(self, context: PipelineContext, client: AsyncHTTPClient, host: str, base_url: str) -> None:
@@ -383,11 +443,7 @@ class ActiveAuthStage(Stage):
             except Exception: continue
 
     def _save_session(self, context: PipelineContext, host: str, url: str, cookies: Dict[str, str], tokens: Dict[str, str], credentials: Dict[str, str]) -> None:
-        new_auth = {
-            "url": url, "cookies": cookies, "tokens": tokens,
-            "credentials": credentials, "captured_at": time_utils.iso_now(),
-            "session_id": uuid.uuid4().hex[:8]
-        }
+        new_auth = self._safe_session_snapshot(url, cookies, tokens, credentials)
         artifact_path = context.record.paths.artifact(f"sessions_{host}.json")
         sessions = []
         if artifact_path.exists():
@@ -399,12 +455,19 @@ class ActiveAuthStage(Stage):
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
-                except: pass
+                except Exception:
+                    pass
         
-        email = credentials.get("email")
-        if email: sessions = [s for s in sessions if s.get("credentials", {}).get("email") != email]
+        email_hash = self._email_hash(credentials.get("email"))
+        if email_hash:
+            sessions = [
+                s
+                for s in sessions
+                if isinstance(s, dict)
+                and s.get("credential_email_hash") != email_hash
+            ]
             
         sessions.append(new_auth)
-        fs.write_json(artifact_path, sessions, redacted=False)
+        fs.write_json(artifact_path, sessions, redacted=True)
         context.logger.info("Captured and added session for %s (Total: %d)", host, len(sessions))
         context.emit_signal("auth_session", "host", host, confidence=1.0, source=self.name, evidence={"session_count": len(sessions)})

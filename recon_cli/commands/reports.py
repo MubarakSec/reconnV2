@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import typer
 from pathlib import Path
 from typing import List, Optional
@@ -55,6 +56,7 @@ def report(
             generate_summary(MockContext(record, manager))
             typer.echo(record.paths.results_txt.read_text())
     elif type == "json":
-        typer.echo(record.metadata.json())
+        payload = record.metadata.to_dict() if hasattr(record.metadata, "to_dict") else record.metadata
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     elif type == "full":
         executive.generate_executive_report(record)

@@ -5,8 +5,10 @@ import json
 import re
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlparse
+
+from recon_cli.utils.sanitizer import redact_json_value
 
 try:
     import requests
@@ -476,6 +478,39 @@ class UnifiedAuthManager:
                                                 record=getattr(context, "record", None),
                                                 manager=getattr(context, "manager", None))
 
+    @staticmethod
+    def _sanitize_auth_material(auth_material: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized = redact_json_value(auth_material)
+        if isinstance(sanitized, dict):
+            return sanitized
+        return {}
+
+    def _sync_identity_to_metadata(self, identity) -> None:
+        if not self.context.record:
+            return
+
+        from recon_cli.jobs.models import IdentityRecord
+
+        persisted_identity = IdentityRecord(
+            identity_id=identity.identity_id,
+            role=identity.role,
+            auth_material=self._sanitize_auth_material(identity.auth_material),
+            source=identity.source,
+            verified=identity.verified,
+            last_seen=identity.last_seen,
+            reachable_surfaces=list(identity.reachable_surfaces),
+            host=identity.host,
+        )
+
+        found = False
+        for i, existing in enumerate(self.context.record.metadata.identities):
+            if existing.identity_id == identity.identity_id:
+                self.context.record.metadata.identities[i] = persisted_identity
+                found = True
+                break
+        if not found:
+            self.context.record.metadata.identities.append(persisted_identity)
+
     def register_identity(self, 
                           identity_id: str, 
                           role: str, 
@@ -488,7 +523,7 @@ class UnifiedAuthManager:
         identity = IdentityRecord(
             identity_id=identity_id,
             role=role,
-            auth_material=auth_material,
+            auth_material=dict(auth_material or {}),
             source=source,
             host=host,
             verified=True # Usually verified if coming from active_auth
@@ -497,15 +532,7 @@ class UnifiedAuthManager:
         
         # Sync back to job metadata
         if self.context.record:
-            # Update or append
-            found = False
-            for i, existing in enumerate(self.context.record.metadata.identities):
-                if existing.identity_id == identity_id:
-                    self.context.record.metadata.identities[i] = identity
-                    found = True
-                    break
-            if not found:
-                self.context.record.metadata.identities.append(identity)
+            self._sync_identity_to_metadata(identity)
             
             if self.context.manager:
                 self.context.manager.update_metadata(self.context.record)
@@ -569,6 +596,7 @@ class UnifiedAuthManager:
                                 
                                 # Sync back to job metadata
                                 if self.context.manager and self.context.record:
+                                    self._sync_identity_to_metadata(identity)
                                     self.context.manager.update_metadata(self.context.record)
                                     
                                 return True
