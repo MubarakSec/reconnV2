@@ -84,11 +84,18 @@ def completions_cmd(
     show: bool = typer.Option(False, "--show", help="Show completion script"),
 ):
     """Manage shell completions."""
-    from recon_cli.completions import install_completions, show_completions
+    from recon_cli.completions import install_completion, generate_completion, Shell
+    
+    try:
+        shell_enum = Shell(shell.lower())
+    except ValueError:
+        typer.echo(f"Unsupported shell: {shell}. Choose from: bash, zsh, fish, powershell")
+        raise typer.Exit(1)
+
     if install:
-        install_completions(shell)
+        install_completion(shell_enum)
     elif show:
-        show_completions(shell)
+        typer.echo(generate_completion(shell_enum))
     else:
         typer.echo("Use --install or --show")
 

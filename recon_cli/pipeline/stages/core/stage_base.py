@@ -102,7 +102,7 @@ class Stage(ABC):
             self._ensure_not_stopped(context)
             return
 
-        logger = context.logger
+        # logger = context.logger
         started = time.monotonic()
         done = threading.Event()
         sla_alerted = threading.Event()
@@ -125,7 +125,7 @@ class Stage(ABC):
             while not done.wait(timeout=check_interval):
                 if self._stop_requested(context) and not stop_alerted.is_set():
                     stop_alerted.set()
-                    logger.warning(
+                    context.logger.warning(
                         "Stage %s received stop request; waiting for current operation to finish",
                         self.name,
                     )
@@ -140,13 +140,13 @@ class Stage(ABC):
                 ):
                     sla_alert_elapsed["seconds"] = elapsed
                     sla_alerted.set()
-                    logger.warning(
+                    context.logger.warning(
                         "Stage %s exceeded SLA (%ss); still running (%ss elapsed)",
                         self.name,
                         sla_seconds,
                         elapsed,
                     )
-                logger.info(
+                context.logger.info(
                     "Stage %s heartbeat: still running (%ss elapsed)",
                     self.name,
                     elapsed,
@@ -255,17 +255,17 @@ class Stage(ABC):
             await context.event_bus.unsubscribe(queue)
 
     async def run_async_wrapped(self, context: PipelineContext) -> bool:
-        logger = context.logger
+        # logger = context.logger
         if self._stop_requested(context):
-            logger.warning("Stage %s skipped because stop was requested", self.name)
+            context.logger.warning("Stage %s skipped because stop was requested", self.name)
             self._note_skip(context, "stop_requested")
             raise StageStopRequested(f"Stop requested before stage {self.name}")
         if not self.is_enabled(context):
-            logger.info("Stage %s disabled for this profile", self.name)
+            context.logger.info("Stage %s disabled for this profile", self.name)
             self._note_skip(context, "disabled")
             return False
         if not self.should_run(context):
-            logger.info("Stage %s already checkpointed; skipping", self.name)
+            context.logger.info("Stage %s already checkpointed; skipping", self.name)
             self._note_skip(context, "checkpointed")
             return False
         
@@ -277,31 +277,31 @@ class Stage(ABC):
             context.increment_attempt(self.name)
             context.record.metadata.stage = self.name
             context.manager.update_metadata(context.record)
-            logger.info("Stage %s attempt %s/%s", self.name, attempt, attempts)
+            context.logger.info("Stage %s attempt %s/%s", self.name, attempt, attempts)
             
             try:
                 # We need an async version of _run_with_heartbeat
                 await self._run_async_with_heartbeat(context)
                 context.checkpoint(self.name)
-                logger.info("Stage %s completed", self.name)
+                context.logger.info("Stage %s completed", self.name)
                 return True
             except StageStopRequested as exc:
-                logger.warning("Stage %s stopped: %s", self.name, exc)
+                context.logger.warning("Stage %s stopped: %s", self.name, exc)
                 self._note_skip(context, "stop_requested")
                 raise
             except Exception as exc:
-                logger.exception("Stage %s failed: %s", self.name, exc)
+                context.logger.exception("Stage %s failed: %s", self.name, exc)
                 if attempt >= attempts:
                     raise StageError(
                         f"Stage {self.name} failed after {attempts} attempts"
                     ) from exc
                 delay = backoff_base * (backoff_factor ** (attempt - 1))
-                logger.info("Retrying stage %s after %ss", self.name, delay)
+                context.logger.info("Retrying stage %s after %ss", self.name, delay)
                 await asyncio.sleep(delay)
         return False
 
     async def _run_async_with_heartbeat(self, context: PipelineContext) -> None:
-        logger = context.logger
+        # logger = context.logger
         heartbeat_seconds = int(
             getattr(context.runtime_config, "stage_heartbeat_seconds", 0) or 0
         )
@@ -341,7 +341,7 @@ class Stage(ABC):
                     # Alert logic
                     elapsed = int(now - started)
                     sla_alerted.set()
-                    logger.warning(
+                    context.logger.warning(
                         "Stage %s exceeded SLA (%ss); still running (%ss elapsed)",
                         self.name,
                         sla_seconds,
@@ -359,7 +359,7 @@ class Stage(ABC):
                     
                 if now >= next_heartbeat:
                     elapsed = int(now - started)
-                    logger.info(
+                    context.logger.info(
                         "Stage %s heartbeat: still running (%ss elapsed)",
                         self.name,
                         elapsed,
@@ -421,17 +421,17 @@ class Stage(ABC):
             return asyncio.run(self.run_async_wrapped(context))
 
     def _run_sync_fallback(self, context: PipelineContext) -> bool:
-        logger = context.logger
+        # logger = context.logger
         if self._stop_requested(context):
-            logger.warning("Stage %s skipped because stop was requested", self.name)
+            context.logger.warning("Stage %s skipped because stop was requested", self.name)
             self._note_skip(context, "stop_requested")
             raise StageStopRequested(f"Stop requested before stage {self.name}")
         if not self.is_enabled(context):
-            logger.info("Stage %s disabled for this profile", self.name)
+            context.logger.info("Stage %s disabled for this profile", self.name)
             self._note_skip(context, "disabled")
             return False
         if not self.should_run(context):
-            logger.info("Stage %s already checkpointed; skipping", self.name)
+            context.logger.info("Stage %s already checkpointed; skipping", self.name)
             self._note_skip(context, "checkpointed")
             return False
         attempts = context.max_retries + 1
@@ -441,23 +441,23 @@ class Stage(ABC):
             context.increment_attempt(self.name)
             context.record.metadata.stage = self.name
             context.manager.update_metadata(context.record)
-            logger.info("Stage %s attempt %s/%s", self.name, attempt, attempts)
+            context.logger.info("Stage %s attempt %s/%s", self.name, attempt, attempts)
             try:
                 self._run_with_heartbeat(context)
                 context.checkpoint(self.name)
-                logger.info("Stage %s completed", self.name)
+                context.logger.info("Stage %s completed", self.name)
                 return True
             except StageStopRequested as exc:
-                logger.warning("Stage %s stopped: %s", self.name, exc)
+                context.logger.warning("Stage %s stopped: %s", self.name, exc)
                 self._note_skip(context, "stop_requested")
                 raise
             except Exception as exc:  # pragma: no cover - runtime path
-                logger.exception("Stage %s failed: %s", self.name, exc)
+                context.logger.exception("Stage %s failed: %s", self.name, exc)
                 if attempt >= attempts:
                     raise StageError(
                         f"Stage {self.name} failed after {attempts} attempts"
                     ) from exc
                 delay = backoff_base * (backoff_factor ** (attempt - 1))
-                logger.info("Retrying stage %s after %ss", self.name, delay)
+                context.logger.info("Retrying stage %s after %ss", self.name, delay)
                 time.sleep(delay)
         return False

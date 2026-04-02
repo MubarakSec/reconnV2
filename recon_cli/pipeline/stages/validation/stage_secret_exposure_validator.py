@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import asyncio
+import logging
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import urlparse
@@ -12,6 +13,8 @@ from recon_cli.pipeline.stages.core.stage_base import Stage
 from recon_cli.secrets.detector import SECRETS_PATTERNS, shannon_entropy
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig, HTTPResponse
+
+logger = logging.getLogger(__name__)
 
 
 class SecretExposureValidatorStage(Stage):

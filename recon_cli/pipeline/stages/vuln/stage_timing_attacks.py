@@ -47,7 +47,7 @@ class TimingAttackStage(Stage):
             try:
                 accounts_data = fs.read_json(self.ACCOUNTS_FILE)
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="timing_attacks", error_type=type(e).__name__).inc()

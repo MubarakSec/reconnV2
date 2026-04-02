@@ -208,7 +208,7 @@ class CTPivotStage(Stage):
                     for entry in entries:
                         if entry.get("asn"): asns.add(str(entry["asn"]).replace("AS", ""))
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="ct_asn_pivot", error_type=type(e).__name__).inc()

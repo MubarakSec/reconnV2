@@ -209,9 +209,26 @@ class ResultsTracker:
 
                 try:
                     payload = validate_result(payload)
-                except Exception:
+                except Exception as exc:
                     self.stats[f"validation_failed:{ptype}"] += 1
-                    pass
+                    # Log failure but do not append invalid data to main results
+                    from recon_cli.utils.logging import get_pipeline_logger
+                    logger = get_pipeline_logger()
+                    if logger:
+                        logger.error("Validation failed for %s: %s", ptype, exc)
+                    
+                    # Optional: Write to a quarantine file for debugging
+                    try:
+                        quarantine_path = self.path.with_name(f"{self.path.name}.quarantine")
+                        with quarantine_path.open("a", encoding="utf-8") as qf:
+                            qf.write(json.dumps({
+                                "failed_at": time_utils.iso_now(),
+                                "error": str(exc),
+                                "payload": payload
+                            }) + "\n")
+                    except Exception:
+                        pass
+                    return False
 
             if isinstance(payload, dict):
                 payload = self._normalize_payload(payload)

@@ -107,6 +107,72 @@ def is_tool_available(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def is_sensible_file(
+    content: bytes, 
+    url: str, 
+    content_type: str = "", 
+    original_html_hash: str | None = None
+) -> bool:
+    """
+    Heuristic check to see if a downloaded file is 'real' and not a soft-404/HTML.
+    """
+    if not content or len(content) < 10:
+        return False
+        
+    lower_content = content[:4000].lower()
+    
+    # 1. HTML detection
+    is_html = b"<!doctype html" in lower_content or b"<html" in lower_content
+    if "text/html" in content_type.lower():
+        is_html = True
+        
+    # If we expected a binary file but got HTML, it's likely a false positive
+    ext = url.split("?")[0].split(".")[-1].lower()
+    if ext in {"zip", "tar", "gz", "tgz", "rar", "7z", "sql", "db", "bak"}:
+        if is_html:
+            # Check if it's just an error page disguised as 200
+            if any(term in lower_content for term in [b"not found", b"404", b"error", b"forbidden"]):
+                return False
+            # If it's HTML but we wanted SQL/Zip, it's almost certainly a soft-404 redirect/landing page
+            return False
+
+    # 2. SQL specific checks
+    if ext == "sql":
+        sql_markers = [b"insert into", b"create table", b"database dump", b"mysql dump", b"postgres"]
+        if any(marker in lower_content for marker in sql_markers):
+            return True
+        if not is_html:
+            return True # Assume non-HTML text might be SQL
+        return False
+
+    # 3. Environment/Config checks
+    if ext in {"env", "config", "ini", "yaml", "yml"}:
+        if is_html: return False
+        return True
+
+    # 4. Binary formats
+    if ext in {"zip", "tar", "gz", "tgz", "rar"}:
+        # ZIP magic header
+        if content.startswith(b"PK\x03\x04"): return True
+        # GZIP magic
+        if content.startswith(b"\x1f\x8b"): return True
+        return not is_html # Fallback
+
+    # 5. Generic HTML check for anything else
+    if is_html:
+        # If the content is identical to a known 'original' HTML page, it's a false positive
+        if original_html_hash:
+            import hashlib
+            if hashlib.md5(content[:8192]).hexdigest() == original_html_hash:
+                return False
+        
+        # If it's too short or contains common error text
+        if len(content) < 500 and any(term in lower_content for term in [b"not found", b"404"]):
+            return False
+            
+    return True
+
+
 def load_targets_from_file(path: str, allow_ip: bool = False) -> List[str]:
     targets: List[str] = []
     with open(path, "r", encoding="utf-8") as handle:

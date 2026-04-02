@@ -100,7 +100,7 @@ class HostInjectionStage(Stage):
                 context.logger.info("Testing HHI on %s using %s", url, list(headers_override.keys())[0])
                 await client.post(action, data=payload, headers=headers, follow_redirects=True)
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="host_injection", error_type=type(e).__name__).inc()
@@ -118,7 +118,7 @@ class HostInjectionStage(Stage):
                     if any(cn in name.lower() for cn in csrf_names):
                         tokens[name] = input_tag.get('value', '')
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="host_injection", error_type=type(e).__name__).inc()

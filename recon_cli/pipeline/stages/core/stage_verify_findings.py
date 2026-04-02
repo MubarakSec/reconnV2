@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import asyncio
 import uuid
+import logging
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple, Any, Optional
 from urllib.parse import urlparse
@@ -11,6 +12,8 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
+
+logger = logging.getLogger(__name__)
 
 
 class VerifyFindingsStage(Stage):

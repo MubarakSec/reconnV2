@@ -37,10 +37,16 @@ def worker_run(
                     record = lifecycle.move_to_running(target_job, owner="worker")
                     run_pipeline(record, manager)
                     lifecycle.move_to_finished(target_job)
-                    typer.echo(f"Job {target_job} finished")
+                    typer.echo(typer.style(f"Job {target_job} FINISHED", fg=typer.colors.GREEN))
                 except Exception as e:
-                    logging.error(f"Job {target_job} failed: {e}")
-                    lifecycle.move_to_failed(target_job)
+                    # Check if it was a partial failure (scan completed but some stages failed)
+                    final_record = manager.load_job(target_job)
+                    if final_record and final_record.metadata.status == "partial":
+                        typer.echo(typer.style(f"Job {target_job} COMPLETED with partial failures: {e}", fg=typer.colors.YELLOW))
+                        lifecycle.move_to_finished(target_job, status="partial")
+                    else:
+                        logging.error(f"Job {target_job} FAILED: {e}")
+                        lifecycle.move_to_failed(target_job)
                 
                 if once:
                     break

@@ -348,8 +348,8 @@ class HTMLReportGenerator:
             self._build_charts_html(data) if self.config.include_charts else ""
         )
 
-        # Build findings table
-        findings_html = self._build_findings_table(data.findings)
+        # Build findings section
+        findings_html = self._build_findings_section(data.findings)
 
         # Build hosts table
         hosts_html = self._build_hosts_table(data.hosts) if data.hosts else ""
@@ -367,15 +367,18 @@ class HTMLReportGenerator:
             --danger: #dc2626;
             --warning: #eab308;
             --success: #10b981;
-            --bg: #ffffff;
+            --bg: #f9fafb;
+            --bg-card: #ffffff;
             --text: #1f2937;
+            --text-light: #6b7280;
             --border: #e5e7eb;
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }}
         
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: var(--font-family);
             line-height: 1.6;
             color: var(--text);
             background: var(--bg);
@@ -388,28 +391,29 @@ class HTMLReportGenerator:
             text-align: center;
             margin-bottom: 3rem;
             padding-bottom: 2rem;
-            border-bottom: 2px solid var(--border);
+            border-bottom: 1px solid var(--border);
         }}
         
         h1 {{ font-size: 2.5rem; margin-bottom: 0.5rem; }}
-        h2 {{ font-size: 1.75rem; margin: 2rem 0 1rem; color: var(--primary); }}
+        h2 {{ font-size: 1.75rem; margin: 2rem 0 1rem; color: var(--primary); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }}
         h3 {{ font-size: 1.25rem; margin: 1.5rem 0 0.75rem; }}
         
-        .subtitle {{ color: #6b7280; font-size: 1.1rem; }}
+        .subtitle {{ color: var(--text-light); font-size: 1.1rem; }}
         .meta {{ color: #9ca3af; font-size: 0.9rem; margin-top: 1rem; }}
         
         .summary-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 1.5rem;
             margin: 2rem 0;
         }}
         
         .summary-card {{
-            background: #f9fafb;
+            background: var(--bg-card);
             border-radius: 8px;
             padding: 1.5rem;
             text-align: center;
+            border: 1px solid var(--border);
         }}
         
         .summary-card .value {{
@@ -419,7 +423,7 @@ class HTMLReportGenerator:
         }}
         
         .summary-card .label {{
-            color: #6b7280;
+            color: var(--text-light);
             font-size: 0.9rem;
         }}
         
@@ -432,11 +436,81 @@ class HTMLReportGenerator:
             text-transform: uppercase;
         }}
         
-        .severity-critical {{ background: #fef2f2; color: #dc2626; }}
-        .severity-high {{ background: #fff7ed; color: #ea580c; }}
-        .severity-medium {{ background: #fefce8; color: #ca8a04; }}
-        .severity-low {{ background: #eff6ff; color: #3b82f6; }}
-        .severity-info {{ background: #f3f4f6; color: #6b7280; }}
+        .severity-critical {{ background: #fef2f2; color: #dc2626; border: 1px solid #dc2626; }}
+        .severity-high {{ background: #fff7ed; color: #ea580c; border: 1px solid #ea580c; }}
+        .severity-medium {{ background: #fefce8; color: #ca8a04; border: 1px solid #ca8a04; }}
+        .severity-low {{ background: #eff6ff; color: #3b82f6; border: 1px solid #3b82f6; }}
+        .severity-info {{ background: #f3f4f6; color: #6b7280; border: 1px solid #6b7280; }}
+
+        .finding-filters {{
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }}
+
+        .filter-btn {{
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s ease;
+        }}
+
+        .filter-btn.active, .filter-btn:hover {{
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }}
+        
+        .finding {{
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1rem 0;
+            overflow: hidden;
+        }}
+        
+        .finding-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }}
+
+        .finding-header:hover {{
+            background: #f3f4f6;
+        }}
+        
+        .finding-title {{
+            font-weight: 600;
+            font-size: 1.1rem;
+        }}
+        
+        .finding-body {{
+            padding: 0 1.5rem 1.5rem;
+            display: none;
+        }}
+
+        .finding-body h4 {{
+            font-size: 1rem;
+            color: var(--primary);
+            margin: 1rem 0 0.5rem;
+        }}
+
+        .finding-body pre {{
+            background: #f3f4f6;
+            padding: 1rem;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+            font-size: 0.9rem;
+        }}
         
         table {{
             width: 100%;
@@ -455,51 +529,12 @@ class HTMLReportGenerator:
             font-weight: 600;
         }}
         
-        tr:hover {{ background: #f9fafb; }}
-        
-        .finding {{
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin: 1rem 0;
-        }}
-        
-        .finding-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-        }}
-        
-        .finding-title {{
-            font-weight: 600;
-            font-size: 1.1rem;
-        }}
-        
-        .finding-details {{
-            color: #6b7280;
-            font-size: 0.9rem;
-        }}
-        
-        .charts-container {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 2rem;
-            margin: 2rem 0;
-        }}
-        
-        .chart {{
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1.5rem;
-        }}
+        tr:hover {{ background: #f3f4f6; }}
         
         footer {{
             margin-top: 3rem;
             padding-top: 2rem;
-            border-top: 2px solid var(--border);
+            border-top: 1px solid var(--border);
             text-align: center;
             color: #9ca3af;
             font-size: 0.9rem;
@@ -529,10 +564,12 @@ class HTMLReportGenerator:
         
         {charts_html}
         
-        <h2>📋 Findings ({data.total_findings})</h2>
-        {findings_html}
+        <section id="findings">
+            <h2>📋 Findings ({data.total_findings})</h2>
+            {findings_html}
+        </section>
         
-        {f"<h2>🖥️ Discovered Hosts ({len(data.hosts)})</h2>{hosts_html}" if data.hosts else ""}
+        {f'<h2>🖥️ Discovered Hosts ({len(data.hosts)})</h2>{hosts_html}' if data.hosts else ""}
         
         {sections}
     </main>
@@ -541,6 +578,45 @@ class HTMLReportGenerator:
         <p>Generated by {escape_html_text(self.config.author)}</p>
         <p>Report ID: {escape_html_text(data.job_id)}</p>
     </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {{
+            const findingHeaders = document.querySelectorAll('.finding-header');
+            findingHeaders.forEach(header => {{
+                header.addEventListener('click', () => {{
+                    const body = header.nextElementSibling;
+                    body.style.display = body.style.display === 'block' ? 'none' : 'block';
+                }});
+            }});
+
+            const filterButtons = document.querySelectorAll('.filter-btn');
+            const findings = document.querySelectorAll('.finding');
+            
+            filterButtons.forEach(button => {{
+                button.addEventListener('click', () => {{
+                    const severity = button.getAttribute('data-severity');
+                    
+                    button.classList.toggle('active');
+                    
+                    const activeSeverities = Array.from(document.querySelectorAll('.filter-btn.active'))
+                                                 .map(btn => btn.getAttribute('data-severity'));
+
+                    findings.forEach(finding => {{
+                        if (activeSeverities.length === 0) {{
+                            finding.style.display = 'block';
+                        }} else {{
+                            const findingSeverity = finding.getAttribute('data-severity');
+                            if (activeSeverities.includes(findingSeverity)) {{
+                                finding.style.display = 'block';
+                            }} else {{
+                                finding.style.display = 'none';
+                            }}
+                        }}
+                    }});
+                }});
+            }});
+        }});
+    </script>
 </body>
 </html>"""
 
@@ -562,20 +638,20 @@ class HTMLReportGenerator:
                     <div class="value">{data.total_findings}</div>
                     <div class="label">Total Findings</div>
                 </div>
-                <div class="summary-card" style="border-left: 4px solid #dc2626;">
-                    <div class="value" style="color: #dc2626;">{counts.get("critical", 0)}</div>
+                <div class="summary-card" style="border-left: 4px solid var(--danger);">
+                    <div class="value" style="color: var(--danger);">{counts.get("critical", 0)}</div>
                     <div class="label">Critical</div>
                 </div>
                 <div class="summary-card" style="border-left: 4px solid #ea580c;">
                     <div class="value" style="color: #ea580c;">{counts.get("high", 0)}</div>
                     <div class="label">High</div>
                 </div>
-                <div class="summary-card" style="border-left: 4px solid #eab308;">
-                    <div class="value" style="color: #eab308;">{counts.get("medium", 0)}</div>
+                <div class="summary-card" style="border-left: 4px solid var(--warning);">
+                    <div class="value" style="color: var(--warning);">{counts.get("medium", 0)}</div>
                     <div class="label">Medium</div>
                 </div>
-                <div class="summary-card" style="border-left: 4px solid #3b82f6;">
-                    <div class="value" style="color: #3b82f6;">{counts.get("low", 0)}</div>
+                <div class="summary-card" style="border-left: 4px solid var(--primary);">
+                    <div class="value" style="color: var(--primary);">{counts.get("low", 0)}</div>
                     <div class="label">Low</div>
                 </div>
             </div>
@@ -583,51 +659,54 @@ class HTMLReportGenerator:
         </section>
 """
 
-    def _build_findings_table(self, findings: List[Dict[str, Any]]) -> str:
-        """Build findings table HTML."""
+    def _build_findings_section(self, findings: List[Dict[str, Any]]) -> str:
+        """Build interactive findings section HTML."""
         if not findings:
             return "<p>No findings to display.</p>"
 
-        rows = []
+        # Sort findings by severity
+        severity_order = ["critical", "high", "medium", "low", "info"]
+        findings.sort(key=lambda f: severity_order.index(resolve_severity(f)))
+
+        finding_html_parts = []
         for finding in findings:
             severity = resolve_severity(finding)
-            title = (
-                finding.get("title")
-                or finding.get("description")
-                or resolve_finding_type(finding)
-            )
-            host = (
-                finding.get("host")
-                or finding.get("hostname")
-                or finding.get("target")
-                or finding.get("url")
-                or "N/A"
-            )
-            description = finding.get("description", "")
-            rows.append(f"""
-            <tr>
-                <td><span class="severity-badge severity-{severity}">{severity}</span></td>
-                <td>{escape_html_text(title)}</td>
-                <td>{escape_html_text(host)}</td>
-                <td>{escape_html_text(description[:100] + ("..." if description else ""))}</td>
-            </tr>
-""")
+            title = escape_html_text(finding.get("title") or finding.get("description") or resolve_finding_type(finding))
+            host = escape_html_text(finding.get("host") or finding.get("hostname") or finding.get("target") or finding.get("url") or "N/A")
+            description = escape_html_text(finding.get("description", "No description provided."))
+            proof = escape_html_text(finding.get("proof") or finding.get("poc") or finding.get("details", {}).get("proof", ""))
+
+            finding_html_parts.append(f"""
+            <div class="finding" data-severity="{severity}">
+                <div class="finding-header">
+                    <div class="finding-title-container">
+                        <span class="severity-badge severity-{severity}">{severity}</span>
+                        <span class="finding-title">{title}</span>
+                    </div>
+                    <div class="finding-host">{host}</div>
+                </div>
+                <div class="finding-body">
+                    <h4>Description</h4>
+                    <p>{description}</p>
+                    {f"<h4>Proof</h4><pre>{proof}</pre>" if proof else ""}
+                </div>
+            </div>
+            """)
+
+        severities_present = sorted(set(resolve_severity(f) for f in findings), key=lambda s: severity_order.index(s))
+        
+        filter_buttons = "".join(
+            f'<button class="filter-btn" data-severity="{s}">{s.title()}</button>' for s in severities_present
+        )
 
         return f"""
-        <table>
-            <thead>
-                <tr>
-                    <th>Severity</th>
-                    <th>Title</th>
-                    <th>Host</th>
-                    <th>Description</th>
-                </tr>
-            </thead>
-            <tbody>
-                {"".join(rows)}
-            </tbody>
-        </table>
-"""
+        <div class="finding-filters">
+            {filter_buttons}
+        </div>
+        <div id="findings-list">
+            {"".join(finding_html_parts)}
+        </div>
+        """
 
     def _build_hosts_table(self, hosts: List[Dict[str, Any]]) -> str:
         """Build hosts table HTML."""
@@ -638,8 +717,8 @@ class HTMLReportGenerator:
         for host in hosts:
             ip = host.get("ip", "N/A")
             hostname = host.get("hostname", "N/A")
-            ports = ", ".join(str(p) for p in host.get("open_ports", [])[:5])
-            if len(host.get("open_ports", [])) > 5:
+            ports = ", ".join(str(p) for p in host.get("open_ports", [])[:10])
+            if len(host.get("open_ports", [])) > 10:
                 ports += "..."
 
             rows.append(f"""
@@ -670,9 +749,11 @@ class HTMLReportGenerator:
     def _build_charts_html(self, data: ReportData) -> str:
         """Build charts section HTML."""
         counts = data.finding_counts
+        if not counts:
+            return ""
 
         return f"""
-        <section id="charts" class="charts-container">
+        <section id="charts" class="charts-container no-print">
             <div class="chart">
                 <h3>Severity Distribution</h3>
                 <canvas id="severityChart"></canvas>
@@ -688,6 +769,15 @@ class HTMLReportGenerator:
                         data: {json.dumps(list(counts.values()))},
                         backgroundColor: ['#dc2626', '#ea580c', '#eab308', '#3b82f6', '#6b7280']
                     }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        legend: {{
+                            position: 'top',
+                        }}
+                    }}
                 }}
             }});
         </script>

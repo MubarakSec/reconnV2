@@ -98,7 +98,7 @@ class AuthBypassTechniqueStage(Stage):
                     evidence={"description": "Redirect detected on missing password field"}
                 )
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="auth_bypass_tech", error_type=type(e).__name__).inc()
@@ -147,7 +147,7 @@ class AuthBypassTechniqueStage(Stage):
                     evidence={"field": target_field, "payload": str(payload)}
                 )
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="auth_bypass_tech", error_type=type(e).__name__).inc()

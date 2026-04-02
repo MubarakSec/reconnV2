@@ -125,7 +125,7 @@ class CloudAssetDiscoveryStage(Stage):
                         org = entry.get("org")
                         if isinstance(org, str): org_tokens.update(self._extract_tokens(org))
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="cloud_asset_discovery", error_type=type(e).__name__).inc()

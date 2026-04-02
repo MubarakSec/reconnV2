@@ -177,7 +177,7 @@ class JSIntelligenceStage(Stage):
                             sm_extraction = self._extract_surface_from_blob(sm_resp.body, base_url=surface_base_url, include_dynamic=True)
                             extraction.merge(sm_extraction)
                     except Exception as e:
-                        logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                         try:
                             from recon_cli.utils.metrics import metrics
                             metrics.stage_errors.labels(stage="js_intelligence", error_type=type(e).__name__).inc()

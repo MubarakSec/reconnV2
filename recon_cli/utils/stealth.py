@@ -127,6 +127,12 @@ class StealthManager:
             delay = random.uniform(self.config.jitter_min, self.config.jitter_max)
             time.sleep(delay)
 
+    async def apply_jitter_async(self) -> None:
+        if self.config.jitter_max > 0:
+            delay = random.uniform(self.config.jitter_min, self.config.jitter_max)
+            import asyncio
+            await asyncio.sleep(delay)
+
     def wrap_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
         new_headers = dict(headers)
         if self.config.rotate_user_agents:

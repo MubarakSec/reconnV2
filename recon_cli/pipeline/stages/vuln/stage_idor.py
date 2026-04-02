@@ -230,7 +230,7 @@ class IDORStage(Stage):
         try:
             data_json = json.loads(body)
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="idor_probe", error_type=type(e).__name__).inc()
@@ -394,7 +394,7 @@ class IDORStage(Stage):
                 results.append(base64.b64encode(f"admin_{decoded}".encode()).decode())
                 results.append(base64.b64encode(b"1").decode())
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="idor_probe", error_type=type(e).__name__).inc()

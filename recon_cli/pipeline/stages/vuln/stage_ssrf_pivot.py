@@ -78,7 +78,7 @@ class SSRFPivotStage(Stage):
                 if resp.status < 500 or duration > 4.5:
                     self._report_pivot(context, url, probe, f"Port {port} potentially OPEN (Status: {resp.status})")
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="ssrf_pivot", error_type=type(e).__name__).inc()
@@ -94,7 +94,7 @@ class SSRFPivotStage(Stage):
                     if any(h in resp.body for h in ["ami-id", "instance-id", "localhost"]):
                         self._report_pivot(context, url, probe, resp.body[:500])
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="ssrf_pivot", error_type=type(e).__name__).inc()

@@ -41,12 +41,24 @@ class Executor:
                 
                 start_time = time.monotonic()
                 try:
-                    resp = await client.get(hypothesis.target_url, identity_id=identity_id)
+                    method = str(hypothesis.parameters.get("method", "GET")).upper()
+                    json_body = hypothesis.parameters.get("json")
+                    data_body = hypothesis.parameters.get("data")
+                    custom_headers = hypothesis.parameters.get("headers")
+                    
+                    resp = await client._request(
+                        method=method,
+                        url=hypothesis.target_url,
+                        identity_id=identity_id,
+                        json=json_body,
+                        data=data_body,
+                        headers=custom_headers
+                    )
                     elapsed = time.monotonic() - start_time
                     
                     observations.append(Observation(
                         url=hypothesis.target_url,
-                        method="GET",
+                        method=method,
                         status=resp.status,
                         headers=resp.headers,
                         body=resp.body,

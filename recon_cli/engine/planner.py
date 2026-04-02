@@ -81,4 +81,21 @@ class Planner:
         return hypotheses
 
     def _plan_auth_bypass(self) -> List[Hypothesis]:
-        return []
+        hypotheses = []
+        
+        with self.context.target_graph._lock:
+            for node in self.context.target_graph._graph._nodes.values():
+                if node.type == "api_endpoint":
+                    url = node.attrs.get("url")
+                    method = node.attrs.get("method", "get")
+                    # If the endpoint explicitly requires auth or has a tag indicating protection
+                    if node.attrs.get("requires_auth") or "auth" in str(node.attrs.get("tags", [])):
+                        hypotheses.append(Hypothesis(
+                            type=HypothesisType.AUTH_BYPASS,
+                            target_url=url,
+                            priority=0.7,
+                            parameters={"method": method},
+                            metadata={"host": node.attrs.get("host")}
+                        ))
+        
+        return hypotheses

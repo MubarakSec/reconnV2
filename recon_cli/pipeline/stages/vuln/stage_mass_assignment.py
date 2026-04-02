@@ -125,7 +125,7 @@ class MassAssignmentStage(Stage):
                         if method.upper() in ["POST", "PUT", "PATCH"]:
                             endpoints.append((f"https://{host}{path}", method.upper()))
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="mass_assignment", error_type=type(e).__name__).inc()
@@ -152,7 +152,7 @@ class MassAssignmentStage(Stage):
                 data = fs.read_json(art)
                 if isinstance(data, list): sessions[host] = data
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="mass_assignment", error_type=type(e).__name__).inc()

@@ -37,7 +37,7 @@ DATA_DIR: Path = RECON_HOME / "data"
 
 LOG_RELATIVE_PATH = Path("logs") / "pipeline.log"
 RESULTS_JSONL_NAME = "results.jsonl"
-RESULTS_TEXT_NAME = "results.txt"
+RESULTS_TEXT_NAME = "summary.txt"
 SPEC_NAME = "spec.json"
 METADATA_NAME = "metadata.json"
 ARTIFACTS_DIRNAME = "artifacts"

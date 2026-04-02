@@ -324,7 +324,7 @@ class AsyncHTTPClient:
                     logger.warning("Session expired (401) for %s. Attempting auto re-auth...", url)
                     
                     # Run re-auth logic
-                    reauth_success = await asyncio.to_thread(self.context._auth_manager.ensure_login, url)
+                    reauth_success = await asyncio.to_thread(self.context._auth_manager.ensure_login, url, identity_id)
                     if reauth_success:
                         self._stats["reauth_success"] += 1
                         logger.info("Auto re-auth SUCCESS. Retrying original request...")

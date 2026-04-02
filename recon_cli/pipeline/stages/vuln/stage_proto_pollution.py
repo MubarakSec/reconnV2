@@ -55,7 +55,7 @@ class ProtoPollutionStage(Stage):
                             self._report_vuln(context, url, "Client-side Prototype Pollution", payload)
                             break
                     except Exception as e:
-                        logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                         try:
                             from recon_cli.utils.metrics import metrics
                             metrics.stage_errors.labels(stage="proto_pollution", error_type=type(e).__name__).inc()
@@ -80,7 +80,7 @@ class ProtoPollutionStage(Stage):
                             self._report_vuln(context, url, "Server-side Prototype Pollution (Reflection)", str(payload))
                             break
                     except Exception as e:
-                        logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                         try:
                             from recon_cli.utils.metrics import metrics
                             metrics.stage_errors.labels(stage="proto_pollution", error_type=type(e).__name__).inc()

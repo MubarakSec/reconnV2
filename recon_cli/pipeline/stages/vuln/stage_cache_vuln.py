@@ -68,7 +68,7 @@ class WebCacheVulnStage(Stage):
                         {"extension": ext, "cache_headers": dict(resp.headers)}
                     )
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="web_cache_vuln", error_type=type(e).__name__).inc()
@@ -89,7 +89,8 @@ class WebCacheVulnStage(Stage):
                 # 2. Check if reflected
                 if poison_val in resp1.text:
                     # 3. Check if cached (send request WITHOUT header)
-                    time.sleep(1)
+                    import asyncio
+                    await asyncio.sleep(1)
                     resp2 = await client.get(url)
                     if poison_val in resp2.text:
                         self._report_cache_finding(
@@ -100,7 +101,7 @@ class WebCacheVulnStage(Stage):
                         )
                         return # Found one, move to next URL
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="web_cache_vuln", error_type=type(e).__name__).inc()

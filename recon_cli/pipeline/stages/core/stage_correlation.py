@@ -427,6 +427,14 @@ class CorrelationStage(Stage):
                         ],
                     }
                 )
+                context.emit_signal(
+                    "attack_path_discovered",
+                    "hostname",
+                    attack_path["hostname"],
+                    confidence=0.9,
+                    source=self.name,
+                    evidence={"entry_url": attack_path["entry_url"], "sink_url": attack_path["sink_url"]}
+                )
             (artifacts_dir / "attack_paths.json").write_text(
                 json.dumps(attack_paths, indent=2, sort_keys=True),
                 encoding="utf-8",
@@ -437,6 +445,14 @@ class CorrelationStage(Stage):
         if chains:
             for chain in chains:
                 context.results.append(chain)
+                context.emit_signal(
+                    "vulnerability_chain_discovered",
+                    "hostname",
+                    chain.get("hostname"),
+                    confidence=0.95,
+                    source=self.name,
+                    evidence=chain.get("details", {})
+                )
             (artifacts_dir / "vulnerability_chains.json").write_text(
                 json.dumps(chains, indent=2, sort_keys=True), encoding="utf-8"
             )

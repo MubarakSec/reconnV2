@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from datetime import datetime
 
 from collections import Counter
@@ -225,6 +226,7 @@ def generate_summary_data(record, prev_record=None) -> Dict[str, Any]:
 def _group_results(results: List[dict]) -> Dict[str, List[dict]]:
     groups = {
         "Authentication & Identity": [],
+        "Potential High-Risk Leaks": [],
         "Leaked Secrets & Tokens": [],
         "Sensitive Files & Backups": [],
         "API Surface & Documentation": [],
@@ -233,18 +235,28 @@ def _group_results(results: List[dict]) -> Dict[str, List[dict]]:
     }
     
     for entry in results:
-        tags = {str(t).lower() for t in entry.get("tags", [])}
+        url = (entry.get("url") or "").lower()
+        tags_raw = entry.get("tags")
+        tags = {str(t).lower() for t in tags_raw} if isinstance(tags_raw, list) else set()
         # Findings have 'finding_type', URLs have 'type' == 'url'
-        f_type = entry.get("finding_type", "")
+        f_type = (entry.get("finding_type") or "").lower()
         
+        # 1. Auth
         if any(t in tags for t in ["surface:login", "surface:register", "surface:password-reset", "auth:challenge", "signin", "signup"]) or "auth" in f_type:
             groups["Authentication & Identity"].append(entry)
+        # 2. Critical Leaks (SQL, Env, etc)
+        elif any(ext in url for ext in [".sql", ".env", ".git/config", "docker-compose.yml", ".htpasswd"]) or "leak-fuzz" in tags:
+            groups["Potential High-Risk Leaks"].append(entry)
+        # 3. Secrets
         elif any(t in tags for t in ["secret", "token", "key", "apikey"]) or "secret" in f_type:
             groups["Leaked Secrets & Tokens"].append(entry)
+        # 4. Backups/Sensitive files
         elif any(t in tags for t in ["backup", "bak", "zip", "old", "tgz"]):
             groups["Sensitive Files & Backups"].append(entry)
+        # 5. Admin
         elif any(t in tags for t in ["surface:admin", "admin", "internal", "panel"]):
             groups["Administrative & Internal"].append(entry)
+        # 6. API
         elif any(t in tags for t in ["service:api", "graphql", "ws", "openapi", "swagger", "api"]):
             groups["API Surface & Documentation"].append(entry)
         else:
@@ -335,19 +347,28 @@ def generate_summary(context) -> None:
         lines.append(f"Incremental  : {prev_job_id}")
     lines.append(f"Duration     : {metadata.started_at} -> {metadata.finished_at}")
 
-    if prev_job_id:
-        lines.append("")
-        lines.append("== DIFF SUMMARY (NEW since last scan) ==")
-        lines.append(f"New Hosts    : {data.get('counts', {}).get('asset_enrichment', 0)}")
-        lines.append(f"New URLs     : {data.get('new_urls_count', 0)}")
-        lines.append(f"New Findings : {data.get('new_findings_count', 0)}")
-
     started_dt = _parse_iso(metadata.started_at)
     finished_dt = _parse_iso(metadata.finished_at)
     if started_dt and finished_dt:
         wall_clock = (finished_dt - started_dt).total_seconds()
         if wall_clock >= 0:
             lines.append(f"Wall Clock   : {wall_clock:.1f}s")
+
+    if prev_job_id:
+        lines.append("")
+        lines.append("== DIFF SUMMARY (NEW since last scan) ==")
+        lines.append(f"New Hosts    : {data.get('counts', {}).get('asset_enrichment', 0)}")
+        lines.append(f"New URLs     : {data.get('new_urls_count', 0)}")
+        lines.append(f"New Findings : {data.get('new_findings_count', 0)}")
+    
+    lines.append("")
+    lines.append("== FINDINGS BY SEVERITY ==")
+    priority_counter = data.get('priority_counter', {})
+    sev_order = ["critical", "high", "medium", "low", "info"]
+    for sev in sev_order:
+        if sev in priority_counter:
+            lines.append(f"{sev.title():12}: {priority_counter[sev]}")
+
 
     # Resilience: Report broken stages
     broken_stages = metadata.stats.get("broken_stages", {})
@@ -395,7 +416,7 @@ def generate_summary(context) -> None:
     all_unconfirmed = [e for e in data["top_findings"] if not _is_confirmed(e)]
     all_unconfirmed.extend(data["top_urls"])
     # Sort by score before grouping to maintain internal order
-    all_unconfirmed.sort(key=lambda x: int(x.get("score", 0)), reverse=True)
+    all_unconfirmed.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
     
     result_groups = _group_results(all_unconfirmed)
     
@@ -403,12 +424,12 @@ def generate_summary(context) -> None:
         lines.append("")
         lines.append(f"== {group_name.upper()} ({len(items)}) ==")
         for entry in items[:SUMMARY_TOP]:
-            score = entry.get("score", 0)
+            score = int(entry.get("score") or 0)
             priority = (entry.get("priority") or "med").upper()
             
             if entry.get("type") == "url":
                 label = _format_url_label(entry)
-                tags = ",".join(entry.get("tags", []))
+                tags = ",".join(entry.get("tags") or [])
                 lines.append(f"[-] [{score:3}] ({priority:8}) {label} {tags}")
             else:
                 label = _format_finding_label(entry)
@@ -458,19 +479,18 @@ def generate_summary(context) -> None:
     )
 
     next_actions: list[str] = []
+    next_actions.append(f"Review the interactive HTML report: recon report {job_id} --format html > report.html")
+    next_actions.append(f"Review this text summary in 'summary.txt'")
+    
     if confirmed_findings:
-        next_actions.append("Manually verify and report the confirmed vulnerabilities.")
+        next_actions.append("Manually verify and report the confirmed vulnerabilities from the HTML report.")
     if all_unconfirmed:
         next_actions.append(
-            "Perform deeper manual analysis on high-priority candidates."
+            "Perform deeper manual analysis on high-priority candidates from the HTML report."
         )
     if data["counts"].get("api_spec", 0) > 0:
         next_actions.append(
             "Examine discovered API specifications for sensitive endpoints."
-        )
-    if data["counts"].get("finding", 0) > 0:
-        next_actions.append(
-            f"Review detailed findings with: recon report {job_id}"
         )
 
     if next_actions:

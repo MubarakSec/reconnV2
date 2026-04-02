@@ -23,11 +23,62 @@ class Judge:
         # Basic IDOR logic as an example
         if hypothesis.type.value == "idor":
             return self._judge_idor(hypothesis, observations)
+        elif hypothesis.type.value == "ssrf":
+            return self._judge_ssrf(hypothesis, observations)
+        elif hypothesis.type.value == "auth_bypass":
+            return self._judge_auth_bypass(hypothesis, observations)
         
         return JudgeResult(
             level=EvidenceLevel.INCONCLUSIVE,
             confidence=0.0,
             reasoning=[f"Hypothesis type {hypothesis.type} not yet supported by Judge"]
+        )
+
+    def _judge_ssrf(self, hypothesis: Hypothesis, observations: List[Observation]) -> JudgeResult:
+        # SSRF Judge logic (simplified for engine illustration)
+        # Check if the body contains OAST or Internal indicators
+        INTERNAL_INDICATORS = ("127.0.0.1", "localhost", "169.254.169.254", "latest/meta-data")
+        
+        for obs in observations:
+            if any(ind in obs.body for ind in INTERNAL_INDICATORS):
+                return JudgeResult(
+                    level=EvidenceLevel.CONFIRMED,
+                    confidence=0.8,
+                    reasoning=[f"Internal metadata or loopback indicator found in {obs.url}"],
+                    finding_data={"target": hypothesis.target_url, "confidence_rationale": "Response contained internal server data indicators"}
+                )
+                
+        return JudgeResult(
+            level=EvidenceLevel.REJECTED,
+            confidence=0.6,
+            reasoning=["No internal indicators found in responses"]
+        )
+
+    def _judge_auth_bypass(self, hypothesis: Hypothesis, observations: List[Observation]) -> JudgeResult:
+        # Auth Bypass: Compare anonymous vs authenticated responses
+        auth_obs = [o for o in observations if o.identity_id is not None]
+        anon_obs = [o for o in observations if o.identity_id is None]
+        
+        if not auth_obs or not anon_obs:
+            return JudgeResult(level=EvidenceLevel.INCONCLUSIVE, confidence=0.0, reasoning=["Missing either authenticated or anonymous observation"])
+            
+        auth_status = auth_obs[0].status
+        anon_status = anon_obs[0].status
+        auth_hash = self._hash_body(auth_obs[0].body)
+        anon_hash = self._hash_body(anon_obs[0].body)
+        
+        if auth_status in {200, 201, 204} and anon_status == auth_status and anon_hash == auth_hash:
+            return JudgeResult(
+                level=EvidenceLevel.CONFIRMED,
+                confidence=0.9,
+                reasoning=["Anonymous user received identical successful response to authenticated user"],
+                finding_data={"target": hypothesis.target_url, "confidence_rationale": "Anonymous user saw the same sensitive resource as an authenticated user."}
+            )
+            
+        return JudgeResult(
+            level=EvidenceLevel.REJECTED,
+            confidence=0.8,
+            reasoning=["Anonymous response differed from authenticated response or was correctly blocked"]
         )
 
     def _judge_idor(self, hypothesis: Hypothesis, observations: List[Observation]) -> JudgeResult:

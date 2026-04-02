@@ -10,13 +10,13 @@ runner = CliRunner()
 
 def test_completions_command_uses_command_tree():
     """Verify completions logic doesn't crash and returns shell script."""
-    result = runner.invoke(cli.app, ["completions", "--shell", "bash"])
+    result = runner.invoke(cli.app, ["completions", "--show", "--shell", "bash"])
     assert result.exit_code == 0
     assert "_recon_completions" in result.stdout
 
 
 def test_completions_show_respects_explicit_shell():
-    result = runner.invoke(cli.app, ["completions", "--shell", "zsh"])
+    result = runner.invoke(cli.app, ["completions", "--show", "--shell", "zsh"])
     assert result.exit_code == 0
     assert "compdef" in result.stdout
 
@@ -43,11 +43,11 @@ def test_interactive_mode_command_exists():
     """Verify the command is registered."""
     result = runner.invoke(cli.app, ["interactive", "--help"])
     assert result.exit_code == 0
-    assert "Start interactive wizard mode" in result.stdout
+    assert "Run interactive mode." in result.stdout
 
 
 def test_scan_wizard_command_exists():
     """Verify the command is registered."""
     result = runner.invoke(cli.app, ["wizard", "--help"])
     assert result.exit_code == 0
-    assert "Launch step-by-step scan configuration wizard" in result.stdout
+    assert "Run the step-by-step scan wizard." in result.stdout

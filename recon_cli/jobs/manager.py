@@ -314,6 +314,7 @@ class JobManager:
             "queued": [self.queued_dir],
             "running": [self.running_dir],
             "finished": [self.finished_dir],
+            "partial": [self.finished_dir], # Partial live in finished_dir
             "failed": [self.failed_dir],
         }
         dirs = groups.get(status)
@@ -325,12 +326,25 @@ class JobManager:
                 continue
             for child in directory.iterdir():
                 if child.is_dir():
+                    metadata_payload = fs.read_json(
+                        child / config.METADATA_NAME, default={}
+                    )
+                    
+                    # 1. Filter by project
                     if project:
                         spec_payload = fs.read_json(
                             child / config.SPEC_NAME, default={}
                         )
                         if spec_payload.get("project") != project:
                             continue
+                    
+                    # 2. Filter by status if requested
+                    # Since "finished" and "partial" both live in finished_dir,
+                    # we need to check metadata to distinguish them if status is provided.
+                    if status in {"finished", "partial", "failed", "running", "queued"}:
+                        if metadata_payload.get("status") != status:
+                            continue
+                            
                     job_ids.append(child.name)
         return sorted(job_ids)
 

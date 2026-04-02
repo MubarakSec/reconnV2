@@ -1,0 +1,62 @@
+*   Trying 134.238.129.186:443...
+* Connected to 134.238.129.186 (134.238.129.186) port 443
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [512 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [85 bytes data]
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+{ [3962 bytes data]
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+{ [333 bytes data]
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+{ [4 bytes data]
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+} [70 bytes data]
+* TLSv1.2 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+} [16 bytes data]
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+{ [16 bytes data]
+* SSL connection using TLSv1.2 / ECDHE-RSA-AES256-GCM-SHA384 / prime256v1 / rsaEncryption
+* ALPN: server did not agree on a protocol. Uses default.
+* Server certificate:
+*  subject: C=US; ST=California; L=Santa Clara; O=Palo Alto Networks, Inc.; CN=*.gpoyssyynyyj.gw.gpcloudservice.com
+*  start date: Nov  1 00:00:00 2025 GMT
+*  expire date: Nov  3 23:59:59 2026 GMT
+*  issuer: C=US; O=DigiCert Inc; CN=DigiCert Global G2 TLS RSA SHA256 2020 CA1
+*  SSL certificate verify result: self-signed certificate in certificate chain (19), continuing anyway.
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 2: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* using HTTP/1.x
+} [5 bytes data]
+> POST /global-protect/getconfig.esp HTTP/1.1
+> Host: 134.238.129.186
+> Accept: */*
+> User-Agent: GlobalProtect/5.2.0
+> Content-Length: 27
+> Content-Type: application/x-www-form-urlencoded
+> 
+} [27 bytes data]
+< HTTP/1.1 200 OK
+< Date: Tue, 31 Mar 2026 06:36:54 GMT
+< Content-Type: application/xml; charset=UTF-8
+< Content-Length: 126
+< Connection: keep-alive
+< Cache-Control: no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+< X-Frame-Options: DENY
+< Strict-Transport-Security: max-age=31536000;
+< X-XSS-Protection: 1; mode=block
+< X-Content-Type-Options: nosniff
+< Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; img-src * data:; style-src 'self' 'unsafe-inline';
+< 
+{ [126 bytes data]
+* Connection #0 to host 134.238.129.186 left intact
+<?xml version="1.0" encoding="UTF-8" ?>
+<policy>
+<has-config>no</has-config>
+<user-group-loaded></user-group-loaded>
+</policy>

@@ -149,7 +149,7 @@ class CMSScanStage(Stage):
 
         # We prefer Nuclei for CMS scanning as droopescan is outdated/broken on Python 3.12+
         if CommandExecutor.available("nuclei"):
-            self.logger.info("Running nuclei CMS scan for %s on %s", cms, base_url)
+            context.logger.info("Running nuclei CMS scan for %s on %s", cms, base_url)
             try:
                 # Use specific CMS tags in nuclei
                 tags = [cms]
@@ -170,7 +170,7 @@ class CMSScanStage(Stage):
                 )
                 return {"tool": "nuclei", "output": completed.stdout.strip(), "findings": []}
             except Exception as e:
-                self.logger.error("Nuclei CMS scan failed: %s", e)
+                context.logger.error("Nuclei CMS scan failed: %s", e)
                 return {}
 
         return {"tool": "none", "error": "No suitable CMS scanner available"}

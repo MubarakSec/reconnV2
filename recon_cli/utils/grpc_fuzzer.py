@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import httpx
 import struct
+import logging
 from typing import List, Dict, Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class GRPCFuzzer:

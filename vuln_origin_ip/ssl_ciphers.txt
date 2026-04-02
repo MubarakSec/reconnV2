@@ -1,0 +1,21 @@
+# Nmap 7.94SVN scan initiated Tue Mar 31 06:37:02 2026 as: nmap -p 443 --script ssl-enum-ciphers -oN vuln_origin_ip/ssl_ciphers.txt 134.238.129.186
+Nmap scan report for 134.238.129.186
+Host is up (0.10s latency).
+
+PORT    STATE SERVICE
+443/tcp open  https
+| ssl-enum-ciphers: 
+|   TLSv1.2: 
+|     ciphers: 
+|       TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 (secp256r1) - A
+|       TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 (secp256r1) - A
+|       TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384 (secp256r1) - A
+|       TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256 (secp256r1) - A
+|       TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 (dh 2048) - A
+|       TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 (dh 2048) - A
+|     compressors: 
+|       NULL
+|     cipher preference: server
+|_  least strength: A
+
+# Nmap done at Tue Mar 31 06:37:07 2026 -- 1 IP address (1 host up) scanned in 5.00 seconds

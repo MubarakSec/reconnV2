@@ -68,7 +68,7 @@ class OAuthVulnerabilityStage(Stage):
                     evidence={"description": "Authorization request accepted without state parameter"}
                 )
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="oauth_vuln", error_type=type(e).__name__).inc()
@@ -111,7 +111,7 @@ class OAuthVulnerabilityStage(Stage):
                     })
                     break
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="oauth_vuln", error_type=type(e).__name__).inc()

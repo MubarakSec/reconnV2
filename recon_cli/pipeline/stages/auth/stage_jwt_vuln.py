@@ -146,7 +146,7 @@ class JWTVulnerabilityStage(Stage):
                         # Finding emitted by _verify_token
                         return
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="jwt_vuln", error_type=type(e).__name__).inc()
@@ -189,13 +189,13 @@ class JWTVulnerabilityStage(Stage):
                         if await self._verify_token(context, client, url, signed_token, "alg:confusion"):
                             return
                 except Exception as e:
-                    logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                    context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                     try:
                         from recon_cli.utils.metrics import metrics
                         metrics.stage_errors.labels(stage="jwt_vuln", error_type=type(e).__name__).inc()
                     except: pass
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="jwt_vuln", error_type=type(e).__name__).inc()
@@ -236,7 +236,7 @@ class JWTVulnerabilityStage(Stage):
                     )
                     return
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="jwt_vuln", error_type=type(e).__name__).inc()
@@ -263,7 +263,7 @@ class JWTVulnerabilityStage(Stage):
                     )
                     return True
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="jwt_vuln", error_type=type(e).__name__).inc()

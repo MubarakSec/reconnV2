@@ -31,6 +31,20 @@ def test_planner_generates_idor_hypothesis(mock_context):
     assert idor_hyp.target_url == "https://api.example.com/users/123"
     assert idor_hyp.priority > 0
 
+def test_planner_generates_auth_bypass_hypothesis(mock_context):
+    planner = Planner(mock_context)
+    
+    # Setup Target Graph
+    mock_context.target_graph.add_entity("api_endpoint", "get:https://api.example.com/admin/settings", 
+                                       url="https://api.example.com/admin/settings", host="api.example.com", requires_auth=True)
+    
+    hypotheses = planner.generate_hypotheses()
+    
+    assert len(hypotheses) >= 1
+    auth_hyp = next(h for h in hypotheses if h.type == HypothesisType.AUTH_BYPASS)
+    assert auth_hyp.target_url == "https://api.example.com/admin/settings"
+    assert auth_hyp.priority == 0.7
+
 @pytest.mark.asyncio
 async def test_executor_collects_observations(mock_context):
     executor = Executor(mock_context)
@@ -42,8 +56,8 @@ async def test_executor_collects_observations(mock_context):
 
     mock_response = HTTPResponse(url=hyp.target_url, status=200, headers={}, body="user data", elapsed=0.1)
     
-    with patch("recon_cli.utils.async_http.AsyncHTTPClient.get", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = mock_response
+    with patch("recon_cli.utils.async_http.AsyncHTTPClient._request", new_callable=AsyncMock) as mock_req:
+        mock_req.return_value = mock_response
         observations = await executor.execute(hyp)
         
     assert len(observations) >= 1
@@ -64,3 +78,32 @@ def test_judge_confirms_idor():
     assert result.level == EvidenceLevel.CONFIRMED
     assert result.confidence >= 0.7
     assert "user" in result.finding_data["role_or_identity_used"]
+
+def test_judge_confirms_ssrf():
+    judge = Judge()
+    hyp = Hypothesis(type=HypothesisType.SSRF, target_url="https://api.example.com/fetch?url=test", priority=0.9)
+    
+    observations = [
+        Observation(url=hyp.target_url, method="GET", status=200, headers={}, body="some data latest/meta-data other data", identity_id=None)
+    ]
+    
+    result = judge.evaluate(hyp, observations)
+    
+    assert result.level == EvidenceLevel.CONFIRMED
+    assert result.confidence == 0.8
+    assert "Internal metadata or loopback indicator found" in result.reasoning[0]
+
+def test_judge_confirms_auth_bypass():
+    judge = Judge()
+    hyp = Hypothesis(type=HypothesisType.AUTH_BYPASS, target_url="https://api.example.com/admin/settings", priority=0.7)
+    
+    observations = [
+        Observation(url=hyp.target_url, method="GET", status=200, headers={}, body="admin dashboard content", identity_id="admin"),
+        Observation(url=hyp.target_url, method="GET", status=200, headers={}, body="admin dashboard content", identity_id=None)
+    ]
+    
+    result = judge.evaluate(hyp, observations)
+    
+    assert result.level == EvidenceLevel.CONFIRMED
+    assert result.confidence == 0.9
+    assert "Anonymous user received identical successful response" in result.reasoning[0]

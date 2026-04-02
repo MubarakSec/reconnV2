@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import sys
 import typer
+from typer import Exit as TyperExit
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from recon_cli.jobs.lifecycle import JobLifecycle
 from recon_cli.jobs.manager import JobManager
@@ -16,6 +18,25 @@ app = typer.Typer(help="Run reconnaissance scans.")
 BASE_PROFILES = {"passive", "full", "fuzz-only"}
 ACTIVE_MODULE_CHOICES = active_modules.available_modules()
 SCANNER_CHOICES = ["nuclei", "wpscan"]
+
+
+def select_profile_interactively() -> str:
+    """Prompt the user to select a scan profile."""
+    typer.echo("Please select a scan profile:")
+    profiles = {
+        "1": ("Quick", "A very fast scan that only checks for the most obvious things. Good for a first look.", "quick"),
+        "2": ("Secure", "A balanced scan that is reasonably fast and provides good coverage. Good for regular use.", "secure"),
+        "3": ("Deep", "A slow, comprehensive scan that is very thorough and finds more vulnerabilities.", "deep"),
+        "4": ("Ultra-Deep", "An extremely slow and comprehensive scan. Use this for maximum coverage.", "ultra-deep"),
+    }
+
+    for key, (name, desc, _) in profiles.items():
+        typer.echo(f"  {key}: {typer.style(name, bold=True)} - {desc}")
+
+    choice = typer.prompt("Enter your choice (1-4)", default="2")
+
+    return profiles.get(choice, profiles["2"])[2]
+
 
 @app.command()
 def scan(
@@ -43,6 +64,12 @@ def scan(
 ) -> None:
     """Launch a reconnaissance job across the staged pipeline."""
     profile_input = profile.lower()
+    
+    if profile_input == "passive" and sys.stdout.isatty():
+        typer.echo(typer.style("No profile specified. The default 'passive' scan is very limited.", fg=typer.colors.YELLOW))
+        if typer.confirm("Would you like to choose a more comprehensive scan profile instead?"):
+            profile_input = select_profile_interactively()
+
     mode_input = mode.lower()
     available_profiles = config.available_profiles()
     
@@ -87,5 +114,16 @@ def scan(
     if inline:
         lifecycle = JobLifecycle(manager)
         running_record = lifecycle.move_to_running(record.spec.job_id)
-        run_pipeline(running_record, manager, force=force)
-        lifecycle.move_to_finished(record.spec.job_id)
+        try:
+            run_pipeline(running_record, manager, force=force)
+            lifecycle.move_to_finished(record.spec.job_id)
+        except Exception as exc:
+            # Check if it was a partial failure (scan completed but some stages failed)
+            final_record = manager.load_job(record.spec.job_id)
+            if final_record and final_record.metadata.status == "partial":
+                typer.echo(typer.style(f"Scan completed with PARTIAL failures: {exc}", fg=typer.colors.YELLOW))
+                lifecycle.move_to_finished(record.spec.job_id, status="partial")
+            else:
+                typer.echo(typer.style(f"Scan FAILED: {exc}", fg=typer.colors.RED))
+                lifecycle.move_to_failed(record.spec.job_id)
+            raise TyperExit(1)

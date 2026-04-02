@@ -132,7 +132,7 @@ class HeadlessCrawlStage(Stage):
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=5000)
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="headless_crawl", error_type=type(e).__name__).inc()
@@ -202,7 +202,7 @@ class HeadlessCrawlStage(Stage):
                 context.emit_signal("pp_confirmed", "url", url, confidence=0.9, source=self.name)
 
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="headless_crawl", error_type=type(e).__name__).inc()

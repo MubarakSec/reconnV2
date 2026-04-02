@@ -151,34 +151,16 @@ def run_backup_hunt(
                 resp.close()
 
             length_value = declared_size if declared_size is not None else len(preview)
-            if length_value < MIN_BACKUP_BYTES:
+            
+            # Soft-404 & Content Validation
+            from recon_cli.utils import validation
+            if not validation.is_sensible_file(
+                preview, 
+                variant_url, 
+                content_type=headers.get("Content-Type", ""),
+                original_html_hash=baseline_hashes.get(url) or baseline_hashes.get(host_origin)
+            ):
                 continue
-
-            # Soft-404 Detection
-            variant_hash = hashlib.md5(preview[:8192]).hexdigest()
-            if variant_hash == baseline_hashes.get(host_origin):
-                continue # Matches catch-all/404 page
-            if variant_hash == baseline_hashes.get(url):
-                continue # Matches original page (no new content)
-            
-            # Additional heuristic: if it's HTML, it's likely not a real backup file (which are usually binary or plain text)
-            # unless the original was also HTML. But usually .bak/.zip aren't HTML.
-            snippet = None
-            content_type = headers.get("Content-Type", "").lower()
-            is_html = "text/html" in content_type
-            
-            if is_html and suffix in {".zip", ".tar.gz", ".tgz", ".rar"}:
-                continue # Binary suffixes returning HTML are definitely false positives
-
-            if content_type.startswith("text") and preview:
-                snippet = preview.decode(encoding, errors="replace")[:MIN_BACKUP_BYTES]
-                if snippet and "<!doctype html" in snippet.lower():
-                    # If we got HTML for a binary suffix, skip
-                    if suffix in {".zip", ".tar.gz", ".tgz", ".rar"}:
-                        continue
-                    # If it looks like a generic error page in HTML
-                    if any(h in snippet.lower() for h in ["not found", "404", "error page"]):
-                        continue
 
             hits.append(
                 {
@@ -186,9 +168,11 @@ def run_backup_hunt(
                     "variant_url": variant_url,
                     "status": status,
                     "length": length_value,
-                    "hash": variant_hash
                 }
             )
+            
+            snippet = preview.decode(encoding, errors="replace")[:200] if preview else None
+            
             findings.append(
                 {
                     "type": "url",

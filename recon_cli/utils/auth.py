@@ -521,6 +521,68 @@ class UnifiedAuthManager:
     def get_all_identities(self) -> List[IdentityRecord]:
         return list(self._identities.values())
 
+    def ensure_login(self, url: Optional[str] = None, identity_id: Optional[str] = None) -> bool:
+        """Attempt to re-authenticate or renew session."""
+        if identity_id:
+            identity = self.get_identity(identity_id)
+            if identity:
+                # Check if we have the material to re-auth
+                material = identity.auth_material
+                login_url = material.get("login_url")
+                login_payload = material.get("login_payload")
+                
+                if login_url and login_payload:
+                    try:
+                        import requests
+                        session = requests.Session()
+                        session.verify = getattr(self.context.runtime_config, "verify_tls", True)
+                        
+                        # Apply stealth headers
+                        headers = {}
+                        if self.context.stealth_manager:
+                            headers = self.context.stealth_manager.wrap_headers(headers)
+                            
+                        # Apply jitter
+                        if self.context.stealth_manager:
+                            self.context.stealth_manager.apply_jitter()
+                        
+                        resp = session.post(login_url, data=login_payload, headers=headers, allow_redirects=True, timeout=15)
+                        
+                        if resp.status_code < 400:
+                            # Update auth material
+                            cookies = session.cookies.get_dict()
+                            token_data = {}
+                            if "application/json" in resp.headers.get("Content-Type", "").lower():
+                                try:
+                                    data = resp.json()
+                                    for key in ["token", "access_token", "jwt", "id_token"]:
+                                        if key in data:
+                                            token_data[key] = data[key]
+                                except Exception:
+                                    pass
+                                    
+                            if cookies or token_data:
+                                material["cookies"] = cookies
+                                material["tokens"] = token_data
+                                identity.verified = True
+                                identity.last_seen = time_utils.iso_now()
+                                
+                                # Sync back to job metadata
+                                if self.context.manager and self.context.record:
+                                    self.context.manager.update_metadata(self.context.record)
+                                    
+                                return True
+                    except Exception as e:
+                        if hasattr(self.context, "logger") and self.context.logger:
+                            self.context.logger.debug(f"Identity {identity_id} re-auth failed: {e}")
+                
+                identity.verified = False
+                
+        if self._legacy_manager:
+            return self._legacy_manager.ensure_login(url)
+            
+        return False
+
     async def verify_identity(self, identity_id: str) -> bool:
         """Actively verify if an identity's session is still valid."""
         identity = self.get_identity(identity_id)

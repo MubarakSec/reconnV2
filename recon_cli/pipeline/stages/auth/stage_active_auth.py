@@ -104,7 +104,7 @@ class ActiveAuthStage(Stage):
                 data = fs.read_json(self.ACCOUNTS_FILE)
                 return data.get(host)
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
@@ -128,7 +128,7 @@ class ActiveAuthStage(Stage):
             try:
                 data = fs.read_json(self.ACCOUNTS_FILE)
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
@@ -152,7 +152,7 @@ class ActiveAuthStage(Stage):
                     if any(cn in name.lower() for cn in csrf_names):
                         tokens[name] = input_tag.get('value', '')
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
@@ -329,7 +329,7 @@ class ActiveAuthStage(Stage):
                         if key in data:
                             token_data[key] = data[key]
                 except Exception as e:
-                    logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                    context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                     try:
                         from recon_cli.utils.metrics import metrics
                         metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
@@ -341,7 +341,13 @@ class ActiveAuthStage(Stage):
                     host = urlparse(action).hostname or "unknown"
                     
                     # Register identity with UnifiedAuthManager (Phase 1)
-                    material = {"cookies": cookies, "tokens": token_data, "credentials": credentials}
+                    material = {
+                        "cookies": cookies,
+                        "tokens": token_data,
+                        "credentials": credentials,
+                        "login_url": action,
+                        "login_payload": payload,
+                    }
                     identity_id = f"auth_{host}_{credentials.get('username', 'user')}"
                     context._auth_manager.register_identity(
                         identity_id=identity_id,
@@ -353,7 +359,7 @@ class ActiveAuthStage(Stage):
                     self._save_session(context, host, action, cookies, token_data, credentials)
                     return True
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()
@@ -389,7 +395,7 @@ class ActiveAuthStage(Stage):
                 sessions = fs.read_json(artifact_path)
                 if not isinstance(sessions, list): sessions = []
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="active_auth", error_type=type(e).__name__).inc()

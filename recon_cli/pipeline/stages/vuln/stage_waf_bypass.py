@@ -110,7 +110,7 @@ class WafBypassStage(Stage):
                 })
                 return True
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="waf_bypass", error_type=type(e).__name__).inc()

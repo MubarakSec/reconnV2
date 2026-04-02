@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import asyncio
+import logging
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
@@ -12,6 +13,8 @@ from recon_cli.pipeline.stages.core.stage_base import Stage
 from recon_cli.pipeline.stages.vuln.stage_idor import IDORStage
 from recon_cli.utils import time as time_utils
 from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
+
+logger = logging.getLogger(__name__)
 
 
 class IDORValidatorStage(Stage):
@@ -117,7 +120,7 @@ class IDORValidatorStage(Stage):
             data_json = {}
             try: data_json = json.loads(body)
             except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="idor_validator", error_type=type(e).__name__).inc()
@@ -245,7 +248,7 @@ class IDORValidatorStage(Stage):
                     cookies = sess.get("cookies", {})
                     if cookies: return "; ".join([f"{k}={v}" for k, v in cookies.items()])
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
                 try:
                     from recon_cli.utils.metrics import metrics
                     metrics.stage_errors.labels(stage="idor_validator", error_type=type(e).__name__).inc()

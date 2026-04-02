@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import json
 import re
-import uuid
-import httpx
-from typing import Dict, List, Optional, Any, Set, Tuple
-from urllib.parse import urlparse, urljoin, urlencode, urlunparse, parse_qsl
+import asyncio
+from typing import Dict, List, Optional, Any, Tuple
+from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
-from recon_cli.utils import fs
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 class ApiLogicFuzzerStage(Stage):
     """
-    Intelligent API Logic Fuzzer.
-    Uses reconstructed API schemas to detect BOLA (Broken Object Level Authorization).
+    Intelligent API Logic Fuzzer (Phase 1 Upgraded).
+    Uses reconstructed API schemas and UnifiedAuthManager identities to detect BOLA.
     """
     name = "api_logic_fuzzer"
 
@@ -34,50 +33,47 @@ class ApiLogicFuzzerStage(Stage):
             context.logger.info("No reconstructed API schemas found for logic fuzzing")
             return
 
-        # 2. Get multiple sessions if available for BOLA
-        sessions_by_host = self._load_all_sessions(context)
+        # 2. Get identities grouped by host
+        identities_by_host = self._load_all_identities(context)
 
-        async with httpx.AsyncClient(verify=False, timeout=15) as client:
+        client_config = HTTPClientConfig(
+            max_concurrent=5,
+            total_timeout=15.0,
+            verify_ssl=bool(getattr(context.runtime_config, "verify_tls", True)),
+        )
+
+        async with AsyncHTTPClient(client_config, context=context) as client:
             for schema_file in schema_files:
                 host = schema_file.name.replace("openapi_reconstructed_", "").replace(".json", "")
                 try:
                     schema = json.loads(schema_file.read_text())
-                    await self._fuzz_schema(context, client, host, schema, sessions_by_host.get(host, []))
+                    await self._fuzz_schema(context, client, host, schema, identities_by_host.get(host, []))
                 except Exception as e:
                     context.logger.debug("Failed to fuzz schema %s: %s", host, e)
 
-    def _load_all_sessions(self, context: PipelineContext) -> Dict[str, List[Dict[str, Any]]]:
-        sessions_by_host = {}
-        # Scan artifacts for sessions_{host}.json
-        for art in context.record.paths.artifacts_dir.glob("sessions_*.json"):
-            host = art.name.replace("sessions_", "").replace(".json", "")
-            try:
-                data = fs.read_json(art)
-                if isinstance(data, list):
-                    sessions_by_host[host] = data
-            except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="api_logic_fuzzer", error_type=type(e).__name__).inc()
-                except: pass
-        return sessions_by_host
+    def _load_all_identities(self, context: PipelineContext) -> Dict[str, List[Any]]:
+        identities_by_host: Dict[str, List[Any]] = {}
+        for identity in context._auth_manager.get_all_identities():
+            host = identity.host
+            if host:
+                identities_by_host.setdefault(host, []).append(identity)
+        return identities_by_host
 
-    async def _fuzz_schema(self, context: PipelineContext, client: httpx.AsyncClient, host: str, schema: Dict[str, Any], sessions: List[Dict[str, Any]]) -> None:
+    async def _fuzz_schema(self, context: PipelineContext, client: AsyncHTTPClient, host: str, schema: Dict[str, Any], identities: List[Any]) -> None:
         paths = schema.get("paths", {})
         
         for path, methods in paths.items():
             for method, info in methods.items():
                 full_url = f"https://{host}{path}"
                 
-                # Test for BOLA (if ID found in path and we have 2+ sessions)
-                if len(sessions) >= 2 and self.ID_PATTERN.search(path):
-                    await self._test_bola(context, client, full_url, method, sessions)
+                # Test for BOLA (if ID found in path and we have 2+ identities)
+                if len(identities) >= 2 and self.ID_PATTERN.search(path):
+                    await self._test_bola(context, client, full_url, method.upper(), identities)
 
-    async def _test_bola(self, context: PipelineContext, client: httpx.AsyncClient, url: str, method: str, sessions: List[Dict[str, Any]]) -> None:
+    async def _test_bola(self, context: PipelineContext, client: AsyncHTTPClient, url: str, method: str, identities: List[Any]) -> None:
         """
         Broken Object Level Authorization Test.
-        Uses Session A to access an object ID belonging to Session B.
+        Uses Identity A to access an object ID belonging to Identity B.
         """
         # Heuristic: we need to find the ID in the path and replace it
         matches = list(self.ID_PATTERN.finditer(url))
@@ -87,44 +83,33 @@ class ApiLogicFuzzerStage(Stage):
         # In a real scenario, we'd need to know which ID belongs to which user.
         # Here we assume if we can access ANY ID from User A with User B's token, it's a BOLA risk.
         
-        user_a = sessions[0]
-        user_b = sessions[1]
+        identity_a = identities[0]
+        identity_b = identities[1]
         
-        # Get baseline with User A (should be 200)
-        headers_a = self._get_headers(user_a)
         try:
-            resp_a = await client.request(method, url, headers=headers_a)
-            if resp_a.status_code != 200: return # Baseline failed
+            # Get baseline with Identity A (should be 200)
+            resp_a = await client._request(method, url, identity_id=identity_a.identity_id)
+            if resp_a.status != 200: return # Baseline failed
             
-            # Now try with User B's token
-            headers_b = self._get_headers(user_b)
-            resp_b = await client.request(method, url, headers=headers_b)
+            # Now try with Identity B's token
+            resp_b = await client._request(method, url, identity_id=identity_b.identity_id)
             
             # If User B gets a 200 for User A's object, it's a BOLA suspect
-            if resp_b.status_code == 200 and len(resp_b.content) > 0:
-                self._report_logic_finding(context, url, "bola", f"Potential BOLA detected via {method}", "high", {"user_a": user_a.get("session_id"), "user_b": user_b.get("session_id")})
+            if resp_b.status == 200 and len(resp_b.body) > 0:
+                self._report_logic_finding(
+                    context, 
+                    url, 
+                    "bola", 
+                    f"Potential BOLA detected via {method}. Accessed {url} (originally Identity A's object) using Identity B's token.", 
+                    "high", 
+                    {"identity_a": identity_a.identity_id, "identity_b": identity_b.identity_id}
+                )
         except Exception as e:
-                logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="api_logic_fuzzer", error_type=type(e).__name__).inc()
-                except: pass
-
-    def _get_headers(self, session_data: Optional[Dict[str, Any]]) -> Dict[str, str]:
-        headers = {"User-Agent": "Mozilla/5.0 (ReconnV2 API-Fuzzer)"}
-        if not session_data: return headers
-        
-        cookies = session_data.get("cookies", {})
-        if cookies:
-            headers["Cookie"] = "; ".join([f"{k}={v}" for k, v in cookies.items()])
-            
-        tokens = session_data.get("tokens", {})
-        if "access_token" in tokens:
-            headers["Authorization"] = f"Bearer {tokens['access_token']}"
-        elif "token" in tokens:
-            headers["Authorization"] = f"Token {tokens['token']}"
-            
-        return headers
+            context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+            try:
+                from recon_cli.utils.metrics import metrics
+                metrics.stage_errors.labels(stage="api_logic_fuzzer", error_type=type(e).__name__).inc()
+            except: pass
 
     def _report_logic_finding(self, context: PipelineContext, url: str, f_type: str, desc: str, severity: str, details: Dict[str, Any]) -> None:
         finding = {

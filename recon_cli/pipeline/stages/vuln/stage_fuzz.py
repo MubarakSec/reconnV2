@@ -25,7 +25,7 @@ class FuzzStage(Stage):
             return False
         return spec.profile in {"full", "fuzz-only"} or bool(spec.wordlist)
 
-    def execute(self, context: PipelineContext) -> None:
+    async def run_async(self, context: PipelineContext) -> None:
         executor = context.executor
         runtime = context.runtime_config
         if not executor.available("ffuf"):
@@ -49,36 +49,24 @@ class FuzzStage(Stage):
         stage_seen: Set[str] = set()
         per_host_limit = max(runtime.trim_url_max_per_host, 0)
 
-        async def _run_all():
-            semaphore = asyncio.Semaphore(3)
-            tasks = []
-            for host in targets[: context.runtime_config.max_fuzz_hosts]:
-                tasks.append(
-                    self._run_ffuf_for_host(
-                        context,
-                        host,
-                        semaphore,
-                        wordlist_override,
-                        host_tags,
-                        host_meta,
-                        param_wordlist_words,
-                        stage_seen,
-                        per_host_counts,
-                        per_host_limit,
-                    )
+        semaphore = asyncio.Semaphore(3)
+        tasks = []
+        for host in targets[: context.runtime_config.max_fuzz_hosts]:
+            tasks.append(
+                self._run_ffuf_for_host(
+                    context,
+                    host,
+                    semaphore,
+                    wordlist_override,
+                    host_tags,
+                    host_meta,
+                    param_wordlist_words,
+                    stage_seen,
+                    per_host_counts,
+                    per_host_limit,
                 )
-            await asyncio.gather(*tasks)
-
-        try:
-            loop = asyncio.get_running_loop()
-            if loop.is_running():
-                # We are already in an event loop, possibly in a different thread
-                # or the same thread. Since execute is sync, we use run_coroutine_threadsafe.
-                asyncio.run_coroutine_threadsafe(_run_all(), loop).result()
-            else:
-                asyncio.run(_run_all())
-        except RuntimeError:
-            asyncio.run(_run_all())
+            )
+        await asyncio.gather(*tasks)
 
     async def _run_ffuf_for_host(
         self,
@@ -141,7 +129,7 @@ class FuzzStage(Stage):
                 str(artifact),
             ]
             if await self._run_ffuf(context, cmd, tool_timeout, runtime, host=host):
-                self._ingest_ffuf_results(
+                await self._ingest_ffuf_results(
                     context,
                     artifact,
                     stage_seen,
@@ -168,7 +156,7 @@ class FuzzStage(Stage):
                         "-mc", "200,301,302,401,403", "-ac", "-of", "json", "-o", str(ext_artifact)
                     ]
                     if await self._run_ffuf(context, ext_cmd, tool_timeout, runtime, host=host):
-                        self._ingest_ffuf_results(context, ext_artifact, stage_seen, per_host_counts, per_host_limit, tag="ext-fuzz")
+                        await self._ingest_ffuf_results(context, ext_artifact, stage_seen, per_host_counts, per_host_limit, tag="ext-fuzz")
 
             if enable_param_fuzz:
                 if param_wordlist_words:
@@ -203,7 +191,7 @@ class FuzzStage(Stage):
                     if await self._run_ffuf(
                         context, param_cmd, tool_timeout, runtime, host=host
                     ):
-                        self._ingest_ffuf_results(
+                        await self._ingest_ffuf_results(
                             context,
                             param_artifact,
                             stage_seen,
@@ -227,7 +215,7 @@ class FuzzStage(Stage):
             "-t", "5", "-mc", "200", "-ac", "-of", "json", "-o", str(artifact)
         ]
         if await self._run_ffuf(context, cmd, 30, context.runtime_config, host=host):
-            self._ingest_ffuf_results(context, artifact, stage_seen, per_host_counts, per_host_limit, tag="leak-fuzz")
+            await self._ingest_ffuf_results(context, artifact, stage_seen, per_host_counts, per_host_limit, tag="leak-fuzz")
 
     def _select_hosts_for_fuzz(self, context: PipelineContext) -> List[str]:
         hosts: Dict[str, int] = defaultdict(int)
@@ -512,7 +500,7 @@ class FuzzStage(Stage):
                 )
             return retried
 
-    def _ingest_ffuf_results(
+    async def _ingest_ffuf_results(
         self,
         context: PipelineContext,
         artifact: Path,
@@ -531,33 +519,49 @@ class FuzzStage(Stage):
                 "Failed to decode ffuf results for %s: %s", artifact, exc
             )
             return
-        for result in data.get("results", []):
-            payload = {
-                "type": "url",
-                "source": "ffuf",
-                "url": result.get("url"),
-                "status_code": result.get("status"),
-                "length": result.get("length"),
-                "tags": ["fuzz", tag],
-                "score": 50,
-            }
-            entry_url = payload.get("url")
-            if not entry_url:
-                continue
-            if not context.url_allowed(entry_url):
-                continue
-            if entry_url in stage_seen:
-                continue
-            host = payload.get("hostname") or urlparse(entry_url).hostname
-            if host:
-                payload.setdefault("hostname", host)
-            if host and per_host_limit > 0 and per_host_counts[host] >= per_host_limit:
-                continue
-            appended = context.results.append(payload)
-            if appended:
-                stage_seen.add(entry_url)
-                if host:
-                    per_host_counts[host] += 1
+            
+        from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
+        from recon_cli.utils import validation
+        
+        client_config = HTTPClientConfig(
+            max_concurrent=5, 
+            total_timeout=15.0,
+            verify_ssl=bool(context.runtime_config.verify_tls)
+        )
+        
+        async with AsyncHTTPClient(client_config, context=context) as client:
+            for result in data.get("results", []):
+                entry_url = result.get("url")
+                if not entry_url or not context.url_allowed(entry_url) or entry_url in stage_seen:
+                    continue
+                
+                host = urlparse(entry_url).hostname
+                if host and per_host_limit > 0 and per_host_counts[host] >= per_host_limit:
+                    continue
+
+                # Verification for highly sensitive tags
+                if tag == "leak-fuzz" or any(ext in entry_url.lower() for ext in [".sql", ".bak", ".zip", ".env"]):
+                    try:
+                        resp = await client.get(entry_url)
+                        if resp.status == 200 and resp.body:
+                            if not validation.is_sensible_file(resp.body, entry_url, content_type=resp.headers.get("Content-Type", "")):
+                                context.logger.debug("Filtered out false positive sensitive file: %s", entry_url)
+                                continue
+                        else:
+                            continue
+                    except Exception:
+                        continue
+
+                payload = {
+                    "type": "url", "source": "ffuf", "url": entry_url,
+                    "status_code": result.get("status"), "length": result.get("length"),
+                    "tags": ["fuzz", tag], "score": 50 if tag != "leak-fuzz" else 110,
+                }
+                if host: payload["hostname"] = host
+                
+                if context.results.append(payload):
+                    stage_seen.add(entry_url)
+                    if host: per_host_counts[host] += 1
 
     def _tags_for_hosts(self, context: PipelineContext) -> Dict[str, set[str]]:
         tags_by_host: Dict[str, set[str]] = defaultdict(set)

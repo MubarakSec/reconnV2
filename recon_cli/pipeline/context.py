@@ -252,6 +252,29 @@ class PipelineContext:
             event_bus=self.event_bus,
             on_finding=self.notify_finding
         )
+        
+        def _on_result_added(payload: Dict[str, Any]) -> None:
+            ptype = payload.get("type")
+            if not ptype: return
+            
+            # Populate TargetGraph dynamically (Phase 2)
+            if ptype == "hostname":
+                self.target_graph.add_entity("hostname", str(payload.get("hostname")), tags=payload.get("tags", []))
+            elif ptype == "url":
+                self.target_graph.add_entity("url", str(payload.get("url")), tags=payload.get("tags", []), status=payload.get("status_code"))
+            elif ptype == "api":
+                self.target_graph.add_entity("endpoint", str(payload.get("url")))
+                host = str(payload.get("hostname"))
+                if host and host != "None":
+                    self.target_graph.add_entity("hostname", host)
+                    self.target_graph.add_relation("hostname", host, "exposes", "endpoint", str(payload.get("url")))
+            elif ptype == "parameter":
+                self.target_graph.add_entity("parameter", str(payload.get("name")))
+            elif ptype == "form":
+                self.target_graph.add_entity("form", str(payload.get("action")))
+
+        self.event_bus.subscribe("result_added", _on_result_added)
+        
         self.stage_attempts: Dict[str, int] = dict(self.record.metadata.attempts)
         if not self.targets:
             self.targets = [spec.target]
@@ -484,17 +507,59 @@ class PipelineContext:
     def auth_enabled(self) -> bool:
         return bool(self._auth_manager)
 
-    def auth_headers(self, base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    def auth_headers(self, base: Optional[Dict[str, str]] = None, identity_id: Optional[str] = None) -> Dict[str, str]:
+        """Get authentication headers for a specific identity or default, including stealth wrapping."""
         headers = base or {}
         if self._auth_manager:
             try:
-                headers = self._auth_manager.prepare_headers(headers)  # type: ignore[attr-defined]
+                headers = self._auth_manager.get_auth_headers(identity_id=identity_id, base=headers)
             except Exception:
                 pass
         
         if self.stealth_manager:
             return self.stealth_manager.wrap_headers(headers)
         return headers
+
+    async def auth_session_async(self, url: Optional[str] = None):
+        """Async version of auth_session that doesn't block the loop for jitter."""
+        host = urlparse(url).hostname if url else None
+        
+        # Adaptive Jitter
+        if self.stealth_manager:
+            if host and host in self._host_adaptive_jitter:
+                import asyncio
+                await asyncio.sleep(self._host_adaptive_jitter[host])
+            else:
+                await self.stealth_manager.apply_jitter_async()
+        
+        # WAF Profiling / Proxy Force
+        proxy = None
+        if self.stealth_manager:
+            if host and host in self._host_force_proxy:
+                proxy = self.stealth_manager.get_proxy()
+            elif getattr(self.runtime_config, "always_use_proxy", False):
+                proxy = self.stealth_manager.get_proxy()
+
+        session = None
+        if self._auth_manager:
+            try:
+                if hasattr(self._auth_manager, "_legacy_manager") and self._auth_manager._legacy_manager:
+                    session = self._auth_manager._legacy_manager.get_session(url)
+                else:
+                    import requests
+                    session = requests.Session()
+            except Exception:
+                session = None
+        
+        if not session:
+            import requests
+            session = requests.Session()
+            session.verify = getattr(self.runtime_config, "verify_tls", True)
+
+        if proxy and hasattr(session, "proxies"):
+            session.proxies.update(proxy)
+            
+        return session
 
     def auth_session(self, url: Optional[str] = None):
         host = urlparse(url).hostname if url else None
@@ -518,7 +583,14 @@ class PipelineContext:
         session = None
         if self._auth_manager:
             try:
-                session = self._auth_manager.get_session(url)  # type: ignore[attr-defined]
+                # UnifiedAuthManager doesn't have a direct get_session like legacy manager.
+                # If we need a requests session, we should probably use the legacy manager's session
+                # or create a new one. UnifiedAuthManager._legacy_manager is an AuthSessionManager.
+                if hasattr(self._auth_manager, "_legacy_manager") and self._auth_manager._legacy_manager:
+                    session = self._auth_manager._legacy_manager.get_session(url)
+                else:
+                    import requests
+                    session = requests.Session()
             except Exception:
                 session = None
         
@@ -538,15 +610,20 @@ class PipelineContext:
     ) -> List[Dict[str, object]]:
         if self._auth_manager:
             try:
-                return self._auth_manager.export_cookies(default_domain)  # type: ignore[attr-defined]
+                # UnifiedAuthManager should expose cookies somehow.
+                # Legacy manager has export_cookies.
+                if hasattr(self._auth_manager, "_legacy_manager") and self._auth_manager._legacy_manager:
+                    return self._auth_manager._legacy_manager.export_cookies(default_domain)
+                return []
             except Exception:
                 return []
         return []
 
-    def auth_cookie_header(self) -> Optional[str]:
+    def auth_cookie_header(self, identity_id: Optional[str] = None) -> Optional[str]:
+        """Get Cookie header for a specific identity or default."""
         if self._auth_manager:
             try:
-                return self._auth_manager.cookie_header()  # type: ignore[attr-defined]
+                return self._auth_manager.get_cookie_header(identity_id=identity_id)
             except Exception:
                 return None
         return None
@@ -713,14 +790,6 @@ class PipelineContext:
         self.record.metadata.checkpoint(stage)
         self.manager.update_metadata(self.record)
 
-    def auth_headers(self, base: Optional[Dict[str, str]] = None, identity_id: Optional[str] = None) -> Dict[str, str]:
-        """Get authentication headers for a specific identity or default."""
-        return self._auth_manager.get_auth_headers(identity_id=identity_id, base=base)
-
-    def auth_cookie_header(self, identity_id: Optional[str] = None) -> Optional[str]:
-        """Get Cookie header for a specific identity or default."""
-        return self._auth_manager.get_cookie_header(identity_id=identity_id)
-
     def mark_error(self, message: str) -> None:
         self.record.metadata.record_error(message)
         self.manager.update_metadata(self.record)
@@ -746,11 +815,9 @@ class PipelineContext:
             self.manager.update_metadata(self.record)
 
     def mark_finished(self, status: str = "finished") -> None:
-        if self._any_stage_failed and status == "finished":
-             # We still mark it as finished, but we could use a specific error field
-             # for partial failure, or change status to 'partial_success' if the user allows.
-             # For now, let's keep status='finished' but ensure the record has the error message
-             # set if none exists.
+        if self._any_stage_failed:
+             if status == "finished":
+                 status = "partial"
              if not self.record.metadata.error:
                  self.record.metadata.error = "Scan completed with partial failures in some stages"
         
