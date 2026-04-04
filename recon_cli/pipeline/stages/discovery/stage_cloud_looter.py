@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
@@ -26,18 +26,20 @@ class CloudBucketLooterStage(Stage):
         results = context.get_results()
         # Find cloud buckets from previous stages
         buckets = [r for r in results if "cloud:s3" in r.get("tags", []) or "cloud:gcp" in r.get("tags", [])]
-        
+
         if not buckets:
             context.logger.info("No cloud buckets discovered for looting")
             return
 
         context.logger.info("Starting deep audit on %d cloud buckets", len(buckets))
-        
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+
+        verify_tls = bool(getattr(context.runtime_config, "verify_tls", True))
+        async with httpx.AsyncClient(verify=verify_tls, timeout=10) as client:
             for bucket in buckets:
                 url = bucket.get("url")
-                if not url: continue
-                
+                if not url:
+                    continue
+
                 await self._audit_bucket(context, client, url)
 
     async def _audit_bucket(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
@@ -46,7 +48,7 @@ class CloudBucketLooterStage(Stage):
             resp = await client.get(url)
             if resp.status_code == 200 and ("ListBucketResult" in resp.text or "Contents" in resp.text):
                 self._report_finding(context, url, "public_bucket_listing", "Bucket allows public directory listing", "high")
-                
+
                 # 2. Loot: Search for sensitive file patterns in the listing
                 sensitive_files = re.findall(r"<Key>([^<]*(?:\.env|\.bak|config|backup|sql|key|secret)[^<]*)</Key>", resp.text, re.I)
                 if sensitive_files:
@@ -54,16 +56,30 @@ class CloudBucketLooterStage(Stage):
 
             # 3. Test for Public Write (CAUTION: we only try to write a harmless metadata file)
             # (Omitted for safety unless specifically requested, but a 'pro' tool would check)
-            
-        except Exception as e:
-                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                try:
-                    from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="cloud_looter", error_type=type(e).__name__).inc()
-                except: pass
+
+        except Exception as exc:
+            context.logger.debug(
+                "Cloud bucket audit failed for %s: %s",
+                url,
+                exc,
+                exc_info=True,
+            )
+            try:
+                from recon_cli.utils.metrics import metrics
+
+                metrics.stage_errors.labels(
+                    stage="cloud_looter",
+                    error_type=type(exc).__name__,
+                ).inc()
+            except Exception as metric_exc:
+                context.logger.debug(
+                    "Failed to update cloud_looter metrics: %s",
+                    metric_exc,
+                    exc_info=True,
+                )
 
     def _report_finding(self, context: PipelineContext, url: str, f_type: str, desc: str, severity: str) -> None:
-        finding = {
+        finding: Dict[str, object] = {
             "type": "finding",
             "finding_type": f_type,
             "source": self.name,

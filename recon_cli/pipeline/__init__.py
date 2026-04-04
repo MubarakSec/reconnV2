@@ -13,6 +13,7 @@ from .context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage, StageError
 from .parallel import ParallelStageExecutor, DependencyResolver
 from .progress import ProgressLogger
+from recon_cli.pipeline.stages.discovery import stage_cms_scan
 
 
 # Lazy import for PipelineRunner to avoid circular import with plugins
@@ -34,6 +35,8 @@ __all__ = [
     "DependencyResolver",
     # Progress
     "ProgressLogger",
+    # Compatibility module exports
+    "stage_cms_scan",
     # Runner (lazy)
     "get_pipeline_runner",
 ]

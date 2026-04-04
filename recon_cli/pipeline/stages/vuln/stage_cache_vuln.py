@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import httpx
 import time
-from typing import Dict, List, Optional, Any
-from urllib.parse import urlparse, urljoin
+from typing import Any, Dict
+from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
@@ -37,8 +37,9 @@ class WebCacheVulnStage(Stage):
             return
 
         context.logger.info("Starting web cache vulnerability testing on %d targets", len(targets))
-        
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+
+        verify_tls = bool(getattr(context.runtime_config, "verify_tls", True))
+        async with httpx.AsyncClient(verify=verify_tls, timeout=10) as client:
             for url in targets:
                 await self._test_cache_deception(context, client, url)
                 await self._test_cache_poisoning(context, client, url)
@@ -48,11 +49,13 @@ class WebCacheVulnStage(Stage):
         Tests if requesting a sensitive page with a static extension triggers caching.
         Example: /api/v1/profile -> /api/v1/profile.css
         """
-        if "?" in url: return # Skip parameterized URLs for this simple check
-        
+        if "?" in url:
+            # Skip parameterized URLs for this simple check.
+            return
+
         headers = context.auth_headers({"User-Agent": "recon-cli cache-pro"})
-        
-        for ext in self.STATIC_EXTENSIONS[:3]: # Limit to most common
+
+        for ext in self.STATIC_EXTENSIONS[:3]:  # Limit to most common
             test_url = f"{url}{ext}"
             try:
                 resp = await client.get(test_url, headers=headers)
@@ -67,25 +70,38 @@ class WebCacheVulnStage(Stage):
                         "high" if cache_hit else "medium",
                         {"extension": ext, "cache_headers": dict(resp.headers)}
                     )
-            except Exception as e:
-                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+            except Exception as exc:
+                context.logger.debug(
+                    "Cache deception probe failed for %s: %s",
+                    test_url,
+                    exc,
+                    exc_info=True,
+                )
                 try:
                     from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="web_cache_vuln", error_type=type(e).__name__).inc()
-                except: pass
+                    metrics.stage_errors.labels(
+                        stage="web_cache_vuln",
+                        error_type=type(exc).__name__,
+                    ).inc()
+                except Exception as metric_exc:
+                    context.logger.debug(
+                        "Failed to update web_cache_vuln metrics: %s",
+                        metric_exc,
+                        exc_info=True,
+                    )
 
     async def _test_cache_poisoning(self, context: PipelineContext, client: httpx.AsyncClient, url: str) -> None:
         """
         Tests if unkeyed headers are reflected and potentially cached.
         """
         poison_val = f"poison-{int(time.time())}.com"
-        
+
         for header in self.POISON_HEADERS:
             headers = {header: poison_val, "User-Agent": "recon-cli cache-pro"}
             try:
                 # 1. Send poisoning request
                 resp1 = await client.get(url, headers=headers)
-                
+
                 # 2. Check if reflected
                 if poison_val in resp1.text:
                     # 3. Check if cached (send request WITHOUT header)
@@ -99,16 +115,30 @@ class WebCacheVulnStage(Stage):
                             "critical",
                             {"header": header, "value": poison_val}
                         )
-                        return # Found one, move to next URL
-            except Exception as e:
-                context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
+                        return  # Found one, move to next URL.
+            except Exception as exc:
+                context.logger.debug(
+                    "Cache poisoning probe failed for %s via %s: %s",
+                    url,
+                    header,
+                    exc,
+                    exc_info=True,
+                )
                 try:
                     from recon_cli.utils.metrics import metrics
-                    metrics.stage_errors.labels(stage="web_cache_vuln", error_type=type(e).__name__).inc()
-                except: pass
+                    metrics.stage_errors.labels(
+                        stage="web_cache_vuln",
+                        error_type=type(exc).__name__,
+                    ).inc()
+                except Exception as metric_exc:
+                    context.logger.debug(
+                        "Failed to update web_cache_vuln metrics: %s",
+                        metric_exc,
+                        exc_info=True,
+                    )
 
     def _report_cache_finding(self, context: PipelineContext, url: str, f_type: str, desc: str, severity: str, details: Dict[str, Any]) -> None:
-        finding = {
+        finding: Dict[str, object] = {
             "type": "finding",
             "finding_type": f_type,
             "source": self.name,
