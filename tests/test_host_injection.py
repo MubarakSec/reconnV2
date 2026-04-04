@@ -56,7 +56,8 @@ class TestHostInjection:
             # Setup OAST Mock
             mock_oast = mock_oast_cls.return_value
             mock_oast.start.return_value = True
-            mock_oast.base_domain = "oast.live"
+            mock_oast.domain = "oast.live"
+            mock_oast.make_url.side_effect = lambda t: f"{t}.oast.live"
             
             # Mock successful interaction
             mock_oast.collect_interactions.return_value = [

@@ -10,6 +10,8 @@ from recon_cli.pipeline.stages.core.stage_base import Stage, note_missing_tool
 from recon_cli.tools.executor import CommandError
 
 
+from recon_cli.engine.nuclei_engine import NucleiEngine
+
 class NucleiStage(Stage):
     """
     Nuclei Template Integration Stage.
@@ -33,10 +35,9 @@ class NucleiStage(Stage):
         return bool(getattr(context.runtime_config, "enable_nuclei", True))
 
     def execute(self, context: PipelineContext) -> None:
-        executor = context.executor
-        if not executor.available("nuclei"):
-            context.logger.warning("nuclei not available; skipping nuclei stage")
-            note_missing_tool(context, "nuclei")
+        engine = NucleiEngine(context)
+        if not engine.is_enabled():
+            context.logger.info("Nuclei stage is disabled.")
             return
 
         targets = self._select_targets(context)
@@ -50,30 +51,15 @@ class NucleiStage(Stage):
         for t in tech_tags:
             if t in self.TECH_MAPPING:
                 nuclei_tags.add(self.TECH_MAPPING[t])
-
-        # Prepare targets file
-        target_file = context.record.paths.artifact("nuclei_targets.txt")
-        target_file.write_text("\n".join(targets))
-
-        artifact = context.record.paths.artifact("nuclei_results.json")
         
-        # Run Nuclei with targeted tags and high severity
-        cmd = [
-            "nuclei",
-            "-list", str(target_file),
-            "-severity", "critical,high",
-            "-tags", ",".join(nuclei_tags),
-            "-jsonl",
-            "-o", str(artifact),
-            "-silent"
-        ]
-
-        context.logger.info("Running nuclei against %d targets with tags: %s", len(targets), ",".join(nuclei_tags))
         try:
-            executor.run(cmd, check=False, timeout=1800)
+            artifact = engine.run(targets, tags=nuclei_tags)
             self._ingest_results(context, artifact)
-        except CommandError as e:
-            context.logger.error("Nuclei execution failed: %s", e)
+        except (RuntimeError, ValueError) as e:
+            context.logger.info("Skipping Nuclei scan: %s", e)
+        except Exception as e:
+            context.logger.error("An unexpected error occurred during Nuclei scan: %s", e)
+
 
     def _collect_tech_tags(self, context: PipelineContext) -> set[str]:
         tags = set()

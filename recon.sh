@@ -126,11 +126,11 @@ run_command() {
 }
 
 run_recon() {
-    run_command "$PYTHON_BIN" -m recon_cli "$@"
+    run_command env PYTHONPATH="$SCRIPT_DIR" "$PYTHON_BIN" -m recon_cli "$@"
 }
 
 ensure_cli_runtime() {
-    if "$PYTHON_BIN" -m recon_cli --help >/dev/null 2>&1; then
+    if [ -x "$SCRIPT_DIR/.venv/bin/recon-cli" ]; then
         return 0
     fi
     print_err "recon_cli is not ready for $PYTHON_BIN."
@@ -144,20 +144,21 @@ run_scan_command() {
     echo -e "${CYAN}> ${cmd[*]}${NC}"
     echo ""
     if [ "${#AUTH_ENV[@]}" -gt 0 ]; then
-        env "${AUTH_ENV[@]}" "${cmd[@]}"
+        env "${AUTH_ENV[@]}" env PYTHONPATH="$SCRIPT_DIR" "${cmd[@]}"
     else
-        "${cmd[@]}"
+        env PYTHONPATH="$SCRIPT_DIR" "${cmd[@]}"
     fi
     return $?
 }
 
 load_profiles() {
     local output=""
-    if ! output="$($PYTHON_BIN - <<'PY'
+    if ! output="$(env PYTHONPATH="$SCRIPT_DIR" "$PYTHON_BIN" - <<'PY'
 from recon_cli import config
 base = ["passive", "full", "fuzz-only", "ultra-deep", "local-benchmark"]
 profiles = sorted(set(base) | set(config.available_profiles().keys()))
-print("\n".join(profiles))
+print("
+".join(profiles))
 PY
 )"; then
         print_warn "Could not read profiles dynamically. Falling back to defaults."
@@ -170,10 +171,11 @@ PY
 
 load_active_modules() {
     local output=""
-    if ! output="$($PYTHON_BIN - <<'PY'
+    if ! output="$(env PYTHONPATH="$SCRIPT_DIR" "$PYTHON_BIN" - <<'PY'
 from recon_cli.active import modules
 mods = modules.available_modules() or []
-print("\n".join(mods))
+print("
+".join(mods))
 PY
 )"; then
         ACTIVE_MODULES=("backup" "cors" "diff" "js-secrets")

@@ -31,7 +31,8 @@ cat << "EOF"
 EOF
 echo -e "${NC}"
 
-echo -e "${BLUE}[*] Starting installation for Kali Linux...${NC}\n"
+echo -e "${BLUE}[*] Starting installation for Kali Linux...${NC}
+"
 
 # Check if running as root for system packages
 check_root() {
@@ -63,16 +64,10 @@ check_python() {
     fi
 }
 
-has_projectdiscovery_httpx() {
-    if ! command -v httpx >/dev/null 2>&1; then
-        return 1
-    fi
-    httpx -h 2>&1 | grep -q -- "-tech-detect"
-}
-
 # Install system dependencies
 install_system_deps() {
-    echo -e "\n${BLUE}[*] Installing system dependencies...${NC}"
+    echo -e "
+${BLUE}[*] Installing system dependencies...${NC}"
     
     $SUDO apt update -qq
     
@@ -81,7 +76,6 @@ install_system_deps() {
         "subfinder"
         "amass"
         "nuclei"
-        "httpx-toolkit"
         "golang-go"
         "chromium"
     )
@@ -98,7 +92,8 @@ install_system_deps() {
 
 # Install Go tools
 install_go_tools() {
-    echo -e "\n${BLUE}[*] Installing Go-based tools...${NC}"
+    echo -e "
+${BLUE}[*] Installing Go-based tools...${NC}"
     
     # Set Go path
     export GOPATH=$HOME/go
@@ -109,7 +104,7 @@ install_go_tools() {
         echo -e "${GREEN}[✓] waybackurls already installed${NC}"
     else
         echo -e "${YELLOW}[*] Installing waybackurls...${NC}"
-        go install github.com/tomnomnom/waybackurls@latest 2>/dev/null || true
+        go install github.com/tomnomnom/waybackurls@latest || echo -e "${YELLOW}[!] Failed to install waybackurls${NC}"
     fi
     
     # gau
@@ -117,19 +112,14 @@ install_go_tools() {
         echo -e "${GREEN}[✓] gau already installed${NC}"
     else
         echo -e "${YELLOW}[*] Installing gau...${NC}"
-        go install github.com/lc/gau/v2/cmd/gau@latest 2>/dev/null || true
-    fi
-    
-    # httpx (if not from apt)
-    if ! has_projectdiscovery_httpx; then
-        echo -e "${YELLOW}[*] Installing httpx...${NC}"
-        go install github.com/projectdiscovery/httpx/cmd/httpx@latest 2>/dev/null || true
+        go install github.com/lc/gau/v2/cmd/gau@latest || echo -e "${YELLOW}[!] Failed to install gau${NC}"
     fi
 }
 
 # Create virtual environment and install Python deps
 install_python_deps() {
-    echo -e "\n${BLUE}[*] Setting up Python environment...${NC}"
+    echo -e "
+${BLUE}[*] Setting up Python environment...${NC}"
     
     # Create venv if not exists
     if [ ! -d ".venv" ]; then
@@ -148,14 +138,15 @@ install_python_deps() {
     pip install -e "." -q
 
     # Install optional dependencies
-    pip install dnspython playwright -q 2>/dev/null || true
+    pip install dnspython playwright -q || echo -e "${YELLOW}[!] Failed to install optional python packages${NC}"
     
     echo -e "${GREEN}[✓] Python dependencies installed${NC}"
 }
 
 # Setup directories
 setup_directories() {
-    echo -e "\n${BLUE}[*] Setting up directories...${NC}"
+    echo -e "
+${BLUE}[*] Setting up directories...${NC}"
     
     mkdir -p jobs/{queued,running,finished,failed}
     mkdir -p config
@@ -179,7 +170,8 @@ RESOLVERS
 
 # Create shell aliases
 create_aliases() {
-    echo -e "\n${BLUE}[*] Creating shell aliases...${NC}"
+    echo -e "
+${BLUE}[*] Creating shell aliases...${NC}"
     
     ALIAS_FILE="$HOME/.recon_aliases"
     
@@ -197,12 +189,12 @@ alias recon-status='recon status'
 # Quick functions
 quick-recon() {
     cd "$RECONN_HOME" && source .venv/bin/activate
-    recon-cli scan "\$1" --profile passive --inline
+    recon-cli scan "$1" --profile passive --inline
 }
 
 deep-recon() {
     cd "$RECONN_HOME" && source .venv/bin/activate
-    recon-cli scan "\$1" --profile deep --scanner nuclei --inline
+    recon-cli scan "$1" --profile deep --scanner nuclei --inline
 }
 ALIASES
 
@@ -225,7 +217,8 @@ ALIASES
 
 # Create wrapper script
 create_wrapper() {
-    echo -e "\n${BLUE}[*] Creating global wrapper...${NC}"
+    echo -e "
+${BLUE}[*] Creating global wrapper...${NC}"
     
     WRAPPER="/usr/local/bin/recon-cli"
     
@@ -233,7 +226,8 @@ create_wrapper() {
 #!/bin/bash
 cd "$PROJECT_DIR" 2>/dev/null || exit 1
 source .venv/bin/activate 2>/dev/null
-exec python -m recon_cli "\$@"
+export PYTHONPATH="$PROJECT_DIR"
+exec python -m recon_cli "$@"
 WRAPPER
 
     $SUDO chmod +x $WRAPPER
@@ -242,25 +236,20 @@ WRAPPER
 
 # Verify installation
 verify_installation() {
-    echo -e "\n${BLUE}[*] Verifying installation...${NC}"
+    echo -e "
+${BLUE}[*] Verifying installation...${NC}"
     
     source .venv/bin/activate
     
-    echo -e "\n${CYAN}═══════════════════════════════════════${NC}"
+    echo -e "
+${CYAN}═══════════════════════════════════════${NC}"
     echo -e "${CYAN}         Installation Summary           ${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════${NC}\n"
+    echo -e "${CYAN}═══════════════════════════════════════${NC}
+"
     
     # Check tools
-    tools=("subfinder" "amass" "nuclei" "httpx" "waybackurls")
+    tools=("subfinder" "amass" "nuclei" "waybackurls")
     for tool in "${tools[@]}"; do
-        if [ "$tool" = "httpx" ]; then
-            if has_projectdiscovery_httpx; then
-                echo -e "${GREEN}[✓] $tool${NC}"
-            else
-                echo -e "${YELLOW}[!] $tool (not found - optional)${NC}"
-            fi
-            continue
-        fi
         if command -v $tool &> /dev/null; then
             echo -e "${GREEN}[✓] $tool${NC}"
         else
@@ -271,7 +260,7 @@ verify_installation() {
     echo ""
     
     # Test recon-cli
-    if python -m recon_cli --help &> /dev/null; then
+    if [ -x ".venv/bin/recon-cli" ]; then
         echo -e "${GREEN}[✓] recon-cli working${NC}"
     else
         echo -e "${RED}[✗] recon-cli has issues${NC}"
@@ -280,25 +269,32 @@ verify_installation() {
 
 # Print usage
 print_usage() {
-    echo -e "\n${CYAN}═══════════════════════════════════════${NC}"
+    echo -e "
+${CYAN}═══════════════════════════════════════${NC}"
     echo -e "${CYAN}           Quick Start Guide            ${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════${NC}\n"
+    echo -e "${CYAN}═══════════════════════════════════════${NC}
+"
     
     echo -e "${GREEN}Activate environment:${NC}"
-    echo -e "  source .venv/bin/activate\n"
+    echo -e "  source .venv/bin/activate
+"
     
     echo -e "${GREEN}Basic scan:${NC}"
-    echo -e "  recon-cli scan target.com --inline\n"
+    echo -e "  recon-cli scan target.com --inline
+"
     
     echo -e "${GREEN}Full scan with nuclei:${NC}"
-    echo -e "  recon-cli scan target.com --profile full --scanner nuclei --inline\n"
+    echo -e "  recon-cli scan target.com --profile full --scanner nuclei --inline
+"
     
     echo -e "${GREEN}View help:${NC}"
-    echo -e "  recon-cli --help\n"
+    echo -e "  recon-cli --help
+"
     
     echo -e "${GREEN}After restarting terminal, use shortcuts:${NC}"
     echo -e "  quick-recon target.com"
-    echo -e "  deep-recon target.com\n"
+    echo -e "  deep-recon target.com
+"
 }
 
 # Main
@@ -314,7 +310,9 @@ main() {
     verify_installation
     print_usage
     
-    echo -e "\n${GREEN}[✓] Installation complete!${NC}\n"
+    echo -e "
+${GREEN}[✓] Installation complete!${NC}
+"
 }
 
 main "$@"

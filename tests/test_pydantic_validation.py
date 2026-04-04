@@ -117,3 +117,15 @@ def test_validate_invalid_severity_fails():
                 "severity": "super_critical",  # Invalid literal
             }
         )
+
+def test_validate_finding_with_string_confidence():
+    finding = {
+        "type": "finding",
+        "finding_type": "xss",
+        "severity": "high",
+        "confidence": "high",
+        "hostname": "example.com"
+    }
+    validated = validate_result(finding)
+    assert validated["type"] == "finding"
+    assert validated["confidence"] == "high"

@@ -60,9 +60,14 @@ class CloudAssetDiscoveryStage(Stage):
 
         context.logger.info("Starting async cloud discovery on %d targets", len(checks_plan))
         
+        
+        # Calculate a more realistic total timeout
+        estimated_time = (len(checks_plan) / getattr(runtime, "cloud_rps", 50.0)) + timeout
+        total_timeout = min(max(estimated_time, timeout * 5), max_duration or 1200)
+
         config = HTTPClientConfig(
             max_concurrent=30,
-            total_timeout=float(timeout),
+            total_timeout=total_timeout,
             verify_ssl=bool(getattr(runtime, "verify_tls", True)),
             requests_per_second=float(getattr(runtime, "cloud_rps", 50.0))
         )

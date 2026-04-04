@@ -177,6 +177,7 @@ class IDORStage(Stage):
                             )
                             if is_confirmed:
                                 finding["type"] = "finding"
+                                finding["finding_type"] = "idor"
                                 finding["confidence"] = "high"
                                 finding.setdefault("tags", []).append("confirmed")
                                 

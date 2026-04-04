@@ -58,7 +58,9 @@ class POCGeneratorStage(Stage):
         method = finding.get("method", "GET").upper()
         
         # Try to extract payload from evidence or details
-        payload = finding.get("details", {}).get("payload") or finding.get("evidence", {}).get("payload")
+        details = finding.get("details") or {}
+        evidence = finding.get("evidence") or {}
+        payload = details.get("payload") or evidence.get("payload")
         
         # Build headers
         headers = {"User-Agent": "Mozilla/5.0 (ReconnV2 POC Generator)"}

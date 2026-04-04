@@ -61,7 +61,7 @@ class VulnScanStage(Stage):
         tokens_to_urls: Dict[str, str] = {}
         
         if oast_session.start():
-            context.logger.info("OAST Session started: %s", oast_session.base_domain)
+            context.logger.info("OAST Session started: %s", oast_session.domain)
             
             client_config = HTTPClientConfig(
                 max_concurrent=20,
@@ -91,7 +91,7 @@ class VulnScanStage(Stage):
             for v_type, payloads in self.OAST_PAYLOADS.items():
                 for payload_tmpl in payloads:
                     token = uuid.uuid4().hex[:10]
-                    oob_url = f"{token}.{oast.base_domain}"
+                    oob_url = oast.make_url(token)
                     payload = payload_tmpl.replace("{oob}", oob_url)
                     
                     test_url = self._inject_all_params(url, payload)

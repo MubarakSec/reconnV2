@@ -496,11 +496,456 @@ class RuntimeConfig:
     screenshot_ocr_lang: str = os.environ.get("RECON_SCREENSHOT_OCR_LANG", "eng")
     max_targets_per_job: int = int(os.environ.get("RECON_MAX_TARGETS_PER_JOB", 200))
     max_probe_hosts: int = int(os.environ.get("RECON_MAX_PROBE_HOSTS", 400))
+    
+    # Feature Enablement Flags
+    enable_active_auth: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_ACTIVE_AUTH", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_advanced_idor: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_ADVANCED_IDOR", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_amass: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_AMASS", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_api_recon: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_API_RECON", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_api_schema_probe: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_API_SCHEMA_PROBE", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_api_reconstructor: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_API_RECONSTRUCTOR", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_api_logic_fuzzer: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_API_LOGIC_FUZZER", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_asn_pivot: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_ASN_PIVOT", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_auth_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_AUTH_DISCOVERY", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_auth_bypass_tech: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_AUTH_BYPASS_TECH", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_auth_matrix: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_AUTH_MATRIX", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_cache_vuln: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_CACHE_VULN", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_cloud_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_CLOUD_DISCOVERY", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_cloud_looter: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_CLOUD_LOOTER", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_cms_scan: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_CMS_SCAN", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_correlation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_CORRELATION", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_ct_pivot: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_CT_PIVOT", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_decision_engine: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_DECISION_ENGINE", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_dns_resolve: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_DNS_RESOLVE", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_favicon_recon: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_FAVICON_RECON", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_fuzz: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_FUZZ", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_param_fuzz: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_PARAM_FUZZ", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_github_recon: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_GITHUB_RECON", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_graphql_recon: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_GRAPHQL_RECON", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_graphql_exploit: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_GRAPHQL_EXPLOIT", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_host_injection: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_HOST_INJECTION", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_html_form_mining: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_HTML_FORM_MINING", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_idor: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_IDOR", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_input_validator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_INPUT_VALIDATOR", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_js_intel: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_JS_INTEL", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_jwt_vuln: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_JWT_VULN", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_learning: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_LEARNING", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_mass_assignment: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_MASS_ASSIGNMENT", "1") not in {"0", "false", "False"}
+        )
+    )
     enable_nmap: bool = field(
         default_factory=lambda: (
             os.environ.get("RECON_ENABLE_NMAP", "0") not in {"0", "false", "False"}
         )
     )
+    enable_nuclei: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_NUCLEI", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_oauth_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_OAUTH_DISCOVERY", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_oauth_vuln: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_OAUTH_VULN", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_origin_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_ORIGIN_DISCOVERY", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_param_mining: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_PARAM_MINING", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_poc_generator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_POC_GENERATOR", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_proto_pollution: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_PROTO_POLLUTION", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_quic_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_QUIC_DISCOVERY", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_race_condition: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_RACE_CONDITION", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_runtime_crawl: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_headless: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_HEADLESS", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_screenshots: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SCREENSHOTS", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_screenshot_ocr: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SCREENSHOT_OCR", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_second_order: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SECOND_ORDER", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_secrets: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_security_headers: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SECURITY_HEADERS", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_smuggling: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SMUGGLING", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_ssrf_pivot: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SSRF_PIVOT", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_subdomain_permute: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SUBDOMAIN_PERMUTE", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_subfinder: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SUBFINDER", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_takeover: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_TAKEOVER", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_timing_attacks: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_TIMING_ATTACKS", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_tls_hygiene: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_TLS_HYGIENE", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_upload_probe: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_UPLOAD_PROBE", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_vhost: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_VHOST", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_vhost_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_VHOST_DISCOVERY", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_waf_probe: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_WAF_PROBE", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_waf_bypass: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_WAF_BYPASS", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_wayback: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_WAYBACK", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_wordlist_miner: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_WORDLIST_MINER", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_wpscan: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_WPSCAN", "1") not in {"0", "false", "False"}
+        )
+    )
+    enable_ws_grpc_discovery: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_WS_GRPC_DISCOVERY", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_verification: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_VERIFICATION", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_exploit_validation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_EXPLOIT_VALIDATION", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_extended_validation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_EXTENDED_VALIDATION", "0")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_idor_validator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_IDOR_VALIDATOR", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_ssrf_validator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SSRF_VALIDATOR", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_open_redirect_validator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_OPEN_REDIRECT_VALIDATOR", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_auth_bypass_validator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_AUTH_BYPASS_VALIDATOR", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_secret_exposure_validator: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SECRET_EXPOSURE_VALIDATOR", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_lfi_validation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_LFI_VALIDATION", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_header_validation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_HEADER_VALIDATION", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_redirect_validation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_REDIRECT_VALIDATION", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_oast_validation: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_OAST_VALIDATION", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    enable_authenticated_scan: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_AUTH_SCAN", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_dalfox: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_DALFOX", "0") not in {"0", "false", "False"}
+        )
+    )
+    enable_sqlmap: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_ENABLE_SQLMAP", "0") not in {"0", "false", "False"}
+        )
+    )
+
+    # Tool Parameters
     nmap_top_ports: int = int(os.environ.get("RECON_NMAP_TOP_PORTS", 1000))
     nmap_ports: Optional[str] = os.environ.get("RECON_NMAP_PORTS")
     nmap_args: Optional[str] = os.environ.get("RECON_NMAP_ARGS", "--max-rtt-timeout 100ms --max-retries 1 --host-timeout 15m")
@@ -569,203 +1014,14 @@ class RuntimeConfig:
     soft_404_max_hosts: int = int(os.environ.get("RECON_SOFT_404_MAX_HOSTS", 25))
     soft_404_paths: int = int(os.environ.get("RECON_SOFT_404_PATHS", 1))
     soft_404_timeout: int = int(os.environ.get("RECON_SOFT_404_TIMEOUT", 6))
-    enable_correlation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_CORRELATION", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_fuzz: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_FUZZ", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_param_fuzz: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_PARAM_FUZZ", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_runtime_crawl: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_RUNTIME_CRAWL", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_secrets: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SECRETS", "1") not in {"0", "false", "False"}
-        )
-    )
-    enable_screenshots: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SCREENSHOTS", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_screenshot_ocr: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SCREENSHOT_OCR", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_auth_discovery: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_AUTH_DISCOVERY", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_js_intel: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_JS_INTEL", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_api_recon: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_API_RECON", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_api_schema_probe: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_API_SCHEMA_PROBE", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_param_mining: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_PARAM_MINING", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_html_form_mining: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_HTML_FORM_MINING", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_graphql_recon: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_GRAPHQL_RECON", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_graphql_exploit: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_GRAPHQL_EXPLOIT", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_oauth_discovery: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_OAUTH_DISCOVERY", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_ws_grpc_discovery: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_WS_GRPC_DISCOVERY", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_upload_probe: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_UPLOAD_PROBE", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_cms_scan: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_CMS_SCAN", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_vhost: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_VHOST", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_subdomain_permute: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SUBDOMAIN_PERMUTE", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_cloud_discovery: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_CLOUD_DISCOVERY", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_ct_pivot: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_CT_PIVOT", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_asn_pivot: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_ASN_PIVOT", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_waf_probe: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_WAF_PROBE", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_takeover: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_TAKEOVER", "0") not in {"0", "false", "False"}
-        )
-    )
-    takeover_require_cname: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_TAKEOVER_REQUIRE_CNAME", "1")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_authenticated_scan: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_AUTH_SCAN", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_dalfox: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_DALFOX", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_sqlmap: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SQLMAP", "0") not in {"0", "false", "False"}
-        )
-    )
-    enable_verification: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_VERIFICATION", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_exploit_validation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_EXPLOIT_VALIDATION", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    enable_extended_validation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_EXTENDED_VALIDATION", "0")
-            not in {"0", "false", "False"}
-        )
-    )
+    
     extended_validation_max_duration: int = int(
         os.environ.get("RECON_EXTENDED_VALIDATION_MAX_DURATION", 7200)
     )
     extended_validation_max_probes: int = int(
         os.environ.get("RECON_EXTENDED_VALIDATION_MAX_PROBES", 500)
     )
-    enable_oast_validation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_OAST_VALIDATION", "1")
-            not in {"0", "false", "False"}
-        )
-    )
+    
     oast_backend: str = os.environ.get("RECON_OAST_BACKEND", "interactsh")
     oast_domain: Optional[str] = os.environ.get("RECON_OAST_DOMAIN")
     oast_wait_seconds: int = int(os.environ.get("RECON_OAST_WAIT_SECONDS", 60))
@@ -775,19 +1031,8 @@ class RuntimeConfig:
     oast_timeout: int = int(os.environ.get("RECON_OAST_TIMEOUT", 10))
     oast_rps: float = float(os.environ.get("RECON_OAST_RPS", 0))
     oast_per_host_rps: float = float(os.environ.get("RECON_OAST_PER_HOST_RPS", 0))
-    enable_redirect_validation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_REDIRECT_VALIDATION", "1")
-            not in {"0", "false", "False"}
-        )
-    )
+    
     redirect_max_urls: int = int(os.environ.get("RECON_REDIRECT_MAX_URLS", 40))
-    enable_idor_validator: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_IDOR_VALIDATOR", "1")
-            not in {"0", "false", "False"}
-        )
-    )
     idor_validator_max_candidates: int = int(
         os.environ.get("RECON_IDOR_VALIDATOR_MAX_CANDIDATES", 40)
     )
@@ -803,12 +1048,6 @@ class RuntimeConfig:
     idor_validator_rps: float = float(os.environ.get("RECON_IDOR_VALIDATOR_RPS", 0))
     idor_validator_per_host_rps: float = float(
         os.environ.get("RECON_IDOR_VALIDATOR_PER_HOST_RPS", 0)
-    )
-    enable_ssrf_validator: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SSRF_VALIDATOR", "1")
-            not in {"0", "false", "False"}
-        )
     )
     ssrf_validator_max_urls: int = int(
         os.environ.get("RECON_SSRF_VALIDATOR_MAX_URLS", 25)
@@ -844,12 +1083,6 @@ class RuntimeConfig:
             not in {"0", "false", "False"}
         )
     )
-    enable_open_redirect_validator: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_OPEN_REDIRECT_VALIDATOR", "1")
-            not in {"0", "false", "False"}
-        )
-    )
     open_redirect_validator_max_urls: int = int(
         os.environ.get("RECON_OPEN_REDIRECT_VALIDATOR_MAX_URLS", 30)
     )
@@ -867,12 +1100,6 @@ class RuntimeConfig:
     )
     open_redirect_validator_per_host_rps: float = float(
         os.environ.get("RECON_OPEN_REDIRECT_VALIDATOR_PER_HOST_RPS", 0)
-    )
-    enable_auth_bypass_validator: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_AUTH_BYPASS_VALIDATOR", "1")
-            not in {"0", "false", "False"}
-        )
     )
     auth_bypass_validator_max_urls: int = int(
         os.environ.get("RECON_AUTH_BYPASS_VALIDATOR_MAX_URLS", 25)
@@ -904,12 +1131,6 @@ class RuntimeConfig:
             not in {"0", "false", "False"}
         )
     )
-    enable_secret_exposure_validator: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SECRET_EXPOSURE_VALIDATOR", "1")
-            not in {"0", "false", "False"}
-        )
-    )
     secret_exposure_validator_max_findings: int = int(
         os.environ.get("RECON_SECRET_EXPOSURE_VALIDATOR_MAX_FINDINGS", 40)
     )
@@ -925,19 +1146,7 @@ class RuntimeConfig:
     secret_exposure_validator_per_host_rps: float = float(
         os.environ.get("RECON_SECRET_EXPOSURE_VALIDATOR_PER_HOST_RPS", 0)
     )
-    enable_lfi_validation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_LFI_VALIDATION", "1")
-            not in {"0", "false", "False"}
-        )
-    )
     lfi_max_urls: int = int(os.environ.get("RECON_LFI_MAX_URLS", 40))
-    enable_header_validation: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_HEADER_VALIDATION", "1")
-            not in {"0", "false", "False"}
-        )
-    )
     header_validation_max_urls: int = int(
         os.environ.get("RECON_HEADER_VALIDATION_MAX_URLS", 30)
     )
@@ -1095,6 +1304,7 @@ class RuntimeConfig:
     oauth_timeout: int = int(os.environ.get("RECON_OAUTH_TIMEOUT", 8))
     oauth_rps: float = float(os.environ.get("RECON_OAUTH_RPS", 0))
     oauth_per_host_rps: float = float(os.environ.get("RECON_OAUTH_PER_HOST_RPS", 0))
+    oauth_total_timeout: int = int(os.environ.get("RECON_OAUTH_TOTAL_TIMEOUT", 300))
     ws_grpc_max_urls: int = int(os.environ.get("RECON_WS_GRPC_MAX_URLS", 80))
     ws_grpc_timeout: int = int(os.environ.get("RECON_WS_GRPC_TIMEOUT", 8))
     ws_grpc_rps: float = float(os.environ.get("RECON_WS_GRPC_RPS", 0))
@@ -1167,41 +1377,23 @@ class RuntimeConfig:
     waf_probe_per_host_rps: float = float(
         os.environ.get("RECON_WAF_PROBE_PER_HOST_RPS", 0)
     )
-    enable_security_headers: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_SECURITY_HEADERS", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    security_headers_max_urls: int = int(
-        os.environ.get("RECON_SECURITY_HEADERS_MAX_URLS", 40)
-    )
-    security_headers_timeout: int = int(
-        os.environ.get("RECON_SECURITY_HEADERS_TIMEOUT", 8)
-    )
-    security_headers_rps: float = float(os.environ.get("RECON_SECURITY_HEADERS_RPS", 0))
-    security_headers_per_host_rps: float = float(
-        os.environ.get("RECON_SECURITY_HEADERS_PER_HOST_RPS", 0)
-    )
-    enable_tls_hygiene: bool = field(
-        default_factory=lambda: (
-            os.environ.get("RECON_ENABLE_TLS_HYGIENE", "0")
-            not in {"0", "false", "False"}
-        )
-    )
-    tls_hygiene_max_hosts: int = int(os.environ.get("RECON_TLS_HYGIENE_MAX_HOSTS", 40))
-    tls_hygiene_timeout: int = int(os.environ.get("RECON_TLS_HYGIENE_TIMEOUT", 6))
-    tls_hygiene_rps: float = float(os.environ.get("RECON_TLS_HYGIENE_RPS", 0))
-    tls_hygiene_per_host_rps: float = float(
-        os.environ.get("RECON_TLS_HYGIENE_PER_HOST_RPS", 0)
-    )
+    
     takeover_max_hosts: int = int(os.environ.get("RECON_TAKEOVER_MAX_HOSTS", 50))
     takeover_timeout: int = int(os.environ.get("RECON_TAKEOVER_TIMEOUT", 6))
     takeover_dns_timeout: int = int(os.environ.get("RECON_TAKEOVER_DNS_TIMEOUT", 6))
+    takeover_require_cname: bool = field(
+        default_factory=lambda: (
+            os.environ.get("RECON_TAKEOVER_REQUIRE_CNAME", "1")
+            not in {"0", "false", "False"}
+        )
+    )
+    
     idor_rps: float = float(os.environ.get("RECON_IDOR_RPS", 0))
     idor_per_host_rps: float = float(os.environ.get("RECON_IDOR_PER_HOST_RPS", 0))
     idor_max_targets: int = int(os.environ.get("RECON_IDOR_MAX_TARGETS", 60))
     idor_max_per_host: int = int(os.environ.get("RECON_IDOR_MAX_PER_HOST", 8))
+    idor_timeout: int = int(os.environ.get("RECON_IDOR_TIMEOUT", 10))
+    
     auth_profile_name: Optional[str] = os.environ.get("RECON_AUTH_PROFILE")
     auth_profiles: list = field(default_factory=list)
     auth_headers: Optional[str] = os.environ.get("RECON_AUTH_HEADERS")

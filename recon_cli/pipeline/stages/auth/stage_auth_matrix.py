@@ -105,7 +105,7 @@ class AuthMatrixStage(Stage):
     )
 
     def is_enabled(self, context: PipelineContext) -> bool:
-        return True
+        return bool(getattr(context.runtime_config, "enable_auth_matrix", True))
 
     async def run_async(self, context: PipelineContext) -> None:
         urls = self._collect_urls(context)

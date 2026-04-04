@@ -529,6 +529,11 @@ class PipelineRunner:
             summary.generate_summary(context)
             if context._any_stage_failed:
                 raise RuntimeError("Scan completed with partial failures")
+        except KeyboardInterrupt:
+            context.logger.warning("Pipeline interrupted by user.")
+            error = InterruptedError("User interrupted scan")
+            status = "interrupted"
+            raise
         except Exception as exc:
             error = error or exc
             if not error_recorded:
@@ -538,10 +543,13 @@ class PipelineRunner:
             self._generate_partial_summary(context, error)
             raise
         finally:
-            status = "finished" if error is None else "failed"
+            final_status = "interrupted" if isinstance(error, (KeyboardInterrupt, InterruptedError)) else ("failed" if error else "finished")
             message = str(error) if error else None
-            self._finish_trace(context, trace, status=status, error=error)
-            send_pipeline_notification(context, status=status, error=message)
+            if final_status in {"interrupted", "failed"}:
+                self._generate_partial_summary(context, error or InterruptedError("Scan interrupted"))
+            
+            self._finish_trace(context, trace, status=final_status, error=error)
+            send_pipeline_notification(context, status=final_status, error=message)
             context.close()
 
     async def _run_parallel(
@@ -682,10 +690,18 @@ def run_pipeline(
 
     try:
         loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # If there's a running loop, schedule the coroutine to run on it
+        # and wait for the result. This is common in async environments.
         asyncio.run_coroutine_threadsafe(
             runner.run(context, stages=stages), loop
         ).result()
-    except RuntimeError:
+    else:
+        # If there's no running loop, create a new one to run the pipeline.
+        # This is the typical case when running from a synchronous entry point.
         asyncio.run(runner.run(context, stages=stages))
 
     if os.environ.get("RECON_METRICS", "0") not in {"0", "false", "False"}:

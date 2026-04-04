@@ -226,6 +226,7 @@ class NmapStage(Stage):
                     if port_id in self.HIGH_RISK_PORTS:
                         finding = {
                             "type": "finding",
+                            "finding_type": "exposed_service",
                             "source": "nmap",
                             "hostname": hostname,
                             "description": f"Potentially risky service exposed on port {port_id}",

@@ -144,34 +144,34 @@ class CMSScanStage(Stage):
             if isinstance(techs, list): info["technologies"].update({str(t).lower() for t in techs if t})
         return host_info
 
+from recon_cli.engine.nuclei_engine import NucleiEngine
+
+class CMSScanStage(Stage):
+    # ... (class attributes remain the same) ...
+
     async def _run_scan(self, context: PipelineContext, cms: str, host: str, base_url: str, timeout: int, artifact_dir) -> Dict[str, Any]:
-        executor = context.executor
+        try:
+            engine = NucleiEngine(context)
+            if not engine.is_enabled():
+                return {"tool": "none", "error": "Nuclei is disabled"}
 
-        # We prefer Nuclei for CMS scanning as droopescan is outdated/broken on Python 3.12+
-        if CommandExecutor.available("nuclei"):
             context.logger.info("Running nuclei CMS scan for %s on %s", cms, base_url)
-            try:
-                # Use specific CMS tags in nuclei
-                tags = [cms]
-                if cms == "wordpress": tags.extend(["wp-plugin", "wp-theme"])
+            
+            tags = [cms]
+            if cms == "wordpress":
+                tags.extend(["wp-plugin", "wp-theme"])
+            
+            output_file = artifact_dir / f"{host}_{cms}_nuclei.json"
+            engine.run([base_url], tags=tags, severity="info,low,medium,high,critical", output_file=output_file)
 
-                completed = await executor.run_async(
-                    [
-                        "nuclei",
-                        "-u", base_url,
-                        "-tags", ",".join(tags),
-                        "-severity", "info,low,medium,high,critical",
-                        "-silent",
-                        "-jsonl"
-                    ],
-                    capture_output=True,
-                    check=False,
-                    timeout=timeout
-                )
-                return {"tool": "nuclei", "output": completed.stdout.strip(), "findings": []}
-            except Exception as e:
-                context.logger.error("Nuclei CMS scan failed: %s", e)
-                return {}
+            output = output_file.read_text() if output_file.exists() else ""
+            return {"tool": "nuclei", "output": output, "findings": []}
+            
+        except (RuntimeError, ValueError) as e:
+            context.logger.info("Skipping Nuclei CMS scan: %s", e)
+            return {}
+        except Exception as e:
+            context.logger.error("Nuclei CMS scan failed: %s", e)
+            return {}
 
-        return {"tool": "none", "error": "No suitable CMS scanner available"}
 

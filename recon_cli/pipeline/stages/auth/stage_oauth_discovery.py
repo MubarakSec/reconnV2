@@ -42,9 +42,17 @@ class OAuthDiscoveryStage(Stage):
         configs: List[Dict[str, Any]] = []
         endpoints_found, configs_found = 0, 0
 
+        # Calculate a more realistic total timeout
+        request_count = len(hosts) * (len(self.WELL_KNOWN_PATHS) + len(self.COMMON_ENDPOINTS))
+        estimated_time = (request_count / getattr(runtime, "oauth_rps", 30.0)) + timeout
+        
+        # Allow override for total timeout, but default to our calculated estimate, capped at a reasonable max
+        max_timeout = int(getattr(runtime, "oauth_total_timeout", 300))
+        total_timeout = min(max(estimated_time, timeout * 5), max_timeout)
+
         config = HTTPClientConfig(
             max_concurrent=20,
-            total_timeout=float(timeout),
+            total_timeout=total_timeout,
             verify_ssl=verify_tls,
             requests_per_second=float(getattr(runtime, "oauth_rps", 30.0))
         )

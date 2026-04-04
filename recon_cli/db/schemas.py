@@ -54,7 +54,7 @@ class FindingResult(BaseResult):
     severity: Literal[
         "info", "low", "medium", "high", "critical", "unknown", "noise"
     ] = "info"
-    confidence: float = 0.5
+    confidence: Union[float, str] = 0.5
     confidence_label: Optional[str] = None
     confidence_score: Optional[float] = None
     finding_fingerprint: Optional[str] = None

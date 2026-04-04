@@ -47,9 +47,14 @@ class SecurityHeadersStage(Stage):
         if max_urls > 0: candidates = candidates[:max_urls]
         if not candidates: return
 
+        
+        # Calculate a more realistic total timeout
+        estimated_time = (len(candidates) / getattr(runtime, "security_headers_rps", 50.0)) + timeout
+        total_timeout = min(max(estimated_time, timeout * 5), 300) # Cap at 5 minutes
+
         config = HTTPClientConfig(
             max_concurrent=20,
-            total_timeout=float(timeout),
+            total_timeout=total_timeout,
             verify_ssl=verify_tls,
             requests_per_second=float(getattr(runtime, "security_headers_rps", 50.0))
         )

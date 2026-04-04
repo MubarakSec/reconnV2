@@ -73,7 +73,7 @@ class HostInjectionStage(Stage):
         url = form.get("url")
         action = urljoin(url, form.get("action") or "")
         token = uuid.uuid4().hex[:8]
-        oob_domain = f"{token}.{oast.base_domain}"
+        oob_domain = oast.make_url(token)
         
         # 1. Extract CSRF and Body
         csrf = await self._extract_csrf(client, url)

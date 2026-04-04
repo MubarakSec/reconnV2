@@ -276,6 +276,11 @@ class ResultsTracker:
                         asyncio.run_coroutine_threadsafe(
                             self.event_bus.publish(ptype, payload), loop
                         )
+                        # Also publish to generic 'result_added' for global listeners like PipelineContext
+                        if ptype != "result_added":
+                            asyncio.run_coroutine_threadsafe(
+                                self.event_bus.publish("result_added", payload), loop
+                            )
                 except RuntimeError:
                     # No loop running, skip publishing
                     pass

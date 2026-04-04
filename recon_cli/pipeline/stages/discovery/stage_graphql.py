@@ -59,9 +59,14 @@ class GraphQLReconStage(Stage):
         checked, graphql_found, introspection_enabled, brute_forced_hits = 0, 0, 0, 0
         artifacts: List[str] = []
 
+        
+        # Calculate a more realistic total timeout
+        estimated_time = (len(candidates) * 2 / getattr(runtime, "graphql_rps", 15.0)) + timeout
+        total_timeout = min(max(estimated_time, timeout * 5), 300) # Cap at 5 minutes
+
         config = HTTPClientConfig(
             max_concurrent=10,
-            total_timeout=float(timeout),
+            total_timeout=total_timeout,
             verify_ssl=verify_tls,
             requests_per_second=float(getattr(runtime, "graphql_rps", 15.0))
         )

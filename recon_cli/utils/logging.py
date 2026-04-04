@@ -65,3 +65,15 @@ def child_logger(parent: Logger, name: str, logfile: Optional[Path] = None) -> L
         fh.setFormatter(RedactingFormatter(_LOG_FORMAT, datefmt=_DATEFMT))
         logger.addHandler(fh)
     return logger
+
+
+def get_pipeline_logger() -> Optional[Logger]:
+    """Get the pipeline logger if it exists."""
+    try:
+        logger = logging.getLogger("recon.pipeline")
+        # Check if logger has any handlers
+        if logger.handlers or logger.parent.handlers:
+            return logger
+    except Exception:
+        pass
+    return None

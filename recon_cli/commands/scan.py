@@ -117,6 +117,10 @@ def scan(
         try:
             run_pipeline(running_record, manager, force=force)
             lifecycle.move_to_finished(record.spec.job_id)
+        except KeyboardInterrupt:
+            typer.echo(typer.style("\nScan interrupted by user.", fg=typer.colors.YELLOW))
+            lifecycle.move_to_finished(record.spec.job_id, status="interrupted")
+            typer.echo("Partial results have been saved.")
         except Exception as exc:
             # Check if it was a partial failure (scan completed but some stages failed)
             final_record = manager.load_job(record.spec.job_id)

@@ -48,6 +48,9 @@ class OriginDiscoveryStage(Stage):
         "com.tr",
     }
 
+    def is_enabled(self, context: PipelineContext) -> bool:
+        return bool(getattr(context.runtime_config, "enable_origin_discovery", False))
+
     def execute(self, context: PipelineContext) -> None:
         import asyncio
         asyncio.run(self.run_async(context))
