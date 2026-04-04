@@ -349,6 +349,7 @@ def run_wpscan(
     random_user_agent: bool = True,
     max_threads: Optional[int] = None,
     api_token: Optional[str] = None,
+    verify_tls: bool = True,
 ) -> ScannerExecution:
     if not shutil.which("wpscan"):
         logger.info("wpscan not available; skipping for %s", host)
@@ -363,8 +364,9 @@ def run_wpscan(
         "json",
         "--output",
         str(artifact_path),
-        "--disable-tls-checks",
     ]
+    if not verify_tls:
+        cmd.append("--disable-tls-checks")
     if enumerate:
         cmd.extend(["--enumerate", str(enumerate)])
     if plugins_detection:

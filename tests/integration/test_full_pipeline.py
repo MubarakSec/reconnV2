@@ -5,9 +5,7 @@ Integration Tests for Full Pipeline
 """
 
 import asyncio
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,7 +19,6 @@ try:
     from recon_cli.pipeline.stages.core.stage_base import StageResult
     from recon_cli.pipeline.context import PipelineContext
     from recon_cli.jobs.lifecycle import JobLifecycle
-    from recon_cli.jobs.manager import JobManager, JobRecord
     from recon_cli.jobs.models import JobSpec
     from recon_cli.utils.jsonl import iter_jsonl
 
@@ -202,10 +199,9 @@ class TestFullPipeline:
         with pytest.raises(RuntimeError):
             await runner.run(context)
         
-        # Current PipelineRunner behavior: status is finished if loop completes
-        # even if individual stages failed, UNLESS we catch the error variable.
-        # But we verify it ran.
-        assert record.metadata.status in ["finished", "failed"]
+        # PipelineRunner marks jobs as partial when one or more stages fail but
+        # the run still completes its bookkeeping.
+        assert record.metadata.status in ["finished", "failed", "partial"]
 
     @pytest.mark.asyncio
     async def test_pipeline_stops_on_failure(self, pipeline_dir: Path, sample_targets: list):
@@ -219,7 +215,7 @@ class TestFullPipeline:
 
         with pytest.raises(RuntimeError):
             await runner.run(context)
-        assert record.metadata.status in ["finished", "failed"]
+        assert record.metadata.status in ["finished", "failed", "partial"]
 
 
 class TestJobLifecycle:
@@ -383,4 +379,4 @@ class TestErrorRecovery:
 
         with pytest.raises(RuntimeError):
             await runner.run(context)
-        assert record.metadata.status in ["finished", "failed"]
+        assert record.metadata.status in ["finished", "failed", "partial"]

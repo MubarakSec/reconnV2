@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -156,28 +155,88 @@ class RuntimeCrawlStage(Stage):
         
         # 1. Anonymous / Default
         crawl_profiles.append({"name": "anonymous", "headers": {"User-Agent": "recon-cli runtime-crawl"}, "cookies": []})
+        configured_profile_limit = max(
+            0, int(getattr(context.runtime_config, "runtime_crawl_max_auth_profiles", 3))
+        )
+        configured_profiles_added = 0
+        profile_names: set[str] = {"anonymous"}
         
         # 2. Authenticated identities from UnifiedAuthManager
         if bool(getattr(context.runtime_config, "runtime_crawl_role_aware", True)):
             for identity in context._auth_manager.get_all_identities():
+                if configured_profiles_added >= configured_profile_limit:
+                    break
                 material = identity.auth_material
+                profile_name = str(identity.identity_id or "").strip()
+                if not profile_name or profile_name in profile_names:
+                    continue
                 headers = {"User-Agent": "recon-cli runtime-crawl"}
-                if "headers" in material: headers.update(material["headers"])
-                if "bearer" in material: headers["Authorization"] = f"Bearer {material['bearer']}"
-                if "token" in material: headers["Authorization"] = f"Bearer {material['token']}"
+                if "headers" in material and isinstance(material["headers"], dict):
+                    headers.update(material["headers"])
+                if "bearer" in material:
+                    headers["Authorization"] = f"Bearer {material['bearer']}"
+                if "token" in material:
+                    headers["Authorization"] = f"Bearer {material['token']}"
                 
                 cookies = []
-                if "cookies" in material:
+                if "cookies" in material and isinstance(material["cookies"], dict):
                     cookies = [
                         {"name": k, "value": v, "domain": default_domain or "", "path": "/"}
                         for k, v in material["cookies"].items()
                     ]
                 
                 crawl_profiles.append({
-                    "name": identity.identity_id,
+                    "name": profile_name,
                     "headers": headers,
                     "cookies": cookies
                 })
+                profile_names.add(profile_name)
+                configured_profiles_added += 1
+
+            runtime_profiles = getattr(context.runtime_config, "auth_profiles", [])
+            if isinstance(runtime_profiles, list):
+                for profile in runtime_profiles:
+                    if configured_profiles_added >= configured_profile_limit:
+                        break
+                    if not isinstance(profile, dict):
+                        continue
+                    profile_name = str(profile.get("name") or "").strip()
+                    if not profile_name or profile_name in profile_names:
+                        continue
+                    headers = {"User-Agent": "recon-cli runtime-crawl"}
+                    profile_headers = profile.get("headers")
+                    if isinstance(profile_headers, dict):
+                        headers.update(
+                            {
+                                str(key): str(value)
+                                for key, value in profile_headers.items()
+                            }
+                        )
+                    profile_cookies = profile.get("cookies")
+                    profile_cookie_list: List[Dict[str, str]] = []
+                    if isinstance(profile_cookies, dict):
+                        profile_cookie_list = [
+                            {
+                                "name": str(key),
+                                "value": str(value),
+                                "domain": default_domain or "",
+                                "path": "/",
+                            }
+                            for key, value in profile_cookies.items()
+                        ]
+                    elif isinstance(profile_cookies, list):
+                        profile_cookie_list = [
+                            cookie for cookie in profile_cookies if isinstance(cookie, dict)
+                        ]
+                    crawl_profiles.append(
+                        {
+                            "name": profile_name,
+                            "headers": headers,
+                            "cookies": profile_cookie_list,
+                        }
+                    )
+                    profile_names.add(profile_name)
+                    configured_profiles_added += 1
 
         merged_results: Dict[str, CrawlResult] = {}
         per_profile_results: Dict[str, Dict[str, CrawlResult]] = {}
@@ -186,8 +245,8 @@ class RuntimeCrawlStage(Stage):
 
         for profile in crawl_profiles:
             profile_name = str(profile.get("name") or "anonymous")
-            headers = profile.get("headers")
-            cookies = profile.get("cookies")
+            profile_headers = profile.get("headers")
+            profile_cookies = profile.get("cookies")
             try:
                 # If crawl_func is sync, we'd use to_thread, but it's likely async-ready 
                 # in the crawl/runtime.py
@@ -195,14 +254,14 @@ class RuntimeCrawlStage(Stage):
                 if asyncio.iscoroutinefunction(crawl_func):
                     results = await crawl_func(
                         selected_urls, timeout, concurrency,
-                        headers=headers if isinstance(headers, dict) else None,
-                        cookies=cookies if isinstance(cookies, list) else None,
+                        headers=profile_headers if isinstance(profile_headers, dict) else None,
+                        cookies=profile_cookies if isinstance(profile_cookies, list) else None,
                     )
                 else:
                     results = await asyncio.to_thread(crawl_func,
                         selected_urls, timeout, concurrency,
-                        headers=headers if isinstance(headers, dict) else None,
-                        cookies=cookies if isinstance(cookies, list) else None,
+                        headers=profile_headers if isinstance(profile_headers, dict) else None,
+                        cookies=profile_cookies if isinstance(profile_cookies, list) else None,
                     )
             except Exception as exc:
                 if profile_name == "anonymous":
@@ -249,11 +308,15 @@ class RuntimeCrawlStage(Stage):
 
         success_count = sum(1 for result in merged_results.values() if result.success)
         javascript_total = sum(len(result.javascript_files) for result in merged_results.values())
+        role_profiles = sorted(
+            {name for name in role_profile_names if name and name != "anonymous"}
+        )
 
         context.update_stats(self.name,
             selected=len(selected_urls), crawled=len(merged_results),
             success=success_count, failures=len(merged_results) - success_count,
             javascript_files=javascript_total, profiles=len(per_profile_results),
+            role_profiles=role_profiles,
             status="completed"
         )
 

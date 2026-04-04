@@ -5,12 +5,12 @@ import asyncio
 import time
 import json
 from dataclasses import dataclass
-from typing import List, Sequence, Set, Tuple, Dict, Any, Optional
+from typing import List, Sequence, Set, Tuple, Dict
 from urllib.parse import urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
-from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig, HTTPResponse
+from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 
 
 @dataclass
@@ -61,15 +61,17 @@ class CloudAssetDiscoveryStage(Stage):
         context.logger.info("Starting async cloud discovery on %d targets", len(checks_plan))
         
         
-        # Calculate a more realistic total timeout
-        estimated_time = (len(checks_plan) / getattr(runtime, "cloud_rps", 50.0)) + timeout
+        # Calculate a more realistic total timeout.
+        configured_rps = float(getattr(runtime, "cloud_rps", 50.0) or 0.0)
+        effective_rps = configured_rps if configured_rps > 0 else 50.0
+        estimated_time = (len(checks_plan) / effective_rps) + timeout
         total_timeout = min(max(estimated_time, timeout * 5), max_duration or 1200)
 
         config = HTTPClientConfig(
             max_concurrent=30,
             total_timeout=total_timeout,
             verify_ssl=bool(getattr(runtime, "verify_tls", True)),
-            requests_per_second=float(getattr(runtime, "cloud_rps", 50.0))
+            requests_per_second=configured_rps
         )
 
         public_findings, exists_only, checked = 0, 0, 0
@@ -88,7 +90,8 @@ class CloudAssetDiscoveryStage(Stage):
 
                 for (provider, url, bucket), resp in zip(batch, responses):
                     checked += 1
-                    if isinstance(resp, Exception): continue
+                    if isinstance(resp, BaseException):
+                        continue
                     
                     status = resp.status
                     body = resp.body[:1200]

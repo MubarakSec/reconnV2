@@ -282,6 +282,7 @@ class ScannerStage(Stage):
                     ),
                     max_threads=int(getattr(runtime, "wpscan_max_threads", 0) or 0),
                     api_token=getattr(runtime, "wpscan_api_token", None),
+                    verify_tls=bool(getattr(runtime, "verify_tls", True)),
                 )
                 for finding in result.findings:
                     context.results.append(finding.payload)

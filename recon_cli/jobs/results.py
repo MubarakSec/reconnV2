@@ -205,6 +205,9 @@ class ResultsTracker:
             # Pydantic validation (optional, can be disabled for performance on large URL lists)
             ptype = str(payload.get("type") or "unknown")
             if ptype in {"finding", "signal", "attack_path"}:
+                if ptype == "finding" and not payload.get("finding_type"):
+                    payload = dict(payload)
+                    payload["finding_type"] = "generic"
                 from recon_cli.db.schemas import validate_result
 
                 try:

@@ -211,9 +211,9 @@ def _recency_score(entry: Dict[str, object]) -> int:
     if observed.tzinfo is None:
         observed = observed.replace(tzinfo=timezone.utc)
     age_days = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).days
-    if age_days <= 7:
-        return 8
     if age_days <= 30:
+        return 8
+    if age_days <= 180:
         return 4
     return 0
 

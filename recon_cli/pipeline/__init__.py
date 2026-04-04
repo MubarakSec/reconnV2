@@ -14,6 +14,8 @@ from recon_cli.pipeline.stages.core.stage_base import Stage, StageError
 from .parallel import ParallelStageExecutor, DependencyResolver
 from .progress import ProgressLogger
 from recon_cli.pipeline.stages.discovery import stage_cms_scan
+from recon_cli.pipeline.stages.validation import stage_ssrf_validator
+from recon_cli.pipeline.stages.vuln import stage_takeover
 
 
 # Lazy import for PipelineRunner to avoid circular import with plugins
@@ -37,6 +39,8 @@ __all__ = [
     "ProgressLogger",
     # Compatibility module exports
     "stage_cms_scan",
+    "stage_takeover",
+    "stage_ssrf_validator",
     # Runner (lazy)
     "get_pipeline_runner",
 ]

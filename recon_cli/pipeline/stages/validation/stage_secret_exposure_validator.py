@@ -4,6 +4,7 @@ import hashlib
 import json
 import asyncio
 import logging
+import requests  # type: ignore[import-untyped]
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple, Any
 from urllib.parse import urlparse
@@ -12,7 +13,6 @@ from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
 from recon_cli.secrets.detector import SECRETS_PATTERNS, shannon_entropy
 from recon_cli.utils import time as time_utils
-from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig, HTTPResponse
 
 logger = logging.getLogger(__name__)
 
@@ -45,57 +45,104 @@ class SecretExposureValidatorStage(Stage):
         attempted, confirmed, stale, filtered_sanity, failed, skipped = 0, 0, 0, 0, 0, 0
         artifacts, seen_urls, content_cache = [], set(), {}
 
-        config = HTTPClientConfig(
-            max_concurrent=15,
-            total_timeout=float(timeout),
-            verify_ssl=verify_tls,
-            requests_per_second=float(getattr(runtime, "secret_exposure_validator_rps", 20.0))
-        )
+        for candidate in candidates:
+            url = str(candidate.get("url") or "")
+            if not url:
+                continue
 
-        async with AsyncHTTPClient(config, context=context) as client:
-            for candidate in candidates:
-                url = str(candidate.get("url") or "")
-                if not url: continue
-                
-                if url not in content_cache:
-                    content, state = await self._fetch_url_text(context, client, url, timeout=timeout, verify_tls=verify_tls)
-                    if state == "failed": failed += 1
-                    elif state == "skipped": skipped += 1
-                    else: attempted += 1
-                    content_cache[url] = content
-                
-                text = content_cache.get(url)
-                if not text: continue
+            if url not in content_cache:
+                content, state = await self._fetch_url_text(
+                    context, url, timeout=timeout, verify_tls=verify_tls
+                )
+                if state == "failed":
+                    failed += 1
+                elif state == "skipped":
+                    skipped += 1
+                else:
+                    attempted += 1
+                content_cache[url] = content
 
-                pattern, expected_hash = str(candidate.get("pattern") or ""), str(candidate.get("value_hash") or "")
-                start, end = candidate.get("start"), candidate.get("end")
-                value = self._recover_value(text, expected_hash=expected_hash, pattern=pattern, start=start, end=end, pattern_map=pattern_map)
-                
-                if not value:
-                    stale += 1; continue
+            text = content_cache.get(url)
+            if not text:
+                continue
 
-                sanity = self._sanity_check(pattern, value)
-                if not sanity["valid"]:
-                    filtered_sanity += 1
-                    artifacts.append({"timestamp": time_utils.iso_now(), "url": url, "pattern": pattern, "value_hash": expected_hash, "status": "filtered", "reason": sanity["reason"]})
-                    continue
+            pattern = str(candidate.get("pattern") or "")
+            expected_hash = str(candidate.get("value_hash") or "")
+            start, end = candidate.get("start"), candidate.get("end")
+            value = self._recover_value(
+                text,
+                expected_hash=expected_hash,
+                pattern=pattern,
+                start=start,
+                end=end,
+                pattern_map=pattern_map,
+            )
 
-                conf_label = str(sanity["confidence"])
-                signal_id = context.emit_signal("secret_exposure_confirmed", "url", url, confidence=1.0 if conf_label == "verified" else 0.85, source=self.name, tags=["secret", "confirmed", "live"], evidence={"pattern": pattern, "value_hash": expected_hash})
-                
-                finding = {
-                    "type": "finding", "finding_type": "exposed_secret", "source": self.name, "url": url, "hostname": urlparse(url).hostname,
-                    "description": f"Secret exposure reconfirmed live ({pattern})",
-                    "details": {"pattern": pattern, "value_hash": expected_hash, "sanity_reason": sanity["reason"], "location": {"start": start, "end": end}},
-                    "proof": f"live-hash:{expected_hash}", "tags": ["secret", "confirmed", "live", f"pattern:{pattern}"],
-                    "score": max(94 if conf_label == "verified" else 88, int(candidate.get("score", 0))),
-                    "priority": "critical" if conf_label == "verified" else "high", "severity": "critical" if conf_label == "verified" else "high",
-                    "confidence_label": conf_label, "evidence_id": signal_id or None,
-                }
-                if context.results.append(finding):
-                    confirmed += 1
-                    artifacts.append({"timestamp": time_utils.iso_now(), "url": url, "pattern": pattern, "value_hash": expected_hash, "status": "confirmed", "confidence": conf_label})
-                    seen_urls.add(url)
+            if not value:
+                stale += 1
+                continue
+
+            sanity = self._sanity_check(pattern, value)
+            if not sanity["valid"]:
+                filtered_sanity += 1
+                artifacts.append(
+                    {
+                        "timestamp": time_utils.iso_now(),
+                        "url": url,
+                        "pattern": pattern,
+                        "value_hash": expected_hash,
+                        "status": "filtered",
+                        "reason": sanity["reason"],
+                    }
+                )
+                continue
+
+            conf_label = str(sanity["confidence"])
+            signal_id = context.emit_signal(
+                "secret_exposure_confirmed",
+                "url",
+                url,
+                confidence=1.0 if conf_label == "verified" else 0.85,
+                source=self.name,
+                tags=["secret", "confirmed", "live"],
+                evidence={"pattern": pattern, "value_hash": expected_hash},
+            )
+
+            finding = {
+                "type": "finding",
+                "finding_type": "exposed_secret",
+                "source": "secret-validator",
+                "parameter": f"{pattern}:{expected_hash}",
+                "url": url,
+                "hostname": urlparse(url).hostname,
+                "description": f"Secret exposure reconfirmed live ({pattern})",
+                "details": {
+                    "pattern": pattern,
+                    "value_hash": expected_hash,
+                    "sanity_reason": sanity["reason"],
+                    "location": {"start": start, "end": end},
+                },
+                "proof": f"live-hash:{expected_hash}",
+                "tags": ["secret", "confirmed", "live", f"pattern:{pattern}"],
+                "score": max(94 if conf_label == "verified" else 88, int(candidate.get("score", 0))),
+                "priority": "critical" if conf_label == "verified" else "high",
+                "severity": "critical" if conf_label == "verified" else "high",
+                "confidence_label": conf_label,
+                "evidence_id": signal_id or None,
+            }
+            if context.results.append(finding):
+                confirmed += 1
+                artifacts.append(
+                    {
+                        "timestamp": time_utils.iso_now(),
+                        "url": url,
+                        "pattern": pattern,
+                        "value_hash": expected_hash,
+                        "status": "confirmed",
+                        "confidence": conf_label,
+                    }
+                )
+                seen_urls.add(url)
 
         artifact_path = context.record.paths.artifact("secret_exposure_validator.json")
         artifact_path.write_text(json.dumps({"timestamp": time_utils.iso_now(), "attempted": attempted, "confirmed": confirmed, "stale": stale, "filtered_sanity": filtered_sanity, "validated_urls": sorted(seen_urls), "entries": artifacts}, indent=2, sort_keys=True), encoding="utf-8")
@@ -131,14 +178,45 @@ class SecretExposureValidatorStage(Stage):
         selected.sort(key=lambda x: x["priority"], reverse=True)
         return selected[:max_findings]
 
-    async def _fetch_url_text(self, context: PipelineContext, client: AsyncHTTPClient, url: str, *, timeout: int, verify_tls: bool) -> Tuple[Optional[str], str]:
-        if not context.url_allowed(url): return None, "skipped"
+    async def _fetch_url_text(
+        self,
+        context: PipelineContext,
+        url: str,
+        *,
+        timeout: int,
+        verify_tls: bool,
+    ) -> Tuple[Optional[str], str]:
+        if not context.url_allowed(url):
+            return None, "skipped"
         headers = context.auth_headers({"User-Agent": "recon-cli secret-validator"})
         try:
-            resp = await client.get(url, headers=headers, follow_redirects=True)
-            if resp.status != 200: return None, "failed"
-            return resp.body, "ok"
-        except Exception: return None, "failed"
+            resp = await asyncio.to_thread(
+                requests.get,
+                url,
+                headers=headers,
+                timeout=timeout,
+                verify=verify_tls,
+                allow_redirects=True,
+            )
+        except Exception:
+            return None, "failed"
+
+        try:
+            status_code = int(getattr(resp, "status_code", 0) or 0)
+            if status_code != 200:
+                return None, "failed"
+            text = getattr(resp, "text", None)
+            if text is None:
+                raw = getattr(resp, "content", b"")
+                if isinstance(raw, (bytes, bytearray)):
+                    text = raw.decode("utf-8", errors="ignore")
+                else:
+                    text = str(raw)
+            return text, "ok"
+        finally:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
     def _recover_value(self, text: str, *, expected_hash: str, pattern: str, start: Optional[int], end: Optional[int], pattern_map: Dict[str, Any]) -> Optional[str]:
         if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text):

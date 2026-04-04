@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import re
 import asyncio
+import requests  # type: ignore[import-untyped]
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional, Any, Tuple
-from urllib.parse import urljoin, urlparse
+from typing import Dict, List, Set, Optional, Any
+from urllib.parse import parse_qsl, urljoin, urlparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
@@ -119,6 +120,7 @@ class JSIntelligenceStage(Stage):
         "api_key", "apikey", "secret", "token", "password", "pwd", "auth", "access",
         "private", "internal", "admin", "config", "settings", "env", "production",
         "database", "db_", "staging", "dev_", "debug", "test", "root", "system",
+        "billing", "feature", "flag", "flags",
     )
     STATIC_EXTENSIONS = (
         ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf",
@@ -129,114 +131,271 @@ class JSIntelligenceStage(Stage):
         return bool(getattr(context.runtime_config, "enable_js_intel", False))
 
     async def run_async(self, context: PipelineContext) -> bool:
-        js_urls = self._collect_js_urls(context)
-        if not js_urls:
+        js_sources = self._collect_js_sources(context)
+        if not js_sources:
             context.logger.info("No JavaScript URLs found for intelligence stage")
             return True
 
         runtime = context.runtime_config
         max_files = int(getattr(runtime, "js_intel_max_files", 150))
         timeout = int(getattr(runtime, "js_intel_timeout", 15))
-        concurrency = int(getattr(runtime, "js_intel_concurrency", 15))
-        
-        config = HTTPClientConfig(
-            max_concurrent=concurrency,
-            total_timeout=float(timeout),
-            verify_ssl=bool(getattr(runtime, "verify_tls", True))
+        verify_tls = bool(getattr(runtime, "verify_tls", True))
+        include_dynamic = bool(
+            getattr(runtime, "js_intel_extract_dynamic_routes", True)
+        )
+        include_hidden_params = bool(
+            getattr(runtime, "js_intel_extract_hidden_params", True)
         )
 
         signaled_hosts: set[str] = set()
         discovered_urls: set[str] = set()
-        artifacts = []
+        artifacts: List[Dict[str, Any]] = []
+        param_hints: Dict[str, Set[str]] = defaultdict(set)
+        graphql_endpoints: Set[str] = set()
+        ws_endpoints: Set[str] = set()
+        graphql_operations: Set[str] = set()
+        persisted_query_hints: Set[str] = set()
+        high_value_strings: Set[str] = set()
+
+        selected_urls = list(js_sources.keys())[:max_files]
+        context.logger.info("Analyzing %d JavaScript files", len(selected_urls))
+        config = HTTPClientConfig(
+            max_concurrent=max(1, int(getattr(runtime, "js_intel_concurrency", 8))),
+            total_timeout=float(timeout),
+            verify_ssl=verify_tls,
+            requests_per_second=float(getattr(runtime, "js_intel_rps", 0.0)),
+        )
 
         async with AsyncHTTPClient(config, context=context) as client:
-            selected_urls = list(js_urls)[:max_files]
-            context.logger.info("Analyzing %d JavaScript files", len(selected_urls))
-            
-            tasks = [client.get(url, headers=context.auth_headers({"User-Agent": "recon-cli js-intel"})) for url in selected_urls]
-            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            for js_url in selected_urls:
+                headers = context.auth_headers({"User-Agent": "recon-cli js-intel"})
+                content = await self._fetch_js_text(
+                    client,
+                    js_url,
+                    headers=headers,
+                    timeout=timeout,
+                    verify_tls=verify_tls,
+                )
+                if not content:
+                    continue
 
-            for js_url, resp in zip(selected_urls, responses):
-                if isinstance(resp, Exception) or resp.status != 200: continue
-                
-                content = resp.body
-                if not content: continue
-                
-                surface_base_url = str(urlparse(js_url)._replace(path="", query="", fragment="").geturl())
-                extraction = self._extract_surface_from_blob(content, base_url=surface_base_url, include_dynamic=True)
-                
-                # Check for Source Map
-                source_map = None
-                sm_match = self.SOURCEMAP_PATTERN.search(content)
-                if sm_match:
-                    sm_url = urljoin(js_url, sm_match.group(1))
-                    try:
-                        sm_resp = await client.get(sm_url, timeout=timeout)
-                        if sm_resp.status == 200:
-                            source_map = sm_url
-                            sm_extraction = self._extract_surface_from_blob(sm_resp.body, base_url=surface_base_url, include_dynamic=True)
-                            extraction.merge(sm_extraction)
-                    except Exception as e:
-                        context.logger.debug(f"Silent failure suppressed: {e}", exc_info=True)
-                        try:
-                            from recon_cli.utils.metrics import metrics
-                            metrics.stage_errors.labels(stage="js_intelligence", error_type=type(e).__name__).inc()
-                        except: pass
+                surface_base_url = js_sources.get(js_url) or str(
+                    urlparse(js_url)._replace(path="", query="", fragment="").geturl()
+                )
+                extraction = self._extract_surface_from_blob(
+                    content,
+                    base_url=surface_base_url,
+                    include_dynamic=include_dynamic,
+                )
+                if include_hidden_params:
+                    for name in self._extract_hidden_params(content, extraction.endpoints):
+                        param_hints[name].add(js_url)
 
-                combined_candidates = sorted([u for u in extraction.endpoints if context.url_allowed(u)])
-                graphql_candidates = sorted([u for u in extraction.graphql_endpoints if context.url_allowed(u)])
-                ws_candidates = sorted([u for u in extraction.ws_endpoints if context.url_allowed(u)])
+                combined_candidates = sorted(
+                    [url for url in extraction.endpoints if context.url_allowed(url)]
+                )
+                graphql_candidates = sorted(
+                    [
+                        url
+                        for url in extraction.graphql_endpoints
+                        if context.url_allowed(url)
+                    ]
+                )
+                ws_candidates = sorted(extraction.ws_endpoints)
 
-                artifacts.append({
-                    "js_url": js_url, "surface_base_url": surface_base_url,
-                    "endpoints": combined_candidates, "graphql_endpoints": sorted(graphql_candidates),
-                    "graphql_operations": sorted(extraction.graphql_operations),
-                    "persisted_query_hints": sorted(extraction.persisted_query_hints),
-                    "ws_endpoints": sorted(ws_candidates),
-                    "high_value_strings": sorted(extraction.high_value_strings),
-                    "secrets": extraction.secrets, "comments": sorted(extraction.comments),
-                    "source_map": source_map,
-                })
+                graphql_endpoints.update(graphql_candidates)
+                ws_endpoints.update(ws_candidates)
+                graphql_operations.update(extraction.graphql_operations)
+                persisted_query_hints.update(extraction.persisted_query_hints)
+                high_value_strings.update(extraction.high_value_strings)
+
+                artifacts.append(
+                    {
+                        "js_url": js_url,
+                        "surface_base_url": surface_base_url,
+                        "endpoints": combined_candidates,
+                        "graphql_endpoints": graphql_candidates,
+                        "graphql_operations": sorted(extraction.graphql_operations),
+                        "persisted_query_hints": sorted(extraction.persisted_query_hints),
+                        "ws_endpoints": ws_candidates,
+                        "high_value_strings": sorted(extraction.high_value_strings),
+                        "secrets": extraction.secrets,
+                        "comments": sorted(extraction.comments),
+                    }
+                )
 
                 for secret in extraction.secrets:
-                    context.emit_signal("js_secret", "url", js_url, confidence=0.7, source=self.name, tags=["secret", secret["type"]], evidence=secret)
+                    context.emit_signal(
+                        "js_secret",
+                        "url",
+                        js_url,
+                        confidence=0.7,
+                        source=self.name,
+                        tags=["secret", secret["type"]],
+                        evidence=secret,
+                    )
                 for comment in extraction.comments:
-                    context.emit_signal("js_comment", "url", js_url, confidence=0.4, source=self.name, tags=["comment", "leak"], evidence={"comment": comment})
+                    context.emit_signal(
+                        "js_comment",
+                        "url",
+                        js_url,
+                        confidence=0.4,
+                        source=self.name,
+                        tags=["comment", "leak"],
+                        evidence={"comment": comment},
+                    )
 
-                self._emit_endpoint_results(context, js_url, combined_candidates, discovered_urls, signaled_hosts)
+                self._emit_endpoint_results(
+                    context,
+                    js_url,
+                    combined_candidates,
+                    discovered_urls,
+                    signaled_hosts,
+                )
 
         if artifacts:
-            context.record.paths.artifact("js_intelligence.json").write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
-        
-        context.update_stats(self.name,
-            files=len(js_urls),
+            payload = json.dumps(artifacts, indent=2, sort_keys=True)
+            context.record.paths.artifact("js_intel.json").write_text(
+                payload, encoding="utf-8"
+            )
+            context.record.paths.artifact("js_intelligence.json").write_text(
+                payload, encoding="utf-8"
+            )
+
+        context.set_data("js_endpoints", sorted(discovered_urls))
+        context.set_data(
+            "js_param_hints",
+            {name: sorted(urls) for name, urls in sorted(param_hints.items())},
+        )
+        context.set_data("js_graphql_endpoints", sorted(graphql_endpoints))
+        context.set_data("js_ws_endpoints", sorted(ws_endpoints))
+        context.set_data("js_graphql_operations", sorted(graphql_operations))
+        context.set_data("js_persisted_query_hints", sorted(persisted_query_hints))
+
+        context.update_stats(
+            self.name,
+            files=len(js_sources),
             files_analyzed=len(artifacts),
             endpoints=len(discovered_urls),
             endpoints_found=len(discovered_urls),
-            status="completed"
+            graphql_endpoints=len(graphql_endpoints),
+            graphql_operations=len(graphql_operations),
+            persisted_query_hints=len(persisted_query_hints),
+            ws_endpoints=len(ws_endpoints),
+            high_value_strings=len(high_value_strings),
+            status="completed",
         )
+        stage_stats = context.record.metadata.stats.get(self.name, {})
+        if isinstance(stage_stats, dict):
+            context.record.metadata.stats["js_intel"] = dict(stage_stats)
+            context.manager.update_metadata(context.record)
         return True
 
-    def _collect_js_urls(self, context: PipelineContext) -> Set[str]:
-        js_urls = set()
+    def _collect_js_sources(self, context: PipelineContext) -> Dict[str, str]:
+        js_sources: Dict[str, str] = {}
         for entry in context.iter_results():
             url = entry.get("url")
             if entry.get("type") == "runtime_crawl":
+                surface_base_url = str(entry.get("url") or "")
                 for js_file in entry.get("javascript_files", []):
                     if isinstance(js_file, str) and context.url_allowed(js_file):
-                        js_urls.add(js_file)
+                        js_sources[js_file] = surface_base_url or str(
+                            urlparse(js_file)
+                            ._replace(path="", query="", fragment="")
+                            .geturl()
+                        )
                 continue
 
-            if not isinstance(url, str) or not url: continue
-            if context.url_allowed(url) and (url.lower().endswith(".js") or "javascript" in str(entry.get("content_type", "")).lower()):
-                js_urls.add(url)
+            if not isinstance(url, str) or not url:
+                continue
+            if context.url_allowed(url) and (
+                url.lower().endswith(".js")
+                or "javascript" in str(entry.get("content_type", "")).lower()
+            ):
+                js_sources[url] = str(
+                    urlparse(url)._replace(path="", query="", fragment="").geturl()
+                )
         
         runtime_js = context.get_data("runtime_discovered_js", [])
         if isinstance(runtime_js, list):
             for url in runtime_js:
                 if isinstance(url, str) and context.url_allowed(url):
-                    js_urls.add(url)
-        return js_urls
+                    js_sources.setdefault(
+                        url,
+                        str(urlparse(url)._replace(path="", query="", fragment="").geturl()),
+                    )
+        return js_sources
+
+    def _collect_js_urls(self, context: PipelineContext) -> Set[str]:
+        return set(self._collect_js_sources(context).keys())
+
+    async def _fetch_js_text(
+        self,
+        client: AsyncHTTPClient,
+        js_url: str,
+        *,
+        headers: Dict[str, str],
+        timeout: int,
+        verify_tls: bool,
+    ) -> Optional[str]:
+        try:
+            response = await client.get(
+                js_url, headers=headers, follow_redirects=True
+            )
+            status_code = int(getattr(response, "status", 0) or 0)
+            body = getattr(response, "body", "")
+            if status_code == 200 and isinstance(body, str) and body:
+                return body
+        except Exception:
+            pass
+
+        try:
+            response = await asyncio.to_thread(
+                requests.get,
+                js_url,
+                headers=headers,
+                timeout=timeout,
+                verify=verify_tls,
+                allow_redirects=True,
+            )
+        except Exception:
+            return None
+
+        try:
+            if int(getattr(response, "status_code", 0) or 0) != 200:
+                return None
+            text = getattr(response, "text", None)
+            if text is None:
+                raw = getattr(response, "content", b"")
+                if isinstance(raw, (bytes, bytearray)):
+                    text = raw.decode("utf-8", errors="ignore")
+                else:
+                    text = str(raw)
+            return text or None
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+
+    def _extract_hidden_params(self, content: str, endpoints: Set[str]) -> Set[str]:
+        names: Set[str] = set()
+        for name in self.QUERY_PARAM_PATTERN.findall(content):
+            names.add(name)
+        for block in self.PARAM_BLOCK_PATTERN.findall(content):
+            for key in self.PARAM_KEY_PATTERN.findall(block):
+                names.add(key)
+        for endpoint in endpoints:
+            try:
+                parsed = urlparse(endpoint)
+            except ValueError:
+                continue
+            for key, _value in parse_qsl(parsed.query, keep_blank_values=True):
+                names.add(key)
+        return {
+            name
+            for name in names
+            if 2 <= len(name) <= 40 and name.lower() not in {"http", "https"}
+        }
 
     def _extract_surface_from_blob(self, content: str, *, base_url: str, include_dynamic: bool) -> _JSSurfaceExtraction:
         extraction = _JSSurfaceExtraction()

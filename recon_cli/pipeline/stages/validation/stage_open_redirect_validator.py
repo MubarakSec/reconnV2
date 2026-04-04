@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import uuid
 import asyncio
+import requests  # type: ignore[import-untyped]
 from collections import defaultdict
 from typing import Dict, List, Tuple, Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from recon_cli.pipeline.context import PipelineContext
 from recon_cli.pipeline.stages.core.stage_base import Stage
-from recon_cli.utils.async_http import AsyncHTTPClient, HTTPClientConfig
 from recon_cli.utils import time as time_utils
 
 
@@ -60,66 +60,110 @@ class OpenRedirectValidatorStage(Stage):
         skipped = 0
         artifacts: List[Dict[str, object]] = []
 
-        config = HTTPClientConfig(
-            max_concurrent=15,
-            total_timeout=float(timeout),
-            verify_ssl=verify_tls,
-            requests_per_second=float(getattr(runtime, "open_redirect_validator_rps", 20.0))
-        )
+        for candidate in candidates:
+            url = str(candidate["url"])
+            param = str(candidate["param"])
+            payloads = self._payloads()
+            validated = False
 
-        async with AsyncHTTPClient(config, context=context) as client:
-            for candidate in candidates:
-                url = str(candidate["url"])
-                param = str(candidate["param"])
-                payloads = self._payloads()
-                validated = False
-                
-                for payload in payloads:
-                    attempted += 1
-                    test_url = self._inject_param(url, param, payload)
-                    if not context.url_allowed(test_url):
-                        skipped += 1; continue
-                    
-                    headers = context.auth_headers({"User-Agent": "recon-cli open-redirect-validator"})
-                    
-                    try:
-                        resp = await client.get(test_url, headers=headers, follow_redirects=False)
-                        status_code = resp.status
-                        location = str(resp.headers.get("Location") or "")
-                        
-                        if status_code in self.REDIRECT_STATUS and self._is_external_redirect(url, location, payload):
-                            signal_id = context.emit_signal(
-                                "open_redirect_confirmed", "url", test_url,
-                                confidence=1.0, source=self.name,
-                                evidence={"status_code": status_code, "location": location, "parameter": param},
-                                tags=["redirect", "confirmed"],
+            for payload in payloads:
+                attempted += 1
+                test_url = self._inject_param(url, param, payload)
+                if not context.url_allowed(test_url):
+                    skipped += 1
+                    continue
+
+                headers = context.auth_headers(
+                    {"User-Agent": "recon-cli open-redirect-validator"}
+                )
+                try:
+                    resp = await asyncio.to_thread(
+                        requests.get,
+                        test_url,
+                        headers=headers,
+                        timeout=timeout,
+                        verify=verify_tls,
+                        allow_redirects=False,
+                    )
+                except Exception:
+                    failed += 1
+                    continue
+
+                try:
+                    status_code = int(getattr(resp, "status_code", 0) or 0)
+                    location = str((getattr(resp, "headers", {}) or {}).get("Location") or "")
+
+                    if status_code in self.REDIRECT_STATUS and self._is_external_redirect(url, location, payload):
+                        signal_id = context.emit_signal(
+                            "open_redirect_confirmed",
+                            "url",
+                            test_url,
+                            confidence=1.0,
+                            source=self.name,
+                            evidence={
+                                "status_code": status_code,
+                                "location": location,
+                                "parameter": param,
+                            },
+                            tags=["redirect", "confirmed"],
+                        )
+                        finding = {
+                            "type": "finding",
+                            "finding_type": "open_redirect",
+                            "source": "open-redirect-validator",
+                            "severity": "high",
+                            "url": test_url,
+                            "hostname": urlparse(url).hostname,
+                            "description": "Open redirect confirmed by dedicated validator",
+                            "details": {
+                                "probe_url": test_url,
+                                "location": location,
+                                "parameter": param,
+                            },
+                            "proof": location,
+                            "status_code": status_code,
+                            "tags": ["redirect", "confirmed", "validator:open-redirect"],
+                            "confidence_label": "verified",
+                            "score": max(85, int(candidate.get("score", 0))),
+                            "signal_id": signal_id or None,
+                        }
+                        if context.results.append(finding):
+                            confirmed += 1
+                            validated = True
+                            artifacts.append(
+                                {
+                                    "timestamp": time_utils.iso_now(),
+                                    "url": url,
+                                    "parameter": param,
+                                    "test_url": test_url,
+                                    "status_code": status_code,
+                                    "location": location,
+                                    "payload": payload,
+                                }
                             )
-                            finding = {
-                                "type": "finding", "finding_type": "open_redirect", "source": "open-redirect-validator",
-                                "severity": "high", "url": test_url, "hostname": urlparse(url).hostname,
-                                "description": "Open redirect confirmed by dedicated validator",
-                                "details": {"probe_url": test_url, "location": location, "parameter": param},
-                                "proof": location, "status_code": status_code,
-                                "tags": ["redirect", "confirmed", "validator:open-redirect"],
-                                "confidence_label": "verified", "score": max(85, int(candidate.get("score", 0))),
-                                "signal_id": signal_id or None,
-                            }
-                            if context.results.append(finding):
-                                confirmed += 1; validated = True
-                                artifacts.append({
-                                    "timestamp": time_utils.iso_now(), "url": url, "parameter": param,
-                                    "test_url": test_url, "status_code": status_code,
-                                    "location": location, "payload": payload,
-                                })
-                            break
-                    except Exception:
-                        failed += 1; continue
-                if validated: continue
+                        break
+                finally:
+                    close = getattr(resp, "close", None)
+                    if callable(close):
+                        close()
+            if validated:
+                continue
 
         artifact_path = context.record.paths.artifact("open_redirect_validator.json")
-        artifact_path.write_text(json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8")
+        artifact_path.write_text(
+            json.dumps(artifacts, indent=2, sort_keys=True), encoding="utf-8"
+        )
         stats = context.record.metadata.stats.setdefault("open_redirect_validator", {})
-        stats.update({"attempted": attempted, "confirmed": confirmed, "failed": failed, "skipped": skipped, "candidates": len(candidates)})
+        stats.update(
+            {
+                "attempted": attempted,
+                "confirmed": confirmed,
+                "failed": failed,
+                "skipped": skipped,
+                "candidates": len(candidates),
+                "artifact": str(artifact_path),
+            }
+        )
         context.manager.update_metadata(context.record)
 
     def _collect_candidates(self, context: PipelineContext, *, min_score: int, max_urls: int, max_per_host: int) -> List[Dict[str, Any]]:

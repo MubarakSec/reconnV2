@@ -4,9 +4,8 @@ import asyncio
 import time
 import statistics
 import uuid
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any, Tuple
+from typing import Dict, List, Any, Tuple
 from urllib.parse import urlparse, parse_qsl
 
 from recon_cli.pipeline.context import PipelineContext
@@ -27,14 +26,28 @@ class TimingAttackStage(Stage):
 
     async def run_async(self, context: PipelineContext) -> None:
         runtime = context.runtime_config
+        overrides = context.record.spec.runtime_overrides or {}
         items = context.get_results()
         
         endpoints = self._collect_endpoints(context, items)
         if not endpoints:
             return
 
-        timeout = float(getattr(runtime, "timing_timeout", 10.0))
-        iterations = int(getattr(runtime, "timing_iterations", 10)) # Increased default iterations for better accuracy
+        timeout = float(
+            overrides.get(
+                "timing_timeout",
+                getattr(runtime, "timing_timeout", 10.0),
+            )
+        )
+        iterations = max(
+            1,
+            int(
+                overrides.get(
+                    "timing_iterations",
+                    getattr(runtime, "timing_iterations", 10),
+                )
+            ),
+        )
         
         config = HTTPClientConfig(
             max_concurrent=1, # Strict sequential testing to minimize local noise
@@ -96,7 +109,7 @@ class TimingAttackStage(Stage):
                 if is_significant and diff > 0.05: # At least 50ms difference
                     severity = "medium"
                     confidence = "medium"
-                    if diff > 0.2: 
+                    if diff >= 0.2:
                         severity = "high"
                         confidence = "high"
 
